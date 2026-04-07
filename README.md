@@ -1,2 +1,2 @@
 # SlugHorn
-Library for shoehorning the Slug text/graphics GPU rendering library ( https://github.com/AlphaPixel/SlugHorn ) into projects.
+Library for shoehorning the Slug text/graphics GPU rendering library ( https://sluglibrary.com/ ) into projects.
