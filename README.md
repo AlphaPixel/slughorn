@@ -95,6 +95,7 @@ Skia deliberately doesn't address.**
 - [ ] Test `numBands = 2-4` on simple arrow shape (3 curves)
 - [ ] Fix `numBands` auto-calculation — account for spatial curve distribution, not just count
 - [ ] Remove redundant `lineTo(L, B)` before `close()` in `buildJigsawPiecePath()`
+- [ ] pybind11 wrapper
 
 ## Medium Term
 - [ ] `Atlas::createDefaultStateSet()` member instead of free function in `Drawable.hpp`

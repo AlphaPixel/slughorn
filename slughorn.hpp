@@ -1,8 +1,9 @@
 #pragma once
 
+#include <cmath>
+#include <cstdint>
 #include <map>
 #include <vector>
-#include <cstdint>
 
 using slug_t = float;
 
@@ -19,6 +20,91 @@ constexpr slug_t cv(auto x) {
 }
 
 namespace slughorn {
+
+// =============================================================================
+// Color
+//
+// Simple RGBA color in linear floating-point space (0.0 – 1.0).
+// Used by ColorLayer / ColorGlyph and by the FT2 / Cairo / Skia headers.
+// Convert to your graphics backend's native type at the boundary.
+// =============================================================================
+struct Color {
+	slug_t r = 0_cv;
+	slug_t g = 0_cv;
+	slug_t b = 0_cv;
+	slug_t a = 1_cv;
+};
+
+// =============================================================================
+// Matrix
+//
+// Column-major 2-D affine transform (the same 6-float layout used by
+// FreeType's FT_Matrix + FT_Vector, Cairo's cairo_matrix_t, and the
+// font-unit matrices threaded through the COLRv1 paint graph).
+//
+// The transform maps a point (x, y) as:
+//
+//   x' = xx*x + xy*y + dx
+//   y' = yx*x + yy*y + dy
+//
+// xx/yx/xy/yy are dimensionless ratios (already divided by 65536 for
+// FreeType callers). dx/dy are in the same coordinate space as the
+// points being transformed (em-units for glyph work).
+// =============================================================================
+struct Matrix {
+	slug_t xx = 1_cv, yx = 0_cv; // first column
+	slug_t xy = 0_cv, yy = 1_cv; // second column
+	slug_t dx = 0_cv, dy = 0_cv; // translation
+
+	// Returns the identity matrix.
+	static Matrix identity() { return {}; }
+
+	// Returns true when this matrix is the identity (within a small epsilon).
+	bool isIdentity() const {
+		constexpr slug_t eps = 1e-6_cv;
+		return std::abs(xx - 1_cv) < eps && std::abs(yy - 1_cv) < eps
+			&& std::abs(yx) < eps     && std::abs(xy) < eps
+			&& std::abs(dx) < eps     && std::abs(dy) < eps;
+	}
+
+	// Apply this matrix to a point.
+	void apply(slug_t x, slug_t y, slug_t& xOut, slug_t& yOut) const {
+		xOut = xx * x + xy * y + dx;
+		yOut = yx * x + yy * y + dy;
+	}
+
+	// Concatenate: returns (this * rhs), i.e. rhs is applied first.
+	Matrix operator*(const Matrix& rhs) const {
+		Matrix m;
+		m.xx = xx * rhs.xx + xy * rhs.yx;
+		m.xy = xx * rhs.xy + xy * rhs.yy;
+		m.yx = yx * rhs.xx + yy * rhs.yx;
+		m.yy = yx * rhs.xy + yy * rhs.yy;
+		m.dx = xx * rhs.dx + xy * rhs.dy + dx;
+		m.dy = yx * rhs.dx + yy * rhs.dy + dy;
+		return m;
+	}
+};
+
+// =============================================================================
+// ColorLayer / ColorGlyph
+//
+// A single layer of a COLR emoji (one atlas key + its default palette color)
+// and the full stack of layers for one codepoint.
+//
+// These are populated by the backend-specific helpers (slughorn-ft2.hpp etc.)
+// and consumed by the rendering layer (osgSlug, vsgSlug, …) to issue one
+// draw call per layer with the appropriate color.
+// =============================================================================
+struct ColorLayer {
+	uint32_t key   = 0;
+	Color    color;
+};
+
+struct ColorGlyph {
+	std::vector<ColorLayer> layers;
+	slug_t                  advance = 0_cv;
+};
 
 // =============================================================================
 // Atlas
