@@ -1,0 +1,52 @@
+# Minimal Skia build for slughorn path decomposition examples.
+#
+# Disables all GPU backends, image codecs, text shaping, and optional modules.
+# Retains only what is needed:
+#   - SkPath / SkPathBuilder / SkPath::Iter     (path geometry)
+#   - SkPaint                                   (stroke expansion via skpathutils)
+#   - skpathutils::FillPathWithPaint            (stroke-to-fill)
+#   - SkBitmap / SkCanvas / SkPngEncoder        (optional: PNG debug export)
+#
+# Expected libskia.a size: ~20-40MB vs ~1.2GB for a full build.
+# Expected total out/Release size: ~200MB vs ~15GB.
+#
+# To use:
+#   cd $SKIA_REPO
+#   bin/gn gen out/Release --args='...' (or edit out/Release/args.gn directly)
+#   ninja -C out/Release skia
+
+is_official_build = true
+is_debug = false
+
+# --- GPU backends (none needed) ---
+skia_use_gl     = false
+skia_use_vulkan = false
+skia_use_metal  = false
+skia_use_dawn   = false
+
+# --- Image codecs (none needed unless using PNG debug export) ---
+skia_use_libjpeg_turbo_decode = false
+skia_use_libjpeg_turbo_encode = false
+skia_use_libwebp_decode       = false
+skia_use_libwebp_encode       = false
+skia_use_libpng_decode        = false
+skia_use_libpng_encode        = false  # set true if using SkPngEncoder
+skia_use_zlib                 = false  # set true if using SkPngEncoder
+
+# --- Text / font shaping (none needed) ---
+skia_use_freetype  = false
+skia_use_harfbuzz  = false
+skia_use_icu       = false
+skia_use_expat     = false
+
+# --- Optional modules (none needed) ---
+skia_enable_sksl       = false
+skia_enable_pdf        = false
+skia_enable_skottie    = false
+skia_enable_skparagraph = false
+skia_enable_svg        = false
+skia_enable_ganesh     = false
+skia_enable_graphite   = false
+
+# --- Don't build Skia's own tools/tests/examples ---
+skia_build_fuzzers  = false
