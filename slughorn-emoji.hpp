@@ -18,7 +18,7 @@
 //
 // NAMES
 // -----
-// Names are CLDR short names, normalised to lowercase with non-alphanumeric
+// Names are CLDR short names, normalized to lowercase with non-alphanumeric
 // runs replaced by underscores:
 //
 //   "Dragon" -> "dragon"
@@ -52,7 +52,7 @@ namespace emoji {
 // Return the Unicode codepoint for a CLDR short name, or std::nullopt if the name is not in the
 // table.
 //
-// @p name must be pre-normalised (lowercase, underscores). Slack-style colons should be stripped
+// @p name must be pre-normalized (lowercase, underscores). Slack-style colons should be stripped
 // before calling.
 //
 // Complexity: O(log N) binary search over the sorted static table.

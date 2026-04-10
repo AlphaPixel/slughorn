@@ -205,7 +205,7 @@ public:
 		slug_t bandScaleX = 0, bandScaleY = 0;
 		slug_t bandOffsetX = 0, bandOffsetY = 0;
 
-		// Metrics in em-space (normalised to the font's em square, or to the
+		// Metrics in em-space (normalized to the font's em square, or to the
 		// bounding box of the curves when autoMetrics = true)
 		slug_t bearingX = 0, bearingY = 0;
 		slug_t width = 0, height = 0;
@@ -214,7 +214,7 @@ public:
 
 	// Descriptor passed to addShape().
 	//
-	// Curves must be in em-normalised coordinates (same convention as FreeType's FT_LOAD_NO_SCALE
+	// Curves must be in em-normalized coordinates (same convention as FreeType's FT_LOAD_NO_SCALE
 	// path, divided by units_per_EM).
 	//
 	// Set autoMetrics = true (the default) to derive width/height/bearing/ advance automatically
