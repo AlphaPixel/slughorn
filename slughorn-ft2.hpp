@@ -124,7 +124,7 @@ bool loadColorGlyph(
     uint32_t          codepoint,
     FT_Color*         palette,
     Atlas&            atlas,
-    ColorGlyph&       out
+    CompositeShape&   out
 );
 
 // Convenience: load a list of emoji codepoints.
@@ -135,7 +135,7 @@ size_t loadColorGlyphs(
     const std::vector<uint32_t>&     codepoints,
     FT_Color*                        palette,
     Atlas&                           atlas,
-    std::map<uint32_t, ColorGlyph>&  colorGlyphs
+    std::map<uint32_t, CompositeShape>& colorGlyphs
 );
 
 // =============================================================================
@@ -157,7 +157,7 @@ bool loadEmojiFont(
     const std::string&               fontPath,
     const std::vector<uint32_t>&     codepoints,
     Atlas&                           atlas,
-    std::map<uint32_t, ColorGlyph>&  colorGlyphs
+    std::map<uint32_t, CompositeShape>& colorGlyphs
 );
 
 } // namespace ft2
@@ -308,7 +308,7 @@ static void processColorGlyphV0(
     uint32_t    codepoint,
     FT_Color*   palette,
     Atlas&      atlas,
-    ColorGlyph& out
+    CompositeShape& out
 ) {
     const FT_UInt  glyphIndex = FT_Get_Char_Index(face, codepoint);
     const slug_t   emScale    = 1.0_cv / cv(face->units_per_EM);
@@ -370,14 +370,14 @@ static Color traversePaint(
     uint32_t              codepoint,
     uint8_t&              layerIdx,
     Atlas&                atlas,
-    ColorGlyph&           out
+    CompositeShape&       out
 );
 
 // -------------------------------------------------------------------------
 // COLRv1 — traversePaint
 //
 // Walks the FreeType paint graph recursively, building up an accumulated
-// affine transform (parentMatrix) and emitting one atlas shape + ColorLayer
+// affine transform (parentMatrix) and emitting one atlas shape + Layer
 // per PaintGlyph leaf.
 //
 // Return value: the Color resolved at this node (meaningful for PaintSolid
@@ -393,7 +393,7 @@ static Color traversePaint(
     uint32_t              codepoint,
     uint8_t&              layerIdx,
     Atlas&                atlas,
-    ColorGlyph&           out
+    CompositeShape&       out
 ) {
     const Color white{1_cv, 1_cv, 1_cv, 1_cv};
 
@@ -609,7 +609,7 @@ static void processColorGlyphV1(
     uint32_t    codepoint,
     FT_Color*   palette,
     Atlas&      atlas,
-    ColorGlyph& out
+    CompositeShape& out
 ) {
     const FT_UInt glyphIndex = FT_Get_Char_Index(face, codepoint);
     const slug_t  emScale    = 1.0_cv / cv(face->units_per_EM);
@@ -713,7 +713,7 @@ bool loadColorGlyph(
     uint32_t    codepoint,
     FT_Color*   palette,
     Atlas&      atlas,
-    ColorGlyph& out
+    CompositeShape& out
 ) {
     const FT_UInt glyphIndex = FT_Get_Char_Index(face, codepoint);
 
@@ -769,12 +769,12 @@ size_t loadColorGlyphs(
     const std::vector<uint32_t>&    codepoints,
     FT_Color*                       palette,
     Atlas&                          atlas,
-    std::map<uint32_t, ColorGlyph>& colorGlyphs
+    std::map<uint32_t, CompositeShape>& colorGlyphs
 ) {
     size_t count = 0;
 
     for(uint32_t cp : codepoints) {
-        ColorGlyph glyph;
+        CompositeShape glyph;
 
         if(loadColorGlyph(face, cp, palette, atlas, glyph)) {
             colorGlyphs[cp] = std::move(glyph);
@@ -815,7 +815,7 @@ bool loadEmojiFont(
     const std::string&               fontPath,
     const std::vector<uint32_t>&     codepoints,
     Atlas&                           atlas,
-    std::map<uint32_t, ColorGlyph>&  colorGlyphs
+    std::map<uint32_t, CompositeShape>&  colorGlyphs
 ) {
     FT_Library library;
 
