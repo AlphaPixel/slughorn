@@ -2,7 +2,9 @@
 
 #include <cmath>
 #include <cstdint>
-#include <map>
+#include <functional>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <ostream>
@@ -96,13 +98,101 @@ struct Matrix {
 };
 
 // ================================================================================================
+// Atlas (forward declaration — Key is needed by Layer)
+// ================================================================================================
+class Atlas;
+
+// ================================================================================================
+// Atlas::Key
+//
+// Discriminated union identifying a shape or composite shape in the Atlas. Two flavors:
+//
+//   Key::fromCodepoint(cp)  — a Unicode codepoint (or any uint32_t ID). Implicitly constructible
+//                             from uint32_t for backwards compatibility with existing call sites.
+//   Key::fromString(name)   — a named shape / composite ("logo", "axolotl", …)
+//
+// The hash is computed once at construction and stored; KeyHash just returns it. operator== uses
+// the hash as a fast pre-check, then falls back to value comparison. The two namespaces are kept
+// disjoint by mixing the type tag into the hash seed, so a codepoint and a string that happen to
+// produce the same raw hash will never collide.
+// ================================================================================================
+struct Key {
+	enum class Type { Codepoint, Name };
+
+	// --- Construction -----------------------------------------------------------
+
+	// With this in the public section:
+	Key() : _type(Type::Codepoint), _codepoint(0), _hash(_hashCp(0)) {}
+
+	// Implicit from uint32_t — preserves all existing call sites unchanged.
+	Key(uint32_t cp) : _type(Type::Codepoint), _codepoint(cp), _hash(_hashCp(cp)) {}
+
+	static Key fromCodepoint(uint32_t cp) { return Key(cp); }
+
+	static Key fromString(std::string name) {
+		Key k;
+		k._type = Type::Name;
+		k._name = std::move(name);
+		k._hash = _hashStr(k._name);
+		return k;
+	}
+
+	// --- Accessors --------------------------------------------------------------
+
+	Type type() const { return _type; }
+
+	// Only valid when type() == Codepoint.
+	uint32_t codepoint() const { return _codepoint; }
+
+	// Only valid when type() == Name.
+	const std::string& name() const { return _name; }
+
+	size_t hash() const { return _hash; }
+
+	// --- Equality ---------------------------------------------------------------
+
+	bool operator==(const Key& o) const {
+		if(_hash != o._hash) return false;
+		if(_type != o._type) return false;
+		if(_type == Type::Codepoint) return _codepoint == o._codepoint;
+		return _name == o._name;
+	}
+
+	bool operator!=(const Key& o) const { return !(*this == o); }
+
+private:
+	static size_t _hashCp(uint32_t cp) {
+		// Mix a type tag (0) into the seed so the codepoint and name namespaces
+		// cannot collide even if their raw hashes match.
+		size_t h = std::hash<uint32_t>{}(cp);
+		h ^= std::hash<size_t>{}(0) + 0x9e3779b9 + (h << 6) + (h >> 2);
+		return h;
+	}
+
+	static size_t _hashStr(const std::string& s) {
+		size_t h = std::hash<std::string>{}(s);
+		h ^= std::hash<size_t>{}(1) + 0x9e3779b9 + (h << 6) + (h >> 2);
+		return h;
+	}
+
+	Type _type = Type::Codepoint;
+	uint32_t _codepoint = 0;
+	std::string _name;
+	size_t _hash = 0;
+};
+
+struct KeyHash {
+	size_t operator()(const Key& k) const { return k.hash(); }
+};
+
+// ================================================================================================
 // Layer
 //
 // Represents the "state" of a single `Shape` instance, and includes all of the information the
 // caller will need to contextually process the `Shape` in whatever setting SlugHorn is being used.
 // ================================================================================================
 struct Layer {
-	uint32_t key = 0;
+	Key key = Key(0u);
 
 	Color color{};
 
@@ -135,47 +225,12 @@ struct CompositeShape {
 // other graphics library. After build() the caller retrieves TextureData descriptors and hands them
 // to whatever graphics layer it is using (see osgSlug::Atlas for the OSG adapter).
 //
-// Key type is uint32_t, which comfortably covers:
-// - Unicode codepoints (fed by a font loader)
-// - User-defined shape IDs (icon sets, procedural geometry, ...)
-//
-// If you need to mix fonts and shapes in the same atlas, reserve a range of IDs for each source
-// (e.g. 0x00000-0xFFFF for codepoints, 0x10000+ for custom shapes).
+// Keys are Atlas::Key values — either a codepoint (uint32_t, implicitly convertible) or a named
+// string. Both shapes and composite shapes share the same key namespace; do not register the same
+// key under both addShape() and addCompositeShape().
 // ================================================================================================
 class Atlas {
 public:
-	// TODO: Convert to this instead!
-	/* struct Key {
-		enum class Type { Codepoint, Name };
-
-		Type type;
-		uint32_t codepoint;
-		std::string name;
-
-		static Key fromCodepoint(uint32_t cp) {
-			return {Type::Codepoint, cp, {}};
-		}
-
-		static Key fromString(std::string s) {
-			return {Type::Name, 0, std::move(s)};
-		}
-
-		bool operator==(const Key& other) const {
-			if(type != other.type) return false;
-			if(type == Type::Codepoint) return codepoint == other.codepoint;
-
-			return name == other.name;
-		}
-	};
-
-	struct KeyHash {
-		size_t operator()(const Key& k) const {
-			if(k.type == Key::Type::Codepoint) return std::hash<uint32_t>{}(k.codepoint);
-
-			return std::hash<std::string>{}(k.name);
-		}
-	}; */
-
 	Atlas();
 	virtual ~Atlas();
 
@@ -217,7 +272,7 @@ public:
 	// Curves must be in em-normalized coordinates (same convention as FreeType's FT_LOAD_NO_SCALE
 	// path, divided by units_per_EM).
 	//
-	// Set autoMetrics = true (the default) to derive width/height/bearing/ advance automatically
+	// Set autoMetrics = true (the default) to derive width/height/bearing/advance automatically
 	// from the curve bounding box. Set it to false and fill in the metric fields when you need
 	// precise control (e.g. when forwarding FreeType's own metrics for a font glyph).
 	//
@@ -242,7 +297,7 @@ public:
 	// a GPU texture (width/height are in texels); `format` tells the graphics backend how to
 	// interpret the bytes:
 	//
-	// RGBA32F - four 32-bit floats per texel (curve texture)
+	// RGBA32F  - four 32-bit floats per texel (curve texture)
 	// RGBA16UI - four 16-bit unsigned ints per texel (band texture)
 	// --------------------------------------------------------------------------------------------
 	struct TextureData {
@@ -260,40 +315,47 @@ public:
 	// Population (call before build())
 	// --------------------------------------------------------------------------------------------
 
-	// Register a shape under @p key.
+	// Register a geometry shape under @p key.
 	//
-	// Must be called before build(). Calling addShape() with an already- registered key silently
+	// Must be called before build(). Calling addShape() with an already-registered key silently
 	// replaces the previous definition.
 	//
 	// Shapes with empty curve lists are stored as metric-only entries (useful for whitespace
 	// characters that need an advance but no visible geometry).
-	void addShape(uint32_t key, const ShapeInfo& desc);
+	void addShape(Key key, const ShapeInfo& desc);
 
-	// TODO: Investigate this!
-	// void addCompositeShape(const CompositeShape& composite, ...)
+	// Register a composite shape (ordered layer stack) under @p key.
+	//
+	// CompositeShapes are stored separately from geometry shapes and are not processed by build().
+	// They can be registered before or after build() — the atlas does not need to be rebuilt when
+	// new composites are added. Calling addCompositeShape() with an already-registered key silently
+	// replaces the previous definition.
+	void addCompositeShape(Key key, CompositeShape composite);
 
 	// --------------------------------------------------------------------------------------------
-	// Build (call once, then the atlas is frozen)
+	// Build (call once, then the atlas is frozen for geometry)
 	// --------------------------------------------------------------------------------------------
 
 	// Pack all registered shapes into the raw pixel buffers.
 	//
 	// After build() returns, addShape() must not be called again. Calling build() a second time is
-	// a no-op (guarded internally).
+	// a no-op (guarded internally). addCompositeShape() may still be called after build().
 	void build();
 
 	bool isBuilt() const { return _built; }
 
 	// --------------------------------------------------------------------------------------------
-	// Accessors (valid after build())
+	// Accessors (geometry valid after build(); composites valid any time after registration)
 	// --------------------------------------------------------------------------------------------
 
-	const Shape* getShape(uint32_t key) const;
+	const Shape* getShape(Key key) const;
+	const CompositeShape* getCompositeShape(Key key) const;
+
 	const TextureData& getCurveTextureData() const { return _curveData; }
 	const TextureData& getBandTextureData() const { return _bandData; }
 
-	bool hasKey(uint32_t key) const {
-		return _build.count(key) || _shapes.count(key);
+	bool hasKey(Key key) const {
+		return _build.count(key) || _shapes.count(key) || _composites.count(key);
 	}
 
 private:
@@ -316,15 +378,16 @@ private:
 	// --------------------------------------------------------------------------------------------
 	// Internal pipeline
 	// --------------------------------------------------------------------------------------------
-	void buildShapeBands(uint32_t key, ShapeBuild& build, uint32_t numBands, bool overrideMetrics);
+	void buildShapeBands(Key key, ShapeBuild& build, uint32_t numBands, bool overrideMetrics);
 
 	void packTextures();
 
 	// --------------------------------------------------------------------------------------------
 	// Data
 	// --------------------------------------------------------------------------------------------
-	std::map<uint32_t, ShapeBuild> _build; // discarded after build()
-	std::map<uint32_t, Shape> _shapes; // live after build()
+	std::unordered_map<Key, ShapeBuild, KeyHash> _build; // discarded after build()
+	std::unordered_map<Key, Shape, KeyHash> _shapes; // live after build()
+	std::unordered_map<Key, CompositeShape, KeyHash> _composites; // live always
 
 	TextureData _curveData;
 	TextureData _bandData;
@@ -409,6 +472,12 @@ struct CurveDecomposer {
 // Debugging Helpers
 // ================================================================================================
 
+inline std::ostream& operator<<(std::ostream& os, const Key& k) {
+	if(k.type() == Key::Type::Codepoint)
+		return os << "Key(0x" << std::hex << k.codepoint() << std::dec << ")";
+	return os << "Key(\"" << k.name() << "\")";
+}
+
 inline std::ostream& operator<<(std::ostream& os, const Color& c) {
 	return os << "Color(r=" << c.r << " g=" << c.g << " b=" << c.b << " a=" << c.a << ")";
 }
@@ -422,8 +491,7 @@ inline std::ostream& operator<<(std::ostream& os, const Matrix& m) {
 }
 
 inline std::ostream& operator<<(std::ostream& os, const Layer& l) {
-	return os << "Layer(key=0x" << std::hex << l.key << std::dec
-			  << " color=" << l.color << " transform=" << l.transform << ")";
+	return os << "Layer(" << l.key << " color=" << l.color << " transform=" << l.transform << ")";
 }
 
 inline std::ostream& operator<<(std::ostream& os, const Atlas::Shape& s) {

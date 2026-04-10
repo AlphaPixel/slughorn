@@ -45,7 +45,7 @@ Atlas::~Atlas() = default;
 // Atlas::addShape
 // =============================================================================
 
-void Atlas::addShape(uint32_t key, const ShapeInfo& desc) {
+void Atlas::addShape(Key key, const ShapeInfo& desc) {
 	if(_built) {
 		// No logging available in this layer — callers should check isBuilt()
 		// before calling addShape() if they need to diagnose this condition.
@@ -75,6 +75,14 @@ void Atlas::addShape(uint32_t key, const ShapeInfo& desc) {
 }
 
 // =============================================================================
+// Atlas::addCompositeShape
+// =============================================================================
+
+void Atlas::addCompositeShape(Key key, CompositeShape composite) {
+	_composites[key] = std::move(composite);
+}
+
+// =============================================================================
 // Atlas::build
 // =============================================================================
 
@@ -90,10 +98,20 @@ void Atlas::build() {
 // Atlas::getShape
 // =============================================================================
 
-const Atlas::Shape* Atlas::getShape(uint32_t key) const {
+const Atlas::Shape* Atlas::getShape(Key key) const {
 	const auto it = _shapes.find(key);
 
 	return it != _shapes.end() ? &it->second : nullptr;
+}
+
+// =============================================================================
+// Atlas::getCompositeShape
+// =============================================================================
+
+const CompositeShape* Atlas::getCompositeShape(Key key) const {
+	const auto it = _composites.find(key);
+
+	return it != _composites.end() ? &it->second : nullptr;
 }
 
 // =============================================================================
@@ -101,7 +119,7 @@ const Atlas::Shape* Atlas::getShape(uint32_t key) const {
 // =============================================================================
 
 void Atlas::buildShapeBands(
-	uint32_t key,
+	Key key,
 	ShapeBuild& build,
 	uint32_t numBands,
 	bool overrideMetrics
@@ -316,7 +334,7 @@ void Atlas::packTextures() {
 	uint32_t bandTexelOffset = 0;
 
 	for(auto& kv : _build) {
-		const uint32_t key = kv.first;
+		const Key& key = kv.first;
 		auto& g = kv.second;
 
 		// --- Curves -----------------------------------------------------------
