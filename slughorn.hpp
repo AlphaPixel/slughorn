@@ -21,13 +21,13 @@ constexpr slug_t cv(auto x) {
 
 namespace slughorn {
 
-// =============================================================================
+// ================================================================================================
 // Color
 //
-// Simple RGBA color in linear floating-point space (0.0 – 1.0).
-// Used by ColorLayer / ColorGlyph and by the FT2 / Cairo / Skia headers.
-// Convert to your graphics backend's native type at the boundary.
-// =============================================================================
+// Simple RGBA color in linear floating-point space (0.0 – 1.0). Used by Layer / CompositeShape and
+// by the FT2 / Cairo / Skia headers. Convert to your graphics backend's native type at the
+// boundary.
+// ================================================================================================
 struct Color {
 	slug_t r = 0_cv;
 	slug_t g = 0_cv;
@@ -35,99 +35,111 @@ struct Color {
 	slug_t a = 1_cv;
 };
 
-// =============================================================================
+// ================================================================================================
 // Matrix
 //
-// Column-major 2-D affine transform (the same 6-float layout used by
-// FreeType's FT_Matrix + FT_Vector, Cairo's cairo_matrix_t, and the
-// font-unit matrices threaded through the COLRv1 paint graph).
+// Column-major 2-D affine transform (the same 6-float layout used by FreeType's FT_Matrix +
+// FT_Vector, Cairo's cairo_matrix_t, and the font-unit matrices threaded through the COLRv1 paint
+// graph).
 //
 // The transform maps a point (x, y) as:
 //
 //   x' = xx*x + xy*y + dx
 //   y' = yx*x + yy*y + dy
 //
-// xx/yx/xy/yy are dimensionless ratios (already divided by 65536 for
-// FreeType callers). dx/dy are in the same coordinate space as the
-// points being transformed (em-units for glyph work).
-// =============================================================================
+// xx/yx/xy/yy are dimensionless ratios (already divided by 65536 for FreeType callers). dx/dy are
+// in the same coordinate space as the points being transformed (em-units for glyph work).
+// ================================================================================================
 struct Matrix {
 	slug_t xx = 1_cv, yx = 0_cv; // first column
 	slug_t xy = 0_cv, yy = 1_cv; // second column
 	slug_t dx = 0_cv, dy = 0_cv; // translation
 
-	// Returns the identity matrix.
 	static Matrix identity() { return {}; }
 
-	// Returns true when this matrix is the identity (within a small epsilon).
 	bool isIdentity() const {
 		constexpr slug_t eps = 1e-6_cv;
-		return std::abs(xx - 1_cv) < eps && std::abs(yy - 1_cv) < eps
-			&& std::abs(yx) < eps     && std::abs(xy) < eps
-			&& std::abs(dx) < eps     && std::abs(dy) < eps;
+
+		return
+			std::abs(xx - 1_cv) < eps &&
+			std::abs(yy - 1_cv) < eps &&
+			std::abs(yx) < eps &&
+			std::abs(xy) < eps &&
+			std::abs(dx) < eps &&
+			std::abs(dy) < eps
+		;
 	}
 
 	// Apply this matrix to a point.
-	void apply(slug_t x, slug_t y, slug_t& xOut, slug_t& yOut) const {
-		xOut = xx * x + xy * y + dx;
-		yOut = yx * x + yy * y + dy;
+	//
+	// TODO: Investigate some operator overload instead!
+	void apply(slug_t x, slug_t y, slug_t& xo, slug_t& yo) const {
+		xo = xx * x + xy * y + dx;
+		yo = yx * x + yy * y + dy;
 	}
 
 	// Concatenate: returns (this * rhs), i.e. rhs is applied first.
 	Matrix operator*(const Matrix& rhs) const {
 		Matrix m;
+
 		m.xx = xx * rhs.xx + xy * rhs.yx;
 		m.xy = xx * rhs.xy + xy * rhs.yy;
 		m.yx = yx * rhs.xx + yy * rhs.yx;
 		m.yy = yx * rhs.xy + yy * rhs.yy;
 		m.dx = xx * rhs.dx + xy * rhs.dy + dx;
 		m.dy = yx * rhs.dx + yy * rhs.dy + dy;
+
 		return m;
 	}
 };
 
-// =============================================================================
-// ColorLayer / ColorGlyph
+// ================================================================================================
+// Layer
 //
-// A single layer of a COLR emoji (one atlas key + its default palette color)
-// and the full stack of layers for one codepoint.
-//
-// These are populated by the backend-specific helpers (slughorn-ft2.hpp etc.)
-// and consumed by the rendering layer (osgSlug, vsgSlug, …) to issue one
-// draw call per layer with the appropriate color.
-// =============================================================================
-struct ColorLayer {
-	uint32_t key   = 0;
-	Color    color;
+// Represents the "state" of a single `Shape` instance, and includes all of the information the
+// caller will need to contextually process the `Shape` in whatever setting SlugHorn is being used.
+// ================================================================================================
+struct Layer {
+	uint32_t key = 0;
+
+	Color color{};
+
+	Matrix transform = Matrix::identity();
 };
 
-struct ColorGlyph {
-	std::vector<ColorLayer> layers;
-	slug_t                  advance = 0_cv;
+// ================================================================================================
+// CompositeShape
+//
+// A simple container that combines/organizes multiple `Layer` instances into an entity that should
+// be conceptually treated as a SINGLE `Shape`.
+// ================================================================================================
+struct CompositeShape {
+	std::vector<Layer> layers;
+
+	// Usage is obvious in text situations; in "pure shape" modes, can be used to help arrange
+	// groups of `Shape` instances horizontally.
+	slug_t advance = 0_cv;
 };
 
-// =============================================================================
+// ================================================================================================
 // Atlas
 //
-// Owns the two raw pixel buffers required by the Slug rendering algorithm
-// (Lengyel 2017):
+// Owns the two raw pixel buffers required by the Slug rendering algorithm (Lengyel 2017):
 //
 // - Curve texture (RGBA32F): packed quadratic Bezier control points
 // - Band texture (RGBA16UI): band headers + curve index lists
 //
-// Atlas is completely backend-agnostic — it has no dependencies on OSG, VSG,
-// raw OpenGL, or any other graphics library. After build() the caller
-// retrieves TextureData descriptors and hands them to whatever graphics layer
-// it is using (see osgSlug::Atlas for the OSG adapter).
+// Atlas is completely backend-agnostic — it has no dependencies on OSG, VSG, raw OpenGL, or any
+// other graphics library. After build() the caller retrieves TextureData descriptors and hands them
+// to whatever graphics layer it is using (see osgSlug::Atlas for the OSG adapter).
 //
 // Key type is uint32_t, which comfortably covers:
 // - Unicode codepoints (fed by a font loader)
 // - User-defined shape IDs (icon sets, procedural geometry, …)
 //
-// If you need to mix fonts and shapes in the same atlas, reserve a range of
-// IDs for each source (e.g. 0x00000–0xFFFF for codepoints, 0x10000+ for
-// custom shapes).
-// =============================================================================
+// If you need to mix fonts and shapes in the same atlas, reserve a range of IDs for each source
+// (e.g. 0x00000–0xFFFF for codepoints, 0x10000+ for custom shapes).
+// ================================================================================================
 class Atlas {
 public:
 	// TODO: Convert to this instead!
@@ -200,19 +212,19 @@ public:
 
 	// Descriptor passed to addShape().
 	//
-	// Curves must be in em-normalised coordinates (same convention as
-	// FreeType's FT_LOAD_NO_SCALE path, divided by units_per_EM).
+	// Curves must be in em-normalised coordinates (same convention as FreeType's FT_LOAD_NO_SCALE
+	// path, divided by units_per_EM).
 	//
-	// Set autoMetrics = true (the default) to derive width/height/bearing/
-	// advance automatically from the curve bounding box. Set it to false and
-	// fill in the metric fields when you need precise control (e.g. when
-	// forwarding FreeType's own metrics for a font glyph).
+	// Set autoMetrics = true (the default) to derive width/height/bearing/ advance automatically
+	// from the curve bounding box. Set it to false and fill in the metric fields when you need
+	// precise control (e.g. when forwarding FreeType's own metrics for a font glyph).
 	//
 	// numBands = 0 lets the atlas pick a sensible default.
 	struct ShapeInfo {
 		Curves curves;
 
 		bool autoMetrics = true;
+
 		slug_t bearingX = 0, bearingY = 0;
 		slug_t width = 0, height = 0;
 		slug_t advance = 0;
@@ -238,6 +250,7 @@ public:
 
 		uint32_t width = 0;
 		uint32_t height = 0;
+
 		Format format = Format::RGBA32F;
 	};
 
@@ -253,6 +266,9 @@ public:
 	// Shapes with empty curve lists are stored as metric-only entries (useful
 	// for whitespace characters that need an advance but no visible geometry).
 	void addShape(uint32_t key, const ShapeInfo& desc);
+
+	// TODO: Investigate this!
+	// void addCompositeShape(const CompositeShape& composite, ...)
 
 	// -------------------------------------------------------------------------
 	// Build (call once, then the atlas is frozen)
@@ -316,14 +332,14 @@ private:
 	static constexpr uint32_t TEX_WIDTH = 512;
 };
 
-// =============================================================================
+// ================================================================================================
 // CurveDecomposer
 //
-// Stateful helper that accepts path commands (moveTo / lineTo / quadTo /
-// cubicTo) and appends the equivalent quadratic Bezier segments to a Curves
-// vector. Cubic segments are split at their midpoint into two quadratics —
-// a lightweight approximation sufficient for the Slug band-building pass.
-// =============================================================================
+// Stateful helper that accepts path commands (moveTo / lineTo / quadTo / cubicTo) and appends the
+// equivalent quadratic Bezier segments to a Curves vector. Cubic segments are split at their
+// midpoint into two quadratics — a lightweight approximation sufficient for the Slug band-building
+// pass.
+// ================================================================================================
 struct CurveDecomposer {
 	Atlas::Curves& curves;
 
