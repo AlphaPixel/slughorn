@@ -5,6 +5,8 @@
 #include <map>
 #include <vector>
 
+#include <ostream>
+
 using slug_t = float;
 
 constexpr slug_t operator"" _cv(long double v) {
@@ -24,7 +26,7 @@ namespace slughorn {
 // ================================================================================================
 // Color
 //
-// Simple RGBA color in linear floating-point space (0.0 – 1.0). Used by Layer / CompositeShape and
+// Simple RGBA color in linear floating-point space (0.0 - 1.0). Used by Layer / CompositeShape and
 // by the FT2 / Cairo / Skia headers. Convert to your graphics backend's native type at the
 // boundary.
 // ================================================================================================
@@ -129,16 +131,16 @@ struct CompositeShape {
 // - Curve texture (RGBA32F): packed quadratic Bezier control points
 // - Band texture (RGBA16UI): band headers + curve index lists
 //
-// Atlas is completely backend-agnostic — it has no dependencies on OSG, VSG, raw OpenGL, or any
+// Atlas is completely backend-agnostic; it has no dependencies on OSG, VSG, raw OpenGL, or any
 // other graphics library. After build() the caller retrieves TextureData descriptors and hands them
 // to whatever graphics layer it is using (see osgSlug::Atlas for the OSG adapter).
 //
 // Key type is uint32_t, which comfortably covers:
 // - Unicode codepoints (fed by a font loader)
-// - User-defined shape IDs (icon sets, procedural geometry, …)
+// - User-defined shape IDs (icon sets, procedural geometry, ...)
 //
 // If you need to mix fonts and shapes in the same atlas, reserve a range of IDs for each source
-// (e.g. 0x00000–0xFFFF for codepoints, 0x10000+ for custom shapes).
+// (e.g. 0x00000-0xFFFF for codepoints, 0x10000+ for custom shapes).
 // ================================================================================================
 class Atlas {
 public:
@@ -233,16 +235,16 @@ public:
 		int numBands = 0;
 	};
 
-	// -------------------------------------------------------------------------
-	// Raw texture descriptor — returned after build()
+	// --------------------------------------------------------------------------------------------
+	// Raw texture descriptor returned after build() is called.
 	//
-	// bytes holds the complete pixel data in row-major order, ready to be
-	// uploaded to a GPU texture (width/height are in texels). Format tells
-	// the graphics backend how to interpret the bytes:
+	// The `bytes` member holds the complete pixel data in row-major order, ready to be uploaded to
+	// a GPU texture (width/height are in texels); `format` tells the graphics backend how to
+	// interpret the bytes:
 	//
-	// RGBA32F — four 32-bit floats per texel (curve texture)
-	// RGBA16UI — four 16-bit unsigned ints per texel (band texture)
-	// -------------------------------------------------------------------------
+	// RGBA32F - four 32-bit floats per texel (curve texture)
+	// RGBA16UI - four 16-bit unsigned ints per texel (band texture)
+	// --------------------------------------------------------------------------------------------
 	struct TextureData {
 		enum class Format { RGBA32F, RGBA16UI };
 
@@ -254,37 +256,37 @@ public:
 		Format format = Format::RGBA32F;
 	};
 
-	// -------------------------------------------------------------------------
+	// --------------------------------------------------------------------------------------------
 	// Population (call before build())
-	// -------------------------------------------------------------------------
+	// --------------------------------------------------------------------------------------------
 
 	// Register a shape under @p key.
 	//
-	// Must be called before build(). Calling addShape() with an already-
-	// registered key silently replaces the previous definition.
+	// Must be called before build(). Calling addShape() with an already- registered key silently
+	// replaces the previous definition.
 	//
-	// Shapes with empty curve lists are stored as metric-only entries (useful
-	// for whitespace characters that need an advance but no visible geometry).
+	// Shapes with empty curve lists are stored as metric-only entries (useful for whitespace
+	// characters that need an advance but no visible geometry).
 	void addShape(uint32_t key, const ShapeInfo& desc);
 
 	// TODO: Investigate this!
 	// void addCompositeShape(const CompositeShape& composite, ...)
 
-	// -------------------------------------------------------------------------
+	// --------------------------------------------------------------------------------------------
 	// Build (call once, then the atlas is frozen)
-	// -------------------------------------------------------------------------
+	// --------------------------------------------------------------------------------------------
 
 	// Pack all registered shapes into the raw pixel buffers.
 	//
-	// After build() returns, addShape() must not be called again. Calling
-	// build() a second time is a no-op (guarded internally).
+	// After build() returns, addShape() must not be called again. Calling build() a second time is
+	// a no-op (guarded internally).
 	void build();
 
 	bool isBuilt() const { return _built; }
 
-	// -------------------------------------------------------------------------
+	// --------------------------------------------------------------------------------------------
 	// Accessors (valid after build())
-	// -------------------------------------------------------------------------
+	// --------------------------------------------------------------------------------------------
 
 	const Shape* getShape(uint32_t key) const;
 	const TextureData& getCurveTextureData() const { return _curveData; }
@@ -295,9 +297,9 @@ public:
 	}
 
 private:
-	// -------------------------------------------------------------------------
+	// --------------------------------------------------------------------------------------------
 	// Internal build structures (discarded after build())
-	// -------------------------------------------------------------------------
+	// --------------------------------------------------------------------------------------------
 	struct BandEntry {
 		uint16_t curveCount = 0; // mirrors the uint16_t written to the band texture
 
@@ -311,16 +313,16 @@ private:
 		std::vector<BandEntry> vbands;
 	};
 
-	// -------------------------------------------------------------------------
+	// --------------------------------------------------------------------------------------------
 	// Internal pipeline
-	// -------------------------------------------------------------------------
+	// --------------------------------------------------------------------------------------------
 	void buildShapeBands(uint32_t key, ShapeBuild& build, uint32_t numBands, bool overrideMetrics);
 
 	void packTextures();
 
-	// -------------------------------------------------------------------------
+	// --------------------------------------------------------------------------------------------
 	// Data
-	// -------------------------------------------------------------------------
+	// --------------------------------------------------------------------------------------------
 	std::map<uint32_t, ShapeBuild> _build; // discarded after build()
 	std::map<uint32_t, Shape> _shapes; // live after build()
 
@@ -337,8 +339,7 @@ private:
 //
 // Stateful helper that accepts path commands (moveTo / lineTo / quadTo / cubicTo) and appends the
 // equivalent quadratic Bezier segments to a Curves vector. Cubic segments are split at their
-// midpoint into two quadratics — a lightweight approximation sufficient for the Slug band-building
-// pass.
+// midpoint into two quadratics, a lightweight approximation sufficient for the Slug band-building.
 // ================================================================================================
 struct CurveDecomposer {
 	Atlas::Curves& curves;
@@ -403,5 +404,34 @@ struct CurveDecomposer {
 		_y = p3y;
 	}
 };
+
+// ================================================================================================
+// Debugging Helpers
+// ================================================================================================
+
+inline std::ostream& operator<<(std::ostream& os, const Color& c) {
+	return os << "Color(r=" << c.r << " g=" << c.g << " b=" << c.b << " a=" << c.a << ")";
+}
+
+inline std::ostream& operator<<(std::ostream& os, const Matrix& m) {
+	return os
+		<< "Matrix(xx=" << m.xx << " yx=" << m.yx
+		<< " xy=" << m.xy << " yy=" << m.yy
+		<< " dx=" << m.dx << " dy=" << m.dy << ")"
+	;
+}
+
+inline std::ostream& operator<<(std::ostream& os, const Layer& l) {
+	return os << "Layer(key=0x" << std::hex << l.key << std::dec
+			  << " color=" << l.color << " transform=" << l.transform << ")";
+}
+
+inline std::ostream& operator<<(std::ostream& os, const Atlas::Shape& s) {
+	return os
+		<< "Shape(w=" << s.width << " h=" << s.height
+		<< " bx=" << s.bearingX << " by=" << s.bearingY
+		<< " bandScale=" << s.bandScaleX << "/" << s.bandScaleY
+		<< " bandOffset=" << s.bandOffsetX << "/" << s.bandOffsetY << ")";
+}
 
 }
