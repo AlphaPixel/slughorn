@@ -41,6 +41,7 @@
 #include <string_view>
 #include <cstdint>
 #include <cstring>
+#include <random>
 
 namespace slughorn {
 namespace emoji {
@@ -80,6 +81,26 @@ inline std::optional<uint32_t> slackNameToCodepoint(std::string_view slackName) 
 
 // Return the total number of entries in the table.
 size_t tableSize();
+
+// Return the codepoint at position @p index in the sorted-by-name table.
+// index must be < tableSize(). Useful for iterating or random sampling.
+uint32_t codepointAtIndex(size_t index);
+
+// Return a random codepoint from the table using a thread-local RNG.
+// Seed is drawn from std::random_device on first call per thread.
+inline uint32_t randomCodepoint() {
+	static thread_local std::mt19937 rng(std::random_device{}());
+	static const size_t n = tableSize();
+	std::uniform_int_distribution<size_t> dist(0, n - 1);
+	return codepointAtIndex(dist(rng));
+}
+
+// Seeded variant — useful for reproducible test sequences.
+inline uint32_t randomCodepoint(std::mt19937& rng) {
+	static const size_t n = tableSize();
+	std::uniform_int_distribution<size_t> dist(0, n - 1);
+	return codepointAtIndex(dist(rng));
+}
 
 }
 }
@@ -1157,6 +1178,12 @@ std::optional<std::string_view> codepointToName(uint32_t codepoint) {
 // =============================================================================
 
 size_t tableSize() { return kTableSize; }
+
+uint32_t codepointAtIndex(size_t index) {
+	if(index >= kTableSize) index = kTableSize - 1;
+
+	return kTable[index].codepoint;
+}
 
 }
 }
