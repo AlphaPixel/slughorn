@@ -682,7 +682,9 @@ def print_grid(grid: List[List[float]]) -> None:
         print("".join(chars[int(v * (len(chars) - 1))] for v in row))
 
 
-def save_image(grid: List[List[float]], filename: str = "out.png") -> None:
+def save_image(grid: List[List[float]], filename: str = "out.png", flip_y: bool = True) -> None:
+    if flip_y:
+        grid = list(reversed(grid))
     h, w = len(grid), len(grid[0])
     img  = Image.new("L", (w, h))
     px   = img.load()
