@@ -1,41 +1,40 @@
 #pragma once
 
 // =============================================================================
-// slughorn-serial.hpp — Atlas serialization (.slug JSON / .slugb binary)
+// slughorn-serial.hpp - Atlas serialization (.slug JSON / .slugb binary)
 //
 // Stb-style single-header companion to slughorn.hpp.
 // Define SLUGHORN_SERIAL_IMPLEMENTATION in exactly one .cpp before including.
 //
 // Depends on:
 //   slughorn.hpp
-//   nlohmann/json.hpp  (expected at $git/ext/json)
+//   nlohmann/json.hpp (expected at $git/ext/json)
 //
 // Formats
 // -------
-//   .slug   JSON + base64-encoded texture blobs.  Human-readable, single file.
-//           Analogous to glTF's .gltf format.
+//   .slug JSON + base64-encoded texture blobs.  Human-readable, single file.
+//         Analogous to glTF's .gltf format.
 //
-//   .slugb  Binary container: 12-byte file header, JSON chunk, BIN chunk.
-//           Compact, single file, fast to load.
-//           Analogous to glTF's .glb format.
+//   .slugb Binary container: 12-byte file header, JSON chunk, BIN chunk.
+//          Compact, single file, fast to load; analogous to glTF's .glb format.
 //
 // Container layout (.slugb)
 // -------------------------
-//   [magic:    4 bytes  "SLUG"       ]
-//   [version:  uint32_t  1           ]
-//   [length:   uint32_t  total bytes ]
+//   [magic:   4 bytes  "SLUG"     ]
+//   [version: uint32_t 1          ]
+//   [length:  uint32_t total bytes]
 //
-//   Chunk 0 — JSON
+//   Chunk 0 - JSON
 //     [chunk_length: uint32_t          ]  byte count of JSON data (before padding)
 //     [chunk_type:   uint32_t 0x4E4F534A "JSON"]
 //     [data:         chunk_length bytes, UTF-8 ]
-//     [padding:      0–3 bytes 0x20 (space) to reach 4-byte alignment]
+//     [padding:      0-3 bytes 0x20 (space) to reach 4-byte alignment]
 //
-//   Chunk 1 — BIN
+//   Chunk 1 - BIN
 //     [chunk_length: uint32_t          ]  byte count of binary data (before padding)
 //     [chunk_type:   uint32_t 0x004E4942 "BIN\0"]
 //     [data:         chunk_length bytes ]
-//     [padding:      0–3 bytes 0x00 to reach 4-byte alignment]
+//     [padding:      0-3 bytes 0x00 to reach 4-byte alignment]
 //
 // JSON schema
 // -----------
@@ -75,14 +74,14 @@
 //     ]
 //   }
 //
-//   In .slug:  each bufferView gains "data": "<base64>" and byteOffset is 0.
+//   In .slug: each bufferView gains "data": "<base64>" and byteOffset is 0.
 //   In .slugb: byteOffset is a real byte offset into the BIN chunk; no "data".
 //
 // Usage
 // -----
 //   // Write
-//   slughorn::serial::write(atlas, "logo.slug");   // JSON
-//   slughorn::serial::write(atlas, "logo.slugb");  // binary
+//   slughorn::serial::write(atlas, "logo.slug"); // JSON
+//   slughorn::serial::write(atlas, "logo.slugb"); // binary
 //
 //   // Read (format auto-detected)
 //   slughorn::Atlas atlas = slughorn::serial::read("logo.slug");
@@ -107,17 +106,17 @@ namespace slughorn::serial {
 
 // Write as JSON + base64 (.slug).
 // pretty=true produces human-readable indented output (recommended default).
-void writeJSON(const Atlas& atlas, std::ostream& out, bool pretty = true);
+void writeJSON(const Atlas& atlas, std::ostream& out, bool pretty=true);
 
 // Write as binary container (.slugb).
 void writeBinary(const Atlas& atlas, std::ostream& out);
 
 // Convenience: write to file path.
-// Extension determines format: .slug → JSON, .slugb → binary.
+// Extension determines format: .slug -> JSON, .slugb -> binary.
 // Throws std::runtime_error if the file cannot be opened.
 void write(const Atlas& atlas, const std::string& path);
 
-// Read either format — auto-detected ('{' → JSON, 'S' → binary).
+// Read either format - auto-detected ('{' -> JSON, 'S' -> binary).
 // Returns a fully-built Atlas (is_built() == true).
 // Throws std::runtime_error on parse errors or unknown format.
 Atlas read(std::istream& in);
@@ -140,69 +139,76 @@ using json = nlohmann::json;
 // Base64
 // -----------------------------------------------------------------------------
 
-static constexpr char kB64Chars[] =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+static constexpr char B64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 std::string base64Encode(const std::vector<uint8_t>& data) {
-    std::string out;
-    out.reserve(((data.size() + 2) / 3) * 4);
+	std::string out;
+	out.reserve(((data.size() + 2) / 3) * 4);
 
-    size_t i = 0;
-    const size_t n = data.size();
+	size_t i = 0;
+	const size_t n = data.size();
 
-    while(i < n) {
-        const uint32_t a = data[i++];
-        const uint32_t b = (i < n) ? data[i++] : 0u;
-        const uint32_t c = (i < n) ? data[i++] : 0u;
-        const uint32_t triple = (a << 16) | (b << 8) | c;
+	while(i < n) {
+		const uint32_t a = data[i++];
+		const uint32_t b = (i < n) ? data[i++] : 0u;
+		const uint32_t c = (i < n) ? data[i++] : 0u;
+		const uint32_t triple = (a << 16) | (b << 8) | c;
 
-        out += kB64Chars[(triple >> 18) & 0x3F];
-        out += kB64Chars[(triple >> 12) & 0x3F];
-        out += kB64Chars[(triple >>  6) & 0x3F];
-        out += kB64Chars[(triple >>  0) & 0x3F];
-    }
+		out += B64[(triple >> 18) & 0x3F];
+		out += B64[(triple >> 12) & 0x3F];
+		out += B64[(triple >> 6) & 0x3F];
+		out += B64[(triple >> 0) & 0x3F];
+	}
 
-    // Pad
-    const size_t mod = data.size() % 3;
-    if(mod >= 1) out[out.size() - 1] = '=';
-    if(mod == 1) out[out.size() - 2] = '=';
+	// Pad
+	const size_t mod = data.size() % 3;
 
-    return out;
+	if(mod >= 1) out[out.size() - 1] = '=';
+	if(mod == 1) out[out.size() - 2] = '=';
+
+	return out;
 }
 
 std::vector<uint8_t> base64Decode(const std::string& s) {
-    // Build reverse lookup table
-    static uint8_t lut[256] = {};
-    static bool lutReady = false;
+	// Build reverse lookup table
+	static uint8_t lut[256] = {};
+	static bool lutReady = false;
 
-    if(!lutReady) {
-        for(int i = 0; i < 64; i++) lut[(uint8_t)kB64Chars[i]] = (uint8_t)i;
-        lutReady = true;
-    }
+	if(!lutReady) {
+		for(int i = 0; i < 64; i++) lut[(uint8_t)B64[i]] = (uint8_t)i;
 
-    const size_t len = s.size();
-    if(len % 4 != 0) throw std::runtime_error("slughorn-serial: base64 length not a multiple of 4");
+		lutReady = true;
+	}
 
-    size_t padding = 0;
-    if(len >= 1 && s[len - 1] == '=') padding++;
-    if(len >= 2 && s[len - 2] == '=') padding++;
+	const size_t len = s.size();
 
-    std::vector<uint8_t> out;
-    out.reserve((len / 4) * 3 - padding);
+	if(len % 4 != 0) throw std::runtime_error("slughorn-serial: base64 length not a multiple of 4");
 
-    for(size_t i = 0; i < len; i += 4) {
-        const uint32_t triple =
-            ((uint32_t)lut[(uint8_t)s[i  ]] << 18) |
-            ((uint32_t)lut[(uint8_t)s[i+1]] << 12) |
-            ((uint32_t)lut[(uint8_t)s[i+2]] <<  6) |
-            ((uint32_t)lut[(uint8_t)s[i+3]]      );
+	size_t padding = 0;
 
-        out.push_back((triple >> 16) & 0xFF);
-        if(s[i+2] != '=') out.push_back((triple >> 8) & 0xFF);
-        if(s[i+3] != '=') out.push_back((triple     ) & 0xFF);
-    }
+	if(len >= 1 && s[len - 1] == '=') padding++;
+	if(len >= 2 && s[len - 2] == '=') padding++;
 
-    return out;
+	std::vector<uint8_t> out;
+
+	out.reserve((len / 4) * 3 - padding);
+
+	for(size_t i = 0; i < len; i += 4) {
+		const uint32_t triple =
+			// TODO: Good grief this is ... ugly.
+			((uint32_t)lut[(uint8_t)s[i]] << 18) |
+			((uint32_t)lut[(uint8_t)s[i + 1]] << 12) |
+			((uint32_t)lut[(uint8_t)s[i + 2]] << 6) |
+			((uint32_t)lut[(uint8_t)s[i + 3]])
+		;
+
+		out.push_back((triple >> 16) & 0xFF);
+
+		if(s[i + 2] != '=') out.push_back((triple >> 8) & 0xFF);
+		if(s[i + 3] != '=') out.push_back((triple) & 0xFF);
+	}
+
+	return out;
 }
 
 // -----------------------------------------------------------------------------
@@ -210,268 +216,281 @@ std::vector<uint8_t> base64Decode(const std::string& s) {
 // -----------------------------------------------------------------------------
 
 json keyToJson(const Key& k) {
-    if(k.type() == Key::Type::Codepoint)
-        return { {"type", "codepoint"}, {"value", k.codepoint()} };
-    return { {"type", "name"}, {"value", k.name()} };
+	if(k.type() == Key::Type::Codepoint) return {
+		{"type", "codepoint"}, {"value", k.codepoint()}
+	};
+
+	return { {"type", "name"}, {"value", k.name()} };
 }
 
 Key keyFromJson(const json& j) {
-    const std::string type = j.at("type");
+	const std::string type = j.at("type");
 
-    if(type == "codepoint") return Key::fromCodepoint(j.at("value").get<uint32_t>());
-    if(type == "name")      return Key::fromString(j.at("value").get<std::string>());
+	if(type == "codepoint") return Key::fromCodepoint(j.at("value").get<uint32_t>());
+	if(type == "name") return Key::fromString(j.at("value").get<std::string>());
 
-    throw std::runtime_error("slughorn-serial: unknown key type '" + type + "'");
+	throw std::runtime_error("slughorn-serial: unknown key type '" + type + "'");
 }
 
 // -----------------------------------------------------------------------------
 // Shared JSON builder (used by both writeJSON and writeBinary)
 //
-// embedBase64=true  → .slug:  bufferViews contain "data" field, byteOffset=0
-// embedBase64=false → .slugb: bufferViews contain byteOffset into BIN chunk
+// embedBase64=true -> .slug: bufferViews contain "data" field, byteOffset=0
+// embedBase64=false -> .slugb: bufferViews contain byteOffset into BIN chunk
 // -----------------------------------------------------------------------------
 
 json buildJson(
-    const Atlas&                     atlas,
-    bool                             embedBase64,
-    uint32_t                         curveByteOffset = 0,
-    uint32_t                         bandByteOffset  = 0
+	const Atlas& atlas,
+	bool embedBase64,
+	uint32_t curveByteOffset=0,
+	uint32_t bandByteOffset=0
 ) {
-    const Atlas::TextureData& curve = atlas.getCurveTextureData();
-    const Atlas::TextureData& band  = atlas.getBandTextureData();
+	const Atlas::TextureData& curve = atlas.getCurveTextureData();
+	const Atlas::TextureData& band = atlas.getBandTextureData();
 
-    json j;
+	json j;
 
-    // Asset block
-    j["asset"] = {
-        {"version",   "1.0"},
-        {"generator", "slughorn"}
-    };
+	// Asset block
+	j["asset"] = {
+		{"version", "1.0"},
+		{"generator", "slughorn"}
+	};
 
-    j["tex_width"] = 512;
+	j["tex_width"] = 512;
 
-    // Buffer views
-    json bv0 = {
-        {"byteLength", curve.bytes.size()},
-        {"format",     "RGBA32F"},
-        {"width",      curve.width},
-        {"height",     curve.height}
-    };
+	// Buffer views
+	json bv0 = {
+		{"byteLength", curve.bytes.size()},
+		{"format", "RGBA32F"},
+		{"width", curve.width},
+		{"height", curve.height}
+	};
 
-    json bv1 = {
-        {"byteLength", band.bytes.size()},
-        {"format",     "RGBA16UI"},
-        {"width",      band.width},
-        {"height",     band.height}
-    };
+	json bv1 = {
+		{"byteLength", band.bytes.size()},
+		{"format", "RGBA16UI"},
+		{"width", band.width},
+		{"height", band.height}
+	};
 
-    if(embedBase64) {
-        bv0["byteOffset"] = 0;
-        bv0["data"]       = base64Encode(curve.bytes);
-        bv1["byteOffset"] = 0;
-        bv1["data"]       = base64Encode(band.bytes);
-    } else {
-        bv0["byteOffset"] = curveByteOffset;
-        bv1["byteOffset"] = bandByteOffset;
-    }
+	if(embedBase64) {
+		bv0["byteOffset"] = 0;
+		bv0["data"] = base64Encode(curve.bytes);
+		bv1["byteOffset"] = 0;
+		bv1["data"] = base64Encode(band.bytes);
+	}
 
-    j["bufferViews"]  = json::array({ bv0, bv1 });
-    j["curve_texture"] = 0;
-    j["band_texture"]  = 1;
+	else {
+		bv0["byteOffset"] = curveByteOffset;
+		bv1["byteOffset"] = bandByteOffset;
+	}
 
-    // Shapes
-    json shapes = json::array();
+	j["bufferViews"] = json::array({ bv0, bv1 });
+	j["curve_texture"] = 0;
+	j["band_texture"] = 1;
 
-    for(const auto& [key, shape] : atlas.getShapes()) {
-        shapes.push_back({
-            {"key",          keyToJson(key)},
-            {"band_tex_x",   shape.bandTexX},
-            {"band_tex_y",   shape.bandTexY},
-            {"band_max_x",   shape.bandMaxX},
-            {"band_max_y",   shape.bandMaxY},
-            {"band_scale_x", shape.bandScaleX},
-            {"band_scale_y", shape.bandScaleY},
-            {"band_offset_x",shape.bandOffsetX},
-            {"band_offset_y",shape.bandOffsetY},
-            {"bearing_x",    shape.bearingX},
-            {"bearing_y",    shape.bearingY},
-            {"width",        shape.width},
-            {"height",       shape.height},
-            {"advance",      shape.advance}
-        });
-    }
+	// Shapes
+	json shapes = json::array();
 
-    j["shapes"] = shapes;
+	for(const auto& [key, shape] : atlas.getShapes()) {
+		shapes.push_back({
+			{"key", keyToJson(key)},
+			{"band_tex_x", shape.bandTexX},
+			{"band_tex_y", shape.bandTexY},
+			{"band_max_x", shape.bandMaxX},
+			{"band_max_y", shape.bandMaxY},
+			{"band_scale_x", shape.bandScaleX},
+			{"band_scale_y", shape.bandScaleY},
+			{"band_offset_x",shape.bandOffsetX},
+			{"band_offset_y",shape.bandOffsetY},
+			{"bearing_x", shape.bearingX},
+			{"bearing_y", shape.bearingY},
+			{"width", shape.width},
+			{"height", shape.height},
+			{"advance", shape.advance}
+		});
+	}
 
-    // Composites
-    json composites = json::array();
+	j["shapes"] = shapes;
 
-    for(const auto& [key, composite] : atlas.getCompositeShapes()) {
-        json layers = json::array();
+	// Composites
+	json composites = json::array();
 
-        for(const auto& layer : composite.layers) {
-            layers.push_back({
-                {"key",       keyToJson(layer.key)},
-                {"color",     {layer.color.r, layer.color.g, layer.color.b, layer.color.a}},
-                {"transform", {
-                    layer.transform.xx, layer.transform.yx,
-                    layer.transform.xy, layer.transform.yy,
-                    layer.transform.dx, layer.transform.dy
-                }},
-                {"effect_id", layer.effectId}
-            });
-        }
+	for(const auto& [key, composite] : atlas.getCompositeShapes()) {
+		json layers = json::array();
 
-        composites.push_back({
-            {"key",     keyToJson(key)},
-            {"advance", composite.advance},
-            {"layers",  layers}
-        });
-    }
+		for(const auto& layer : composite.layers) {
+			layers.push_back({
+				{"key", keyToJson(layer.key)},
+				{"color", {layer.color.r, layer.color.g, layer.color.b, layer.color.a}},
+				{"transform", {
+					layer.transform.xx, layer.transform.yx,
+					layer.transform.xy, layer.transform.yy,
+					layer.transform.dx, layer.transform.dy
+				}},
+				{"effect_id", layer.effectId}
+			});
+		}
 
-    j["composites"] = composites;
+		composites.push_back({
+			{"key", keyToJson(key)},
+			{"advance", composite.advance},
+			{"layers", layers}
+		});
+	}
 
-    return j;
+	j["composites"] = composites;
+
+	return j;
 }
 
 // -----------------------------------------------------------------------------
-// JSON → Atlas reconstruction (shared by read paths)
+// JSON - Atlas reconstruction (shared by read paths)
 // -----------------------------------------------------------------------------
 
 Atlas atlasFromJson(
-    const json&                      j,
-    const std::vector<uint8_t>*      binChunk = nullptr  // null → use base64 "data" fields
+	const json& j,
+	const std::vector<uint8_t>* binChunk=nullptr // nullptr -> use base64 "data" fields
 ) {
-    Atlas atlas;
+	Atlas atlas;
 
-    // Textures
-    const json& bufferViews = j.at("bufferViews");
+	// Textures
+	const json& bufferViews = j.at("bufferViews");
 
-    auto loadTexture = [&](size_t index) -> Atlas::TextureData {
-        const json& bv = bufferViews.at(index);
+	auto loadTexture = [&](size_t index) -> Atlas::TextureData {
+		const json& bv = bufferViews.at(index);
 
-        Atlas::TextureData td;
-        td.width  = bv.at("width");
-        td.height = bv.at("height");
+		Atlas::TextureData td;
 
-        const std::string fmt = bv.at("format");
+		td.width = bv.at("width");
+		td.height = bv.at("height");
 
-        if     (fmt == "RGBA32F")  td.format = Atlas::TextureData::Format::RGBA32F;
-        else if(fmt == "RGBA16UI") td.format = Atlas::TextureData::Format::RGBA16UI;
-        else throw std::runtime_error("slughorn-serial: unknown texture format '" + fmt + "'");
+		const std::string fmt = bv.at("format");
 
-        if(binChunk) {
-            const uint32_t offset = bv.at("byteOffset");
-            const uint32_t length = bv.at("byteLength");
+		if (fmt == "RGBA32F") td.format = Atlas::TextureData::Format::RGBA32F;
+		else if(fmt == "RGBA16UI") td.format = Atlas::TextureData::Format::RGBA16UI;
+		else throw std::runtime_error("slughorn-serial: unknown texture format '" + fmt + "'");
 
-            if(offset + length > binChunk->size())
-                throw std::runtime_error("slughorn-serial: bufferView out of range");
+		if(binChunk) {
+			const uint32_t offset = bv.at("byteOffset");
+			const uint32_t length = bv.at("byteLength");
 
-            td.bytes.assign(
-                binChunk->begin() + offset,
-                binChunk->begin() + offset + length
-            );
-        } else {
-            td.bytes = base64Decode(bv.at("data").get<std::string>());
-        }
+			if(offset + length > binChunk->size()) throw
+				std::runtime_error("slughorn-serial: bufferView out of range")
+			;
 
-        return td;
-    };
+			td.bytes.assign(
+				binChunk->begin() + offset,
+				binChunk->begin() + offset + length
+			);
+		}
 
-    // We need to inject pre-built texture data and the shape map into the
-    // Atlas without re-running build(). We do this by calling the internal
-    // reconstruction path exposed via the serial friend.
-    Atlas::SerialData sd;
-    sd.curveData = loadTexture(j.at("curve_texture"));
-    sd.bandData  = loadTexture(j.at("band_texture"));
+		else td.bytes = base64Decode(bv.at("data").get<std::string>());
 
-    // Shapes
-    for(const json& js : j.at("shapes")) {
-        Key key = keyFromJson(js.at("key"));
+		return td;
+	};
 
-        Atlas::Shape shape;
-        shape.bandTexX   = js.at("band_tex_x");
-        shape.bandTexY   = js.at("band_tex_y");
-        shape.bandMaxX   = js.at("band_max_x");
-        shape.bandMaxY   = js.at("band_max_y");
-        shape.bandScaleX = js.at("band_scale_x");
-        shape.bandScaleY = js.at("band_scale_y");
-        shape.bandOffsetX= js.at("band_offset_x");
-        shape.bandOffsetY= js.at("band_offset_y");
-        shape.bearingX   = js.at("bearing_x");
-        shape.bearingY   = js.at("bearing_y");
-        shape.width      = js.at("width");
-        shape.height     = js.at("height");
-        shape.advance    = js.at("advance");
+	// We need to inject pre-built texture data and the shape map into the
+	// Atlas without re-running build(). We do this by calling the internal
+	// reconstruction path exposed via the serial friend.
+	Atlas::SerialData sd;
 
-        sd.shapes[key] = shape;
-    }
+	sd.curveData = loadTexture(j.at("curve_texture"));
+	sd.bandData = loadTexture(j.at("band_texture"));
 
-    // Composites
-    for(const json& jc : j.at("composites")) {
-        Key key = keyFromJson(jc.at("key"));
+	// Shapes
+	for(const json& js : j.at("shapes")) {
+		Key key = keyFromJson(js.at("key"));
 
-        CompositeShape composite;
-        composite.advance = jc.at("advance");
+		Atlas::Shape shape;
 
-        for(const json& jl : jc.at("layers")) {
-            Layer layer;
-            layer.key      = keyFromJson(jl.at("key"));
-            layer.effectId = jl.at("effect_id");
+		shape.bandTexX = js.at("band_tex_x");
+		shape.bandTexY = js.at("band_tex_y");
+		shape.bandMaxX = js.at("band_max_x");
+		shape.bandMaxY = js.at("band_max_y");
+		shape.bandScaleX = js.at("band_scale_x");
+		shape.bandScaleY = js.at("band_scale_y");
+		shape.bandOffsetX= js.at("band_offset_x");
+		shape.bandOffsetY= js.at("band_offset_y");
+		shape.bearingX = js.at("bearing_x");
+		shape.bearingY = js.at("bearing_y");
+		shape.width = js.at("width");
+		shape.height = js.at("height");
+		shape.advance = js.at("advance");
 
-            const auto& jcolor = jl.at("color");
-            layer.color = { jcolor[0], jcolor[1], jcolor[2], jcolor[3] };
+		sd.shapes[key] = shape;
+	}
 
-            const auto& jxform = jl.at("transform");
-            layer.transform = {
-                jxform[0], jxform[1],  // xx, yx
-                jxform[2], jxform[3],  // xy, yy
-                jxform[4], jxform[5]   // dx, dy
-            };
+	// Composites
+	for(const json& jc : j.at("composites")) {
+		Key key = keyFromJson(jc.at("key"));
 
-            composite.layers.push_back(layer);
-        }
+		CompositeShape composite;
+		composite.advance = jc.at("advance");
 
-        sd.composites[key] = std::move(composite);
-    }
+		for(const json& jl : jc.at("layers")) {
+			Layer layer;
+			layer.key = keyFromJson(jl.at("key"));
+			layer.effectId = jl.at("effect_id");
 
-    atlas.loadFromSerial(std::move(sd));
+			const auto& jcolor = jl.at("color");
+			layer.color = { jcolor[0], jcolor[1], jcolor[2], jcolor[3] };
 
-    return atlas;
+			const auto& jxform = jl.at("transform");
+			layer.transform = {
+				jxform[0], jxform[1], // xx, yx
+				jxform[2], jxform[3], // xy, yy
+				jxform[4], jxform[5] // dx, dy
+			};
+
+			composite.layers.push_back(layer);
+		}
+
+		sd.composites[key] = std::move(composite);
+	}
+
+	atlas.loadFromSerial(std::move(sd));
+
+	return atlas;
 }
 
 // -----------------------------------------------------------------------------
 // Binary container helpers
 // -----------------------------------------------------------------------------
 
-static constexpr uint32_t kMagic         = 0x47554C53; // "SLUG"
-static constexpr uint32_t kVersion       = 1;
-static constexpr uint32_t kChunkTypeJSON = 0x4E4F534A; // "JSON"
-static constexpr uint32_t kChunkTypeBIN  = 0x004E4942; // "BIN\0"
+static constexpr uint32_t SLUG_MAGIC = 0x47554C53; // "SLUG"
+static constexpr uint32_t SLUG_VERISON = 1;
+static constexpr uint32_t SLUG_CHUNK_TYPE_JSON = 0x4E4F534A; // "JSON"
+static constexpr uint32_t SLUG_CHUNK_TYPE_BIN = 0x004E4942; // "BIN\0"
 
 void writeU32LE(std::ostream& out, uint32_t v) {
-    const uint8_t bytes[4] = {
-        uint8_t(v      ),
-        uint8_t(v >>  8),
-        uint8_t(v >> 16),
-        uint8_t(v >> 24)
-    };
-    out.write(reinterpret_cast<const char*>(bytes), 4);
+	const uint8_t bytes[4] = {
+		uint8_t(v),
+		uint8_t(v >> 8),
+		uint8_t(v >> 16),
+		uint8_t(v >> 24)
+	};
+
+	out.write(reinterpret_cast<const char*>(bytes), 4);
 }
 
 uint32_t readU32LE(std::istream& in) {
-    uint8_t bytes[4];
-    in.read(reinterpret_cast<char*>(bytes), 4);
-    return uint32_t(bytes[0])
-         | uint32_t(bytes[1]) <<  8
-         | uint32_t(bytes[2]) << 16
-         | uint32_t(bytes[3]) << 24;
+	uint8_t bytes[4];
+
+	in.read(reinterpret_cast<char*>(bytes), 4);
+
+	return
+		uint32_t(bytes[0]) |
+		uint32_t(bytes[1]) << 8 |
+		uint32_t(bytes[2]) << 16 |
+		uint32_t(bytes[3]) << 24
+	;
 }
 
 // Pad a buffer to a multiple of 4 bytes.
 // JSON chunks pad with spaces (0x20); BIN chunks pad with zeros.
 void padTo4(std::vector<uint8_t>& buf, uint8_t padByte) {
-    while(buf.size() % 4 != 0) buf.push_back(padByte);
+	while(buf.size() % 4 != 0) buf.push_back(padByte);
 }
 
 } // anonymous namespace
@@ -481,12 +500,13 @@ void padTo4(std::vector<uint8_t>& buf, uint8_t padByte) {
 // =============================================================================
 
 void writeJSON(const Atlas& atlas, std::ostream& out, bool pretty) {
-    if(!atlas.isBuilt())
-        throw std::runtime_error("slughorn-serial: Atlas must be built before writing");
+	if(!atlas.isBuilt()) throw
+		std::runtime_error("slughorn-serial: Atlas must be built before writing")
+	;
 
-    const json j = buildJson(atlas, /*embedBase64=*/true);
+	const json j = buildJson(atlas, /*embedBase64=*/true);
 
-    out << (pretty ? j.dump(2) : j.dump());
+	out << (pretty ? j.dump(2) : j.dump());
 }
 
 // =============================================================================
@@ -494,53 +514,62 @@ void writeJSON(const Atlas& atlas, std::ostream& out, bool pretty) {
 // =============================================================================
 
 void writeBinary(const Atlas& atlas, std::ostream& out) {
-    if(!atlas.isBuilt())
-        throw std::runtime_error("slughorn-serial: Atlas must be built before writing");
+	if(!atlas.isBuilt()) throw
+		std::runtime_error("slughorn-serial: Atlas must be built before writing")
+	;
 
-    const Atlas::TextureData& curve = atlas.getCurveTextureData();
-    const Atlas::TextureData& band  = atlas.getBandTextureData();
+	const Atlas::TextureData& curve = atlas.getCurveTextureData();
+	const Atlas::TextureData& band = atlas.getBandTextureData();
 
-    // Build BIN chunk: curve bytes then band bytes, each padded to 4 bytes
-    std::vector<uint8_t> binData;
-    binData.insert(binData.end(), curve.bytes.begin(), curve.bytes.end());
-    const uint32_t curveByteOffset = 0;
-    const uint32_t bandByteOffset  = static_cast<uint32_t>(curve.bytes.size());
-    // Note: curve texture size is always a multiple of 4 (4 floats * 4 bytes each)
-    // and band texture is always a multiple of 4 (4 uint16s * 2 bytes each, * even row).
-    // No padding needed between them in practice, but we pad the final buffer to be safe.
-    binData.insert(binData.end(), band.bytes.begin(), band.bytes.end());
-    padTo4(binData, 0x00);
+	// Build BIN chunk: curve bytes then band bytes, each padded to 4 bytes
+	std::vector<uint8_t> binData;
 
-    // Build JSON chunk
-    const json j = buildJson(atlas, /*embedBase64=*/false, curveByteOffset, bandByteOffset);
-    const std::string jsonStr = j.dump();
+	binData.insert(binData.end(), curve.bytes.begin(), curve.bytes.end());
 
-    std::vector<uint8_t> jsonData(jsonStr.begin(), jsonStr.end());
-    padTo4(jsonData, 0x20); // pad with spaces
+	const uint32_t curveByteOffset = 0;
+	const uint32_t bandByteOffset = static_cast<uint32_t>(curve.bytes.size());
 
-    // File header: magic + version + total_length
-    //   12 bytes file header
-    // + 8 bytes JSON chunk header + jsonData.size()
-    // + 8 bytes BIN  chunk header + binData.size()
-    const uint32_t totalLength =
-        12 +
-        8 + static_cast<uint32_t>(jsonData.size()) +
-        8 + static_cast<uint32_t>(binData.size());
+	// Note: curve texture size is always a multiple of 4 (4 floats * 4 bytes each)
+	// and band texture is always a multiple of 4 (4 uint16s * 2 bytes each, * even row).
+	// No padding needed between them in practice, but we pad the final buffer to be safe.
+	binData.insert(binData.end(), band.bytes.begin(), band.bytes.end());
 
-    // Write file header
-    writeU32LE(out, kMagic);
-    writeU32LE(out, kVersion);
-    writeU32LE(out, totalLength);
+	padTo4(binData, 0x00);
 
-    // Write JSON chunk
-    writeU32LE(out, static_cast<uint32_t>(jsonData.size()));
-    writeU32LE(out, kChunkTypeJSON);
-    out.write(reinterpret_cast<const char*>(jsonData.data()), static_cast<std::streamsize>(jsonData.size()));
+	// Build JSON chunk
+	const json j = buildJson(atlas, /*embedBase64=*/false, curveByteOffset, bandByteOffset);
+	const std::string jsonStr = j.dump();
 
-    // Write BIN chunk
-    writeU32LE(out, static_cast<uint32_t>(binData.size()));
-    writeU32LE(out, kChunkTypeBIN);
-    out.write(reinterpret_cast<const char*>(binData.data()), static_cast<std::streamsize>(binData.size()));
+	std::vector<uint8_t> jsonData(jsonStr.begin(), jsonStr.end());
+
+	padTo4(jsonData, 0x20); // pad with spaces
+
+	// File header: magic + version + total_length
+	// 12 bytes file header
+	// + 8 bytes JSON chunk header + jsonData.size()
+	// + 8 bytes BIN chunk header + binData.size()
+	const uint32_t totalLength =
+		12 +
+		8 + static_cast<uint32_t>(jsonData.size()) +
+		8 + static_cast<uint32_t>(binData.size())
+	;
+
+	// Write file header
+	writeU32LE(out, SLUG_MAGIC);
+	writeU32LE(out, SLUG_VERISON);
+	writeU32LE(out, totalLength);
+
+	// Write JSON chunk
+	writeU32LE(out, static_cast<uint32_t>(jsonData.size()));
+	writeU32LE(out, SLUG_CHUNK_TYPE_JSON);
+
+	out.write(reinterpret_cast<const char*>(jsonData.data()), static_cast<std::streamsize>(jsonData.size()));
+
+	// Write BIN chunk
+	writeU32LE(out, static_cast<uint32_t>(binData.size()));
+	writeU32LE(out, SLUG_CHUNK_TYPE_BIN);
+
+	out.write(reinterpret_cast<const char*>(binData.data()), static_cast<std::streamsize>(binData.size()));
 }
 
 // =============================================================================
@@ -548,15 +577,18 @@ void writeBinary(const Atlas& atlas, std::ostream& out) {
 // =============================================================================
 
 void write(const Atlas& atlas, const std::string& path) {
-    const bool binary = path.size() >= 6 &&
-                        path.substr(path.size() - 6) == ".slugb";
+	const bool binary =
+		path.size() >= 6 &&
+		path.substr(path.size() - 6) == ".slugb"
+	;
 
-    std::ofstream f(path, binary ? (std::ios::out | std::ios::binary) : std::ios::out);
+	std::ofstream f(path, binary ? (std::ios::out | std::ios::binary) : std::ios::out);
 
-    if(!f) throw std::runtime_error("slughorn-serial: cannot open '" + path + "' for writing");
+	if(!f) throw std::runtime_error("slughorn-serial: cannot open '" + path + "' for writing");
 
-    if(binary) writeBinary(atlas, f);
-    else       writeJSON(atlas, f);
+	if(binary) writeBinary(atlas, f);
+
+	else writeJSON(atlas, f);
 }
 
 // =============================================================================
@@ -564,61 +596,72 @@ void write(const Atlas& atlas, const std::string& path) {
 // =============================================================================
 
 Atlas read(std::istream& in) {
-    // Peek at first byte to detect format
-    const int first = in.peek();
+	// Peek at first byte to detect format
+	const int first = in.peek();
 
-    if(first == '{') {
-        // .slug — JSON
-        json j = json::parse(in);
-        return atlasFromJson(j, nullptr);
-    }
+	if(first == '{') {
+		// .slug — JSON
+		json j = json::parse(in);
 
-    if(first == 'S') {
-        // .slugb — binary container
-        const uint32_t magic   = readU32LE(in);
-        const uint32_t version = readU32LE(in);
-        const uint32_t length  = readU32LE(in);
+		return atlasFromJson(j, nullptr);
+	}
 
-        if(magic != kMagic)
-            throw std::runtime_error("slughorn-serial: not a .slugb file (bad magic)");
+	if(first == 'S') {
+		// .slugb - binary container
+		const uint32_t magic = readU32LE(in);
+		const uint32_t version = readU32LE(in);
+		// TODO: This is related to the TODO below; why aren't we validating?
+		[[maybe_unused]] const uint32_t length = readU32LE(in);
 
-        if(version != kVersion)
-            throw std::runtime_error("slughorn-serial: unsupported .slugb version " +
-                                     std::to_string(version));
+		if(magic != SLUG_MAGIC) throw
+			std::runtime_error("slughorn-serial: not a .slugb file (bad magic)")
+		;
 
-        // Read JSON chunk
-        const uint32_t jsonLength = readU32LE(in);
-        const uint32_t jsonType   = readU32LE(in);
+		if(version != SLUG_VERISON) throw
+			std::runtime_error("slughorn-serial: unsupported .slugb version " +
+			std::to_string(version))
+		;
 
-        if(jsonType != kChunkTypeJSON)
-            throw std::runtime_error("slughorn-serial: expected JSON chunk first");
+		// Read JSON chunk
+		const uint32_t jsonLength = readU32LE(in);
+		const uint32_t jsonType = readU32LE(in);
 
-        std::string jsonStr(jsonLength, '\0');
-        in.read(jsonStr.data(), jsonLength);
+		if(jsonType != SLUG_CHUNK_TYPE_JSON) throw
+			std::runtime_error("slughorn-serial: expected JSON chunk first")
+		;
 
-        // Skip JSON padding (stream position must be 4-byte aligned)
-        const uint32_t jsonPad = (4 - (jsonLength % 4)) % 4;
-        in.seekg(jsonPad, std::ios::cur);
+		std::string jsonStr(jsonLength, '\0');
 
-        // Read BIN chunk
-        const uint32_t binLength = readU32LE(in);
-        const uint32_t binType   = readU32LE(in);
+		in.read(jsonStr.data(), jsonLength);
 
-        if(binType != kChunkTypeBIN)
-            throw std::runtime_error("slughorn-serial: expected BIN chunk second");
+		// Skip JSON padding (stream position must be 4-byte aligned)
+		const uint32_t jsonPad = (4 - (jsonLength % 4)) % 4;
 
-        std::vector<uint8_t> binData(binLength);
-        in.read(reinterpret_cast<char*>(binData.data()), binLength);
+		in.seekg(jsonPad, std::ios::cur);
 
-        (void)length; // total file length — used for validation if desired
+		// Read BIN chunk
+		const uint32_t binLength = readU32LE(in);
+		const uint32_t binType = readU32LE(in);
 
-        json j = json::parse(jsonStr);
-        return atlasFromJson(j, &binData);
-    }
+		if(binType != SLUG_CHUNK_TYPE_BIN) throw
+			std::runtime_error("slughorn-serial: expected BIN chunk second")
+		;
 
-    throw std::runtime_error(
-        "slughorn-serial: unrecognised format (expected '{' for .slug or 'S' for .slugb)"
-    );
+		std::vector<uint8_t> binData(binLength);
+
+		in.read(reinterpret_cast<char*>(binData.data()), binLength);
+
+		// TODO: Why?
+		// (void)length; // total file length - used for validation if desired
+
+		json j = json::parse(jsonStr);
+
+		return atlasFromJson(j, &binData);
+	}
+
+	throw std::runtime_error(
+		"slughorn-serial: unrecognised format (expected '{' for .slug or 'S' for .slugb)"
+	);
 }
 
 // =============================================================================
@@ -626,16 +669,18 @@ Atlas read(std::istream& in) {
 // =============================================================================
 
 Atlas read(const std::string& path) {
-    const bool binary = path.size() >= 6 &&
-                        path.substr(path.size() - 6) == ".slugb";
+	const bool binary =
+		path.size() >= 6 &&
+		path.substr(path.size() - 6) == ".slugb"
+	;
 
-    std::ifstream f(path, binary ? (std::ios::in | std::ios::binary) : std::ios::in);
+	std::ifstream f(path, binary ? (std::ios::in | std::ios::binary) : std::ios::in);
 
-    if(!f) throw std::runtime_error("slughorn-serial: cannot open '" + path + "' for reading");
+	if(!f) throw std::runtime_error("slughorn-serial: cannot open '" + path + "' for reading");
 
-    return read(f);
+	return read(f);
 }
 
-#endif // SLUGHORN_SERIAL_IMPLEMENTATION
+#endif
 
-} // namespace slughorn::serial
+}
