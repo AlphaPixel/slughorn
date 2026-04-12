@@ -103,6 +103,7 @@ that Skia deliberately doesn't address.**
 - [ ] Fix `numBands` auto-calculation — account for spatial curve distribution,
   not just count
 - [x] pybind11 wrapper
+- [ ] Change `composites` to `compositeShapes` in serialization
 
 ## Medium Term
 

@@ -16,16 +16,17 @@
 //
 // Cairo must be on your include path. Link against cairo.
 //
-// Y-UP CONVENTION
-// ---------------
-// slughorn uses Y-up coordinates throughout. Cairo uses Y-down. All decompose/load functions in
-// this header convert automatically: pass canvasHeight (in the same pre-scale units as the path
-// coordinates) and the flip is applied for you. There is no need to apply a Y-flip CTM to the
-// cairo_t before building paths.
+// PATH CONVENTIONS
+// ----------------
+// Cairo is Y-down by default. slughorn expects Y-up coordinates (the same convention as FreeType
+// and em-space in general). The caller is responsible for applying a flip transform to the cairo_t
+// before building paths:
 //
-// For the raw decomposePath() overload, canvasHeight defaults to 0.0 which means "pass through
-// unchanged" — use this only when your path coordinates are already Y-up. Prefer passing an
-// explicit canvasHeight.
+//   cairo_translate(cr, 0.0, emSize); // shift origin to bottom-left
+//   cairo_scale(cr, 1.0, -1.0); // flip Y
+//
+// This bakes the flip into the path coordinates returned by cairo_copy_path(), so decomposePath()
+// receives Y-up data without needing to know about it.
 //
 // STROKE LIMITATION
 // -----------------
@@ -42,6 +43,7 @@
 // ================================================================================================
 
 #include "slughorn.hpp"
+
 #include <cairo/cairo.h>
 
 namespace slughorn {
@@ -56,36 +58,27 @@ namespace cairo {
 // Uses cairo_copy_path() (cubic-preserving) rather than cairo_copy_path_flat() (which would
 // pre-subdivide arcs into line segments and inflate curve counts).
 //
-// The path is copied and then destroyed internally — the path on @p cr is left unchanged.
+// The path is copied and then destroyed internally - the path on @p cr is left unchanged.
 //
 // @p scale is applied uniformly to every coordinate. Use it to normalize path coordinates into the
 // [0, 1] em-square slughorn expects (e.g. 1/100 if your path is built in a 100-unit space). Pass
 // 1.0 if coordinates are already normalized.
-//
-// @p canvasHeight is the height of the coordinate space in pre-scale source units. When nonzero,
-// every Y coordinate is flipped (y_up = canvasHeight - y_down) to convert from Cairo's Y-down
-// convention to slughorn's Y-up convention. Pass 0.0 (default) only if the path is already Y-up.
-void decomposePath(
-	cairo_t* cr,
-	Atlas::Curves& curves,
-	slug_t scale=1.0_cv,
-	slug_t canvasHeight=0.0_cv
-);
+void decomposePath(cairo_t* cr, Atlas::Curves& curves, slug_t scale = 1.0_cv);
 
 // Decompose the current path on @p cr into slughorn curves in local coordinate space.
 //
 // The tight bounding box of the path is computed via cairo_path_extents(). The path is then
-// translated so its Y-up bottom-left corner sits at (0, 0) before decomposition, producing tight
-// atlas bands with no wasted offset space.
+// translated so its origin sits at (0, 0) before decomposition, producing tight atlas bands with
+// no wasted offset space.
 //
 // The canvas-space translation that was subtracted is returned in @p outTransform (dx/dy only;
 // xx/yy remain identity). The caller should store this in Layer::transform so that
 // ShapeDrawable::compile() can restore the correct canvas position at draw time.
-// outTransform.dy is in Y-up em-space (i.e. the Y-up bottom of the shape in canvas coordinates).
 //
-// @p canvasHeight is the height of the coordinate space in pre-scale source units, required to
-// convert the Y-down extents from cairo_path_extents() into a Y-up canvas offset for
-// outTransform.dy.
+// @p canvasHeight is required to correctly convert the Y-down extents returned by
+// cairo_path_extents() into the Y-up offset that slughorn and ShapeDrawable expect. Pass the
+// same height value used in the cairo_translate(cr, 0, height) + cairo_scale(cr, 1, -1) flip
+// applied to the cairo_t before building paths.
 //
 // @p scale is applied after the local translation, consistent with decomposePath().
 void decomposePathLocal(
@@ -93,7 +86,7 @@ void decomposePathLocal(
 	Atlas::Curves& curves,
 	Matrix& outTransform,
 	slug_t canvasHeight,
-	slug_t scale=1.0_cv
+	slug_t scale = 1.0_cv
 );
 
 // ================================================================================================
@@ -106,18 +99,14 @@ void decomposePathLocal(
 // bounding box. Set it to false and populate the ShapeInfo fields manually if you need precise
 // control.
 //
-// @p canvasHeight is forwarded to decomposePath() for Y-down -> Y-up conversion; see that
-// function's documentation. Pass 0.0 only for already-Y-up paths.
-//
 // Returns true if at least one curve was produced and the shape was added. Returns false (and does
 // NOT call addShape) if the path is empty.
 bool loadShape(
 	cairo_t* cr,
 	Atlas& atlas,
 	Key key,
-	slug_t canvasHeight,
-	slug_t scale=1.0_cv,
-	bool autoMetrics=true
+	slug_t scale = 1.0_cv,
+	bool autoMetrics = true
 );
 
 // Decompose the current path on @p cr in local coordinate space and register the result in
@@ -125,8 +114,6 @@ bool loadShape(
 //
 // The canvas-space offset is returned in @p outTransform — store it in Layer::transform so
 // ShapeDrawable::compile() can restore the correct position at draw time.
-//
-// @p canvasHeight is forwarded to decomposePathLocal() for Y-down -> Y-up conversion.
 //
 // Returns true if at least one curve was produced and the shape was added. Returns false (and does
 // NOT call addShape) if the path is empty.
@@ -136,8 +123,8 @@ bool loadShapeLocal(
 	Key key,
 	Matrix& outTransform,
 	slug_t canvasHeight,
-	slug_t scale=1.0_cv,
-	bool autoMetrics=true
+	slug_t scale = 1.0_cv,
+	bool autoMetrics = true
 );
 
 }
@@ -146,19 +133,13 @@ bool loadShapeLocal(
 // ================================================================================================
 // IMPLEMENTATION
 // ================================================================================================
-
 #ifdef SLUGHORN_CAIRO_IMPLEMENTATION
 
 namespace slughorn {
 namespace cairo {
 
-void decomposePath(cairo_t* cr, Atlas::Curves& curves, slug_t scale, slug_t canvasHeight) {
+void decomposePath(cairo_t* cr, Atlas::Curves& curves, slug_t scale) {
 	CurveDecomposer decomposer(curves);
-
-	// Flip helper: when canvasHeight > 0, converts Y-down to Y-up.
-	const bool doFlip = (canvasHeight > 0.0_cv);
-
-	auto flipY = [&](slug_t y) -> slug_t { return doFlip ? (canvasHeight - y) : y; };
 
 	cairo_path_t* path = cairo_copy_path(cr);
 
@@ -166,59 +147,78 @@ void decomposePath(cairo_t* cr, Atlas::Curves& curves, slug_t scale, slug_t canv
 		const cairo_path_data_t* d = &path->data[i];
 
 		switch(d->header.type) {
-		case CAIRO_PATH_MOVE_TO:
-			decomposer.moveTo(cv(d[1].point.x) * scale, flipY(cv(d[1].point.y)) * scale);
+			case CAIRO_PATH_MOVE_TO:
+				decomposer.moveTo(cv(d[1].point.x) * scale, cv(d[1].point.y) * scale);
 
-			break;
+				break;
 
-		case CAIRO_PATH_LINE_TO:
-			decomposer.lineTo(cv(d[1].point.x) * scale, flipY(cv(d[1].point.y)) * scale);
+			case CAIRO_PATH_LINE_TO:
+				decomposer.lineTo(cv(d[1].point.x) * scale, cv(d[1].point.y) * scale);
 
-			break;
+				break;
 
-		case CAIRO_PATH_CURVE_TO:
-			decomposer.cubicTo(
-				cv(d[1].point.x) * scale, flipY(cv(d[1].point.y)) * scale,
-				cv(d[2].point.x) * scale, flipY(cv(d[2].point.y)) * scale,
-				cv(d[3].point.x) * scale, flipY(cv(d[3].point.y)) * scale
-			);
+			case CAIRO_PATH_CURVE_TO:
+				decomposer.cubicTo(
+					cv(d[1].point.x) * scale, cv(d[1].point.y) * scale,
+					cv(d[2].point.x) * scale, cv(d[2].point.y) * scale,
+					cv(d[3].point.x) * scale, cv(d[3].point.y) * scale
+				);
 
-			break;
+				break;
 
-		// The implicit close line (back to the subpath start) has already been emitted as a
-		// CAIRO_PATH_LINE_TO by Cairo before this token, so no geometric action is needed here.
-		case CAIRO_PATH_CLOSE_PATH:
-			break;
+			// The implicit close line (back to the subpath start) has already been emitted as a
+			// CAIRO_PATH_LINE_TO by Cairo before this token, so no geometric action is needed here.
+			case CAIRO_PATH_CLOSE_PATH: break;
 		}
 	}
 
 	cairo_path_destroy(path);
 }
 
-void decomposePathLocal(
-	cairo_t* cr,
-	Atlas::Curves& curves,
-	Matrix& outTransform,
-	slug_t canvasHeight,
-	slug_t scale
-) {
+#if 0
+void decomposePathLocal(cairo_t* cr, Atlas::Curves& curves, Matrix& outTransform, slug_t canvasHeight, slug_t scale) {
 	outTransform = Matrix::identity();
 
 	double x1, y1, x2, y2;
 
 	cairo_path_extents(cr, &x1, &y1, &x2, &y2);
 
-	// cairo_path_extents() returns Y-down coordinates. The Y-up bottom of the shape is:
-	// y_up_bottom = canvasHeight - y2 (y2 is the Y-down bottom = largest Y-down value)
-	const slug_t ox = cv(x1) * scale;
+	// cairo_path_extents() returns coordinates in Y-down user space (even with the flip CTM
+	// active). Translate by the Y-down top-left corner so Cairo's CTM handles the rest correctly
+	// during decomposition.
+	cairo_save(cr);
+	cairo_translate(cr, -x1, -y1);
+	// cairo_translate(cr, -x1, -(canvasHeight - cv(y2)));
+
+	decomposePath(cr, curves, scale);
+
+	cairo_restore(cr);
+
+	// Convert the Y-down extents to a Y-up canvas offset for ShapeDrawable::compile().
+	// In Y-up space the bottom of the shape sits at (canvasHeight - y2).
+	outTransform.dx = cv(x1) * scale;
+	outTransform.dy = (canvasHeight - cv(y2)) * scale;
+}
+#endif
+
+void decomposePathLocal(cairo_t* cr, Atlas::Curves& curves, Matrix& outTransform, slug_t canvasHeight, slug_t scale) {
+	outTransform = Matrix::identity();
+
+	double x1, y1, x2, y2;
+
+	cairo_path_extents(cr, &x1, &y1, &x2, &y2);
+
+	// Y-up bottom-left of the shape in normalized space.
+	const slug_t ox = cv(x1)                  * scale;
 	const slug_t oy = (canvasHeight - cv(y2)) * scale;
 
-	// Decompose as normal with the full canvasHeight for the Y-flip, then shift all newly added
-	// curves to local origin.
+	// Decompose as normal — cairo_copy_path() returns already-transformed
+	// coordinates so CTM manipulation after the fact has no effect.
 	const size_t priorCount = curves.size();
 
-	decomposePath(cr, curves, scale, canvasHeight);
+	decomposePath(cr, curves, scale);
 
+	// Shift all newly added curves to local origin.
 	for(auto it = curves.begin() + priorCount; it != curves.end(); ++it) {
 		it->x1 -= ox; it->x2 -= ox; it->x3 -= ox;
 		it->y1 -= oy; it->y2 -= oy; it->y3 -= oy;
@@ -228,19 +228,11 @@ void decomposePathLocal(
 	outTransform.dy = oy;
 }
 
-bool loadShape(
-	cairo_t* cr,
-	Atlas& atlas,
-	Key key,
-	slug_t canvasHeight,
-	slug_t scale,
-	bool autoMetrics
-) {
+bool loadShape(cairo_t* cr, Atlas& atlas, Key key, slug_t scale, bool autoMetrics) {
 	Atlas::ShapeInfo info;
-
 	info.autoMetrics = autoMetrics;
 
-	decomposePath(cr, info.curves, scale, canvasHeight);
+	decomposePath(cr, info.curves, scale);
 
 	if(info.curves.empty()) return false;
 
@@ -259,7 +251,6 @@ bool loadShapeLocal(
 	bool autoMetrics
 ) {
 	Atlas::ShapeInfo info;
-
 	info.autoMetrics = autoMetrics;
 
 	decomposePathLocal(cr, info.curves, outTransform, canvasHeight, scale);

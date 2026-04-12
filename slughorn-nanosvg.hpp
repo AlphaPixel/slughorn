@@ -21,29 +21,22 @@
 //
 // NanoSVG must be available as "nanosvg.h", and "nanosvgrast.h" is not used.
 //
-// Y-UP CONVENTION
-// ---------------
-// slughorn uses Y-up coordinates throughout. NanoSVG (and SVG in general) uses Y-down. All
-// decompose/load functions in this header convert automatically using the SVG canvas height
-// (image->height for full-image calls, or shape->bounds for local-coords calls). No caller
-// action is required.
-//
 // WHAT IS SUPPORTED
 // -----------------
-// - Filled shapes (solid color only)
-// - All path segment types: lines, cubics (split to quadratics), and NanoSVG's pre-flattened
-//   cubic chains
-// - Fill color unpacked from NanoSVG's packed ABGR uint32
-// - Per-shape local coordinate decomposition (tight bands, zero offset waste)
-// - Auto-scale from SVG viewBox width (pass scale=0 to use this)
+//   - Filled shapes (solid color only)
+//   - All path segment types: lines, cubics (split to quadratics), and NanoSVG's pre-flattened
+//     cubic chains
+//   - Fill color unpacked from NanoSVG's packed ABGR uint32
+//   - Per-shape local coordinate decomposition (tight bands, zero offset waste)
+//   - Auto-scale from SVG viewBox width (pass scale=0 to use this)
 //
 // WHAT IS NOT (YET) SUPPORTED
 // ---------------------------
-// - Stroked shapes (stroke-to-fill expansion not yet wired up)
-// - Gradients (first stop color used as flat approximation, like COLRv1)
-// - Clip paths, masks, opacity, transforms on groups
-// - Text elements
-// - ZWJ / multi-codepoint keys (same limitation as emoji support)
+//   - Stroked shapes (stroke-to-fill expansion not yet wired up)
+//   - Gradients (first stop color used as flat approximation, like COLRv1)
+//   - Clip paths, masks, opacity, transforms on groups
+//   - Text elements
+//   - ZWJ / multi-codepoint keys (same limitation as emoji support)
 //
 // NanoSVG parses all paths as cubic Bezier chains. Each cubic is split at its midpoint into two
 // quadratics via `CurveDecomposer::cubicTo`, the same approximation used by slughorn-skia.hpp and
@@ -55,13 +48,15 @@
 // NanoSVG is a single-header library. The implementation is compiled in exactly one translation
 // unit via SLUGHORN_NANOSVG_IMPLEMENTATION (see below).
 #ifdef SLUGHORN_NANOSVG_IMPLEMENTATION
-#  define NANOSVG_IMPLEMENTATION
+#   define NANOSVG_IMPLEMENTATION
 #endif
 
 _Pragma("GCC diagnostic push") \
 _Pragma("GCC diagnostic ignored \"-Wsign-conversion\"") \
 _Pragma("GCC diagnostic ignored \"-Wshadow\"")
+
 #include "nanosvg.h"
+
 _Pragma("GCC diagnostic pop")
 
 #include <string>
@@ -77,6 +72,7 @@ namespace nanosvg {
 // Note: NanoSVG stores colors in sRGB. For correct compositing you should convert to linear; for
 // now we pass through as-is (same pragmatic choice made by the FT2 and Cairo backends).
 // ================================================================================================
+
 inline Color colorFromNSVG(unsigned int packed) {
 	return {
 		cv((packed & 0xFF)) / 255.0_cv, // R
@@ -90,32 +86,18 @@ inline Color colorFromNSVG(unsigned int packed) {
 // Decomposition
 // ================================================================================================
 
-// Decompose a single `NSVGshape` path into slughorn curves, appending to @p curves.
-//
-// @p canvasHeight is the SVG canvas height in pre-scale source units (i.e. image->height).
-// It is used to flip Y-down SVG coordinates to slughorn's Y-up convention.
-//
-// @p scale is applied to every coordinate after the Y-flip.
-void decomposeShape(
-	const NSVGshape* shape,
-	Atlas::Curves& curves,
-	slug_t canvasHeight,
-	slug_t scale=1.0_cv
-);
+// Decompose a single `NSVGshape` path into slughorn curves, appending to @p curves. @p scale is
+// applied to every coordinate.
+void decomposeShape(const NSVGshape* shape, Atlas::Curves& curves, slug_t scale=1.0_cv);
 
 // Decompose a single `NSVGshape` in local coordinate space (tight bounding box origin), appending
-// to @p curves.
-//
-// The shape's Y-down bounding box is used both to determine the local origin (shape's Y-up
-// bottom-left) and to flip curve coordinates. outTransform.dy is the Y-up canvas position of the
-// shape's bottom edge, requiring @p canvasHeight to compute.
+// to @p curves. The canvas-space translation is written to @p outTransform (TODO: Investigate...)
 //
 // Returns false if the shape produces no curves or has a zero bounding box.
 bool decomposeShapeLocal(
 	const NSVGshape* shape,
 	Atlas::Curves& curves,
 	Matrix& outTransform,
-	slug_t canvasHeight,
 	slug_t scale=1.0_cv
 );
 
@@ -123,9 +105,8 @@ bool decomposeShapeLocal(
 // Atlas Integration
 // ================================================================================================
 
-// Decompose @p shape in local coords and register it in @p atlas under @p key.
-//
-// @p canvasHeight is forwarded to decomposeShapeLocal() for Y-down -> Y-up conversion.
+// Decompose @p shape in local coords and register it in @p atlas under @p key. The canvas-space
+// offset is written to @p outTransform (TODO: Investigate...)
 //
 // Returns true if at least one curve was produced and the shape was added.
 bool loadShape(
@@ -133,11 +114,10 @@ bool loadShape(
 	Atlas& atlas,
 	uint32_t key,
 	Matrix& outTransform,
-	slug_t canvasHeight,
 	slug_t scale=1.0_cv
 );
 
-// Parse an entire NSVGimage into a CompositeShape, one `Layer` per filled `NSVGshape`,
+// Parse an entire NSVGimage into a CompositeShape - one `Layer` per filled `NSVGshape`,
 // back-to-front order preserved.
 //
 // @p scale normalizes SVG canvas coordinates into slughorn's [0, 1] em-space. Pass scale = 0.0 to
@@ -155,8 +135,8 @@ CompositeShape loadImage(
 	slug_t scale=0.0_cv
 );
 
-// Convenience: parse an SVG file and load it in one call. @p dpi controls NanoSVG's unit
-// conversion (96.0 is a sensible default). Returns an empty CompositeShape on parse failure.
+// Convenience: parse an SVG file and load it in one call.  @p dpi controls NanoSVG's unit
+// conversion (96.0 is a sensible default).  Returns an empty CompositeShape on parse failure.
 CompositeShape loadFile(
 	const std::string& path,
 	Atlas& atlas,
@@ -181,7 +161,6 @@ CompositeShape loadString(
 // ================================================================================================
 // IMPLEMENTATION
 // ================================================================================================
-
 #ifdef SLUGHORN_NANOSVG_IMPLEMENTATION
 
 #include <cstring>
@@ -190,35 +169,36 @@ CompositeShape loadString(
 namespace slughorn {
 namespace nanosvg {
 
-void decomposeShape(const NSVGshape* shape, Atlas::Curves& curves, slug_t canvasHeight, slug_t scale) {
+void decomposeShape(const NSVGshape* shape, Atlas::Curves& curves, slug_t scale) {
 	CurveDecomposer decomposer(curves);
-
-	// Flip helper: converts Y-down SVG to Y-up slughorn.
-	auto flipY = [&](slug_t y) -> slug_t { return canvasHeight - y; };
 
 	for(const NSVGpath* path = shape->paths; path; path = path->next) {
 		if(path->npts < 4) continue;
 
 		// NanoSVG stores paths as a flat array of cubic Bezier control points:
-		// [x0,y0, cx0,cy0, cx1,cy1, x1,y1, cx0,cy0, ...] repeating. Each cubic uses 4 points
+		// [x0,y0, cx0,cy0, cx1,cy1, x1,y1,  cx0,cy0, ...] repeating. Each cubic uses 4 points
 		// (8 floats), sharing the end point with the next segment's start.
+
 		const float* p = path->pts;
-		decomposer.moveTo(cv(p[0]) * scale, flipY(cv(p[1])) * scale);
+
+		decomposer.moveTo(cv(p[0]) * scale, cv(p[1]) * scale);
 
 		for(int i = 0; i < path->npts - 1; i += 3) {
 			p = path->pts + i * 2;
 
 			decomposer.cubicTo(
-				cv(p[2]) * scale, flipY(cv(p[3])) * scale, // control 1
-				cv(p[4]) * scale, flipY(cv(p[5])) * scale, // control 2
-				cv(p[6]) * scale, flipY(cv(p[7])) * scale // end point
+				cv(p[2]) * scale, cv(p[3]) * scale, // control 1
+				cv(p[4]) * scale, cv(p[5]) * scale, // control 2
+				cv(p[6]) * scale, cv(p[7]) * scale  // end point
 			);
 		}
 
 		if(path->closed) {
-			// Close back to the path start with a line if needed.
+			// Close back to the path start with a line if needed.  CurveDecomposer::lineTo will
+			// emit a degenerate quadratic.
 			const float* start = path->pts;
-			decomposer.lineTo(cv(start[0]) * scale, flipY(cv(start[1])) * scale);
+
+			decomposer.lineTo(cv(start[0]) * scale, cv(start[1]) * scale);
 		}
 	}
 }
@@ -227,26 +207,22 @@ bool decomposeShapeLocal(
 	const NSVGshape* shape,
 	Atlas::Curves& curves,
 	Matrix& outTransform,
-	slug_t canvasHeight,
 	slug_t scale
 ) {
-	// NanoSVG pre-computes the bounding box for each shape (Y-down).
+	// NanoSVG pre-computes the bounding box for each shape.
 	const float minX = shape->bounds[0];
-	const float minY = shape->bounds[1]; // Y-down top (smallest Y-down value)
+	const float minY = shape->bounds[1];
 	const float maxX = shape->bounds[2];
-	const float maxY = shape->bounds[3]; // Y-down bottom (largest Y-down value)
+	const float maxY = shape->bounds[3];
 
 	if(maxX <= minX || maxY <= minY) return false;
 
-	// In Y-up space:
-	// shape's bottom edge = canvasHeight - maxY (Y-down bottom -> Y-up bottom)
-	// shape's top edge = canvasHeight - minY (Y-down top -> Y-up top)
-	// local Y = (canvasHeight - y_down) - (canvasHeight - maxY) = maxY - y_down
-	// So the local flip is simply: y_local = maxY - y_down.
-	//
-	// outTransform.dy = (canvasHeight - maxY) * scale
+	// Decompose with a local-origin translation baked into scale application. We can't easily
+	// pre-translate an NSVGshape in place, so instead we subtract the bounding box origin from
+	// every point during decomposition.
 
 	CurveDecomposer decomposer(curves);
+
 	const size_t curvesBefore = curves.size();
 
 	for(const NSVGpath* path = shape->paths; path; path = path->next) {
@@ -254,30 +230,31 @@ bool decomposeShapeLocal(
 
 		const float* p = path->pts;
 
-		decomposer.moveTo(cv(p[0] - minX) * scale, cv(maxY - p[1]) * scale);
+		decomposer.moveTo(cv(p[0] - minX) * scale, cv(p[1] - minY) * scale);
 
 		for(int i = 0; i < path->npts - 1; i += 3) {
 			p = path->pts + i * 2;
 
 			decomposer.cubicTo(
-				cv(p[2] - minX) * scale, cv(maxY - p[3]) * scale,
-				cv(p[4] - minX) * scale, cv(maxY - p[5]) * scale,
-				cv(p[6] - minX) * scale, cv(maxY - p[7]) * scale
+				cv(p[2] - minX) * scale, cv(p[3] - minY) * scale,
+				cv(p[4] - minX) * scale, cv(p[5] - minY) * scale,
+				cv(p[6] - minX) * scale, cv(p[7] - minY) * scale
 			);
 		}
 
 		if(path->closed) {
 			const float* start = path->pts;
 
-			decomposer.lineTo(cv(start[0] - minX) * scale, cv(maxY - start[1]) * scale);
+			decomposer.lineTo(cv(start[0] - minX) * scale, cv(start[1] - minY) * scale);
 		}
 	}
 
 	if(curves.size() == curvesBefore) return false;
 
+	// Return canvas-space offset in scaled coordinates.
 	outTransform = Matrix::identity();
 	outTransform.dx = cv(minX) * scale;
-	outTransform.dy = (canvasHeight - cv(maxY)) * scale;
+	outTransform.dy = cv(minY) * scale;
 
 	return true;
 }
@@ -287,14 +264,13 @@ bool loadShape(
 	Atlas& atlas,
 	uint32_t key,
 	Matrix& outTransform,
-	slug_t canvasHeight,
 	slug_t scale
 ) {
 	Atlas::ShapeInfo info;
 
 	info.autoMetrics = true;
 
-	if(!decomposeShapeLocal(shape, info.curves, outTransform, canvasHeight, scale)) return false;
+	if(!decomposeShapeLocal(shape, info.curves, outTransform, scale)) return false;
 
 	atlas.addShape(key, info);
 
@@ -318,15 +294,12 @@ CompositeShape loadImage(
 		else {
 			std::cerr
 				<< "slughorn::nanosvg::loadImage: image width is zero, "
-				<< "cannot auto-compute scale. Pass scale explicitly."
-				<< std::endl
+				<< "cannot auto-compute scale. Pass scale explicitly." << std::endl
 			;
 
 			return composite;
 		}
 	}
-
-	const slug_t canvasHeight = cv(image->height);
 
 	composite.advance = cv(image->width) * scale; // normalized width = 1.0
 
@@ -338,8 +311,7 @@ CompositeShape loadImage(
 		if(shape->fill.type != NSVG_PAINT_COLOR) {
 			std::cerr
 				<< "slughorn::nanosvg: skipping shape with non-solid fill "
-				<< "(gradient/pattern support not yet implemented)"
-				<< std::endl
+				<< "(gradient/pattern support not yet implemented)" << std::endl
 			;
 
 			continue;
@@ -352,7 +324,7 @@ CompositeShape loadImage(
 
 		Matrix xform;
 
-		if(!loadShape(shape, atlas, baseKey, xform, canvasHeight, scale)) continue;
+		if(!loadShape(shape, atlas, baseKey, xform, scale)) continue;
 
 		Layer layer;
 
