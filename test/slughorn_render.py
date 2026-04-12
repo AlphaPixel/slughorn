@@ -718,7 +718,8 @@ def save_curves_debug(curves, shape, filename="curves_debug.png", scale=1024):
         """Convert em-space to pixel coords (Y-flipped)."""
         u = (ex - ox) / sx
         v = (ey - oy) / sy
-        return (int(u * w), int((1.0 - v) * h))
+        # return (int(u * w), int((1.0 - v) * h))
+        return (int(u * w), int(v * h))
 
     def draw_quad_bezier(p1, p2, p3, color, steps=32):
         """Approximate a quadratic Bézier as a polyline."""
