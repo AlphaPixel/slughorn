@@ -69,6 +69,18 @@ class SlugShape:
         sy = (float(self.band_max_y + 1) / self.band_scale_y) if self.band_scale_y else 1.0
         return ((em_x - ox) / sx, (em_y - oy) / sy)
 
+    @property
+    def em_origin(self):
+        ox = (-self.band_offset_x / self.band_scale_x) if self.band_scale_x else 0.0
+        oy = (-self.band_offset_y / self.band_scale_y) if self.band_scale_y else 0.0
+        return (ox, oy)
+
+    @property
+    def em_size(self):
+        sx = (float(self.band_max_x + 1) / self.band_scale_x) if self.band_scale_x else 1.0
+        sy = (float(self.band_max_y + 1) / self.band_scale_y) if self.band_scale_y else 1.0
+        return (sx, sy)
+
     def __repr__(self):
         return (f"SlugShape(size={self.width:.3f}x{self.height:.3f} "
                 f"bands={self.band_max_x+1}x{self.band_max_y+1} "

@@ -695,6 +695,71 @@ def save_image(grid: List[List[float]], filename: str = "out.png", flip_y: bool 
     print(f"Saved {w}x{h} image → {filename}")
 
 
+def save_curves_debug(curves, shape, filename="curves_debug.png", scale=1024):
+    """
+    Render the raw curve geometry as a diagnostic diagram:
+      - Curve paths as thin white lines (approximated)
+      - Start/end points as small filled circles
+      - Control points as slightly larger hollow circles
+    """
+    from PIL import Image, ImageDraw
+
+    # Aspect-ratio-aware canvas
+    w = scale
+    h = max(1, int(scale * (shape.height / shape.width)))
+
+    img  = Image.new("RGB", (w, h), (30, 30, 30))
+    draw = ImageDraw.Draw(img)
+
+    ox, oy   = shape.em_origin
+    sx, sy   = shape.em_size
+
+    def em_to_px(ex, ey):
+        """Convert em-space to pixel coords (Y-flipped)."""
+        u = (ex - ox) / sx
+        v = (ey - oy) / sy
+        return (int(u * w), int((1.0 - v) * h))
+
+    def draw_quad_bezier(p1, p2, p3, color, steps=32):
+        """Approximate a quadratic Bézier as a polyline."""
+        pts = []
+        for i in range(steps + 1):
+            t  = i / steps
+            mt = 1.0 - t
+            x  = mt*mt*p1[0] + 2*mt*t*p2[0] + t*t*p3[0]
+            y  = mt*mt*p1[1] + 2*mt*t*p2[1] + t*t*p3[1]
+            pts.append(em_to_px(x, y))
+        for i in range(len(pts) - 1):
+            draw.line([pts[i], pts[i+1]], fill=color, width=1)
+
+    for c in curves:
+        x1, y1, x2, y2, x3, y3 = c
+
+        p1 = (x1, y1)
+        p2 = (x2, y2)
+        p3 = (x3, y3)
+
+        # Curve path
+        draw_quad_bezier(p1, p2, p3, color=(200, 200, 200))
+
+        # Control point line (faint)
+        draw.line([em_to_px(*p1), em_to_px(*p2)], fill=(80, 80, 180), width=1)
+        draw.line([em_to_px(*p2), em_to_px(*p3)], fill=(80, 80, 180), width=1)
+
+        # Start/end points — small filled circles (green)
+        for px, py in [em_to_px(*p1), em_to_px(*p3)]:
+            r = 2
+            draw.ellipse([px-r, py-r, px+r, py+r], fill=(80, 220, 80))
+
+        # Control point — slightly larger hollow circle (blue)
+        px, py = em_to_px(*p2)
+        r = 3
+        draw.ellipse([px-r, py-r, px+r, py+r], outline=(100, 100, 255), width=1)
+
+    img.save(filename)
+    print(f"Saved {w}x{h} curve debug → {filename}")
+
+
 # =============================================================================
 # Self-test
 # =============================================================================
