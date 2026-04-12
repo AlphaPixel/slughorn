@@ -106,18 +106,18 @@ that Skia deliberately doesn't address.**
 
 ## Medium Term
 
-- [ ] `Atlas::createDefaultStateSet()` member instead of free function in
+- [x] `Atlas::createDefaultStateSet()` member instead of free function in
   `Drawable.hpp`
 - [ ] Sync `TEX_WIDTH` / `kLogBandTextureWidth` — uniform or shader preamble
   injection
 - [ ] Premultiplied alpha
 - [ ] Proper depth testing and render order
-- [ ] Remove `slug_color` uniform remnant from shaders (color is pure vertex
+- [x] Remove `slug_color` uniform remnant from shaders (color is pure vertex
   attribute now)
 
 ## When Ready
 
-- [ ] `Atlas::Key` type conversion (`uint32_t` → `Codepoint | Name`
+- [x] `Atlas::Key` type conversion (`uint32_t` → `Codepoint | Name`
   discriminated union)
 - [x] Conic subdivision for Skia circular geometry (`iter.conicWeight()`)
 - [x] Minimal Skia `args.gn` build config (trim from 25GB)
