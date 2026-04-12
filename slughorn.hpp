@@ -294,7 +294,9 @@ public:
 	// from the curve bounding box. Set it to false and fill in the metric fields when you need
 	// precise control (e.g. when forwarding FreeType's own metrics for a font glyph).
 	//
-	// numBands = 0 lets the atlas pick a sensible default.
+	// numBandsX / numBandsY control the band grid dimensions independently.
+	// 0 means "pick automatically" for that axis. Negative values are invalid.
+	// Set both to the same value to get a square grid (equivalent to the old numBands scalar).
 	struct ShapeInfo {
 		Curves curves;
 
@@ -305,7 +307,8 @@ public:
 		slug_t advance = 0;
 
 		// Signed: 0 means "pick automatically"; negative values are invalid.
-		int numBands = 0;
+		int numBandsX = 0;
+		int numBandsY = 0;
 	};
 
 	// --------------------------------------------------------------------------------------------
@@ -427,7 +430,7 @@ private:
 	// --------------------------------------------------------------------------------------------
 	// Internal pipeline
 	// --------------------------------------------------------------------------------------------
-	void buildShapeBands(Key key, ShapeBuild& build, uint32_t numBands, bool overrideMetrics);
+	void buildShapeBands(Key key, ShapeBuild& build, uint32_t numBandsX, uint32_t numBandsY, bool overrideMetrics);
 
 	void packTextures();
 

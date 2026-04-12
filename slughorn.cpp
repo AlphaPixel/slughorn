@@ -72,14 +72,19 @@ void Atlas::addShape(Key key, const ShapeInfo& desc) {
 		build.metrics.advance = desc.advance;
 	}
 
-	// Clamp negative numBands to 0 (auto) — the signed sentinel is an API
+	// Clamp negative values to 0 (auto) — the signed sentinel is an API
 	// convenience; internally we always work with uint32_t.
-	const uint32_t numBands = desc.numBands > 0
-		? static_cast<uint32_t>(desc.numBands)
+	const uint32_t numBandsX = desc.numBandsX > 0
+		? static_cast<uint32_t>(desc.numBandsX)
 		: 0u
 	;
 
-	buildShapeBands(key, build, numBands, /*overrideMetrics=*/!desc.autoMetrics);
+	const uint32_t numBandsY = desc.numBandsY > 0
+		? static_cast<uint32_t>(desc.numBandsY)
+		: 0u
+	;
+
+	buildShapeBands(key, build, numBandsX, numBandsY, /*overrideMetrics=*/!desc.autoMetrics);
 }
 
 // =============================================================================
@@ -129,7 +134,8 @@ const CompositeShape* Atlas::getCompositeShape(Key key) const {
 void Atlas::buildShapeBands(
 	Key key,
 	ShapeBuild& build,
-	uint32_t numBands,
+	uint32_t numBandsX,
+	uint32_t numBandsY,
 	bool overrideMetrics
 ) {
 	if(build.curves.empty()) {
@@ -140,8 +146,21 @@ void Atlas::buildShapeBands(
 
 	const size_t numCurves = build.curves.size();
 
-	if(numBands == 0) {
-		numBands = static_cast<uint32_t>(
+	// -------------------------------------------------------------------------
+	// Auto band counts
+	//
+	// When 0, pick independently per axis. Currently hardcoded for testing —
+	// automatic aspect-ratio-aware calculation to follow once we've validated
+	// the non-square grid plumbing with known good values.
+	// -------------------------------------------------------------------------
+	if(numBandsX == 0) {
+		numBandsX = static_cast<uint32_t>(
+			std::min(size_t(16), std::max(size_t(1), numCurves / 2))
+		);
+	}
+
+	if(numBandsY == 0) {
+		numBandsY = static_cast<uint32_t>(
 			std::min(size_t(16), std::max(size_t(1), numCurves / 2))
 		);
 	}
@@ -177,25 +196,23 @@ void Atlas::buildShapeBands(
 	}
 
 	// -------------------------------------------------------------------------
-	// Band transform
+	// Band transform — X and Y now use independent band counts
 	// -------------------------------------------------------------------------
-	const slug_t fBands = cv(numBands);
-
-	build.metrics.bandScaleX = fBands / rangeX;
-	build.metrics.bandScaleY = fBands / rangeY;
+	build.metrics.bandScaleX  = cv(numBandsX) / rangeX;
+	build.metrics.bandScaleY  = cv(numBandsY) / rangeY;
 	build.metrics.bandOffsetX = -minX * build.metrics.bandScaleX;
 	build.metrics.bandOffsetY = -minY * build.metrics.bandScaleY;
-	build.metrics.bandMaxX = numBands - 1;
-	build.metrics.bandMaxY = numBands - 1;
+	build.metrics.bandMaxX    = numBandsX - 1;
+	build.metrics.bandMaxY    = numBandsY - 1;
 
 	// -------------------------------------------------------------------------
-	// Horizontal bands (sliced along Y)
+	// Horizontal bands (sliced along Y) — numBandsY slices
 	// -------------------------------------------------------------------------
-	build.hbands.resize(numBands);
+	build.hbands.resize(numBandsY);
 
-	const slug_t bandHeightY = rangeY / fBands;
+	const slug_t bandHeightY = rangeY / cv(numBandsY);
 
-	for(uint32_t b = 0; b < numBands; b++) {
+	for(uint32_t b = 0; b < numBandsY; b++) {
 		const slug_t lo = minY + cv(b) * bandHeightY;
 		const slug_t hi = lo + bandHeightY;
 		auto& band = build.hbands[b];
@@ -215,13 +232,13 @@ void Atlas::buildShapeBands(
 	}
 
 	// -------------------------------------------------------------------------
-	// Vertical bands (sliced along X)
+	// Vertical bands (sliced along X) — numBandsX slices
 	// -------------------------------------------------------------------------
-	build.vbands.resize(numBands);
+	build.vbands.resize(numBandsX);
 
-	const slug_t bandWidthX = rangeX / fBands;
+	const slug_t bandWidthX = rangeX / cv(numBandsX);
 
-	for(uint32_t b = 0; b < numBands; b++) {
+	for(uint32_t b = 0; b < numBandsX; b++) {
 		const slug_t lo = minX + cv(b) * bandWidthX;
 		const slug_t hi = lo + bandWidthX;
 		auto& band = build.vbands[b];
