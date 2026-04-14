@@ -3,12 +3,19 @@
 // ================================================================================================
 // NanoSVG backend for slughorn
 //
-// Parses SVG files/strings into slughorn `Atlas` shapes, producing a `CompositeShape` with one
-// `Layer` per filled SVG shape, back-to-front order preserved.
+// Parses SVG files/strings into slughorn Atlas shapes, producing a CompositeShape with one
+// Layer per filled SVG shape, back-to-front order preserved.
 //
-// Local coords are used by default; every shape is decomposed in its own tight bounding box, so
-// atlas bands are sized to the geometry rather than the full SVG canvas. `Layer::transform` carries
-// the canvas-space offset back to the caller (TODO: NOT IDEAL, investigate...)
+// API mirrors slughorn-cairo.hpp exactly:
+//   - decomposePath()  -- low-level: NSVGshape -> (curves, transform)
+//   - loadShape()      -- mid-level: decompose + register in atlas
+//   - loadImage()      -- high-level: full NSVGimage -> CompositeShape
+//   - loadFile()       -- convenience: parse file + loadImage
+//   - loadString()     -- convenience: parse string + loadImage
+//
+// Scale is always auto-computed from image->width (1/image->width), normalizing
+// all coordinates to [0,1] em-space. It is never exposed as a caller parameter.
+// World sizing is the caller's responsibility via MatrixTransform or equivalent.
 //
 // USAGE
 // -----
@@ -19,40 +26,31 @@
 //
 // All other translation units include it without the define.
 //
-// NanoSVG must be available as "nanosvg.h", and "nanosvgrast.h" is not used.
-//
 // WHAT IS SUPPORTED
 // -----------------
 //   - Filled shapes (solid color only)
-//   - All path segment types: lines, cubics (split to quadratics), and NanoSVG's pre-flattened
-//     cubic chains
+//   - All path segment types: lines, cubics (split to quadratics), and NanoSVG's
+//     pre-flattened cubic chains
 //   - Fill color unpacked from NanoSVG's packed ABGR uint32
 //   - Per-shape local coordinate decomposition (tight bands, zero offset waste)
-//   - Auto-scale from SVG viewBox width (pass scale=0 to use this)
+//   - Auto-scale from SVG viewBox width (always 1/image->width)
 //
 // WHAT IS NOT (YET) SUPPORTED
 // ---------------------------
 //   - Stroked shapes (stroke-to-fill expansion not yet wired up)
-//   - Gradients (first stop color used as flat approximation, like COLRv1)
+//   - Gradients (first stop color used as flat approximation)
 //   - Clip paths, masks, opacity, transforms on groups
 //   - Text elements
-//   - ZWJ / multi-codepoint keys (same limitation as emoji support)
-//
-// NanoSVG parses all paths as cubic Bezier chains. Each cubic is split at its midpoint into two
-// quadratics via `CurveDecomposer::cubicTo`, the same approximation used by slughorn-skia.hpp and
-// slughorn-cairo.hpp.
 // ================================================================================================
 
 #include "slughorn.hpp"
 
-// NanoSVG is a single-header library. The implementation is compiled in exactly one translation
-// unit via SLUGHORN_NANOSVG_IMPLEMENTATION (see below).
 #ifdef SLUGHORN_NANOSVG_IMPLEMENTATION
 #   define NANOSVG_IMPLEMENTATION
 #endif
 
-_Pragma("GCC diagnostic push") \
-_Pragma("GCC diagnostic ignored \"-Wsign-conversion\"") \
+_Pragma("GCC diagnostic push")
+_Pragma("GCC diagnostic ignored \"-Wsign-conversion\"")
 _Pragma("GCC diagnostic ignored \"-Wshadow\"")
 
 #include "nanosvg.h"
@@ -60,6 +58,7 @@ _Pragma("GCC diagnostic ignored \"-Wshadow\"")
 _Pragma("GCC diagnostic pop")
 
 #include <string>
+#include <utility>
 
 namespace slughorn {
 namespace nanosvg {
@@ -68,95 +67,89 @@ namespace nanosvg {
 // colorFromNSVG
 //
 // NanoSVG packs fill/stroke color as 0xAABBGGRR (little-endian ABGR).
-//
-// Note: NanoSVG stores colors in sRGB. For correct compositing you should convert to linear; for
-// now we pass through as-is (same pragmatic choice made by the FT2 and Cairo backends).
 // ================================================================================================
-
 inline Color colorFromNSVG(unsigned int packed) {
-	return {
-		cv((packed & 0xFF)) / 255.0_cv, // R
-		cv(((packed >> 8) & 0xFF)) / 255.0_cv, // G
-		cv(((packed >> 16) & 0xFF)) / 255.0_cv, // B
-		cv(((packed >> 24) & 0xFF)) / 255.0_cv, // A
-	};
+    return {
+        cv((packed       & 0xFF)) / 255.0_cv, // R
+        cv(((packed >> 8)  & 0xFF)) / 255.0_cv, // G
+        cv(((packed >> 16) & 0xFF)) / 255.0_cv, // B
+        cv(((packed >> 24) & 0xFF)) / 255.0_cv, // A
+    };
 }
 
 // ================================================================================================
-// Decomposition
-// ================================================================================================
-
-// Decompose a single `NSVGshape` path into slughorn curves, appending to @p curves. @p scale is
-// applied to every coordinate.
-void decomposeShape(const NSVGshape* shape, Atlas::Curves& curves, slug_t scale=1.0_cv);
-
-// Decompose a single `NSVGshape` in local coordinate space (tight bounding box origin), appending
-// to @p curves. The canvas-space translation is written to @p outTransform (TODO: Investigate...)
+// decomposePath
 //
-// Returns false if the shape produces no curves or has a zero bounding box.
-bool decomposeShapeLocal(
-	const NSVGshape* shape,
-	Atlas::Curves& curves,
-	Matrix& outTransform,
-	slug_t scale=1.0_cv
+// Decompose a single NSVGshape into slughorn curves, shifted to local origin
+// for tight atlas bands. Mirrors slughorn::cairo::decomposePath exactly.
+//
+// @p scale normalizes SVG canvas coordinates into em-space. For direct use,
+// pass 1/image->width. loadImage/loadFile/loadString handle this automatically.
+//
+// Returns the shifted curves and the canvas-space offset as a Matrix (dx/dy
+// only; xx/yy are identity). Store the Matrix in Layer::transform for correct
+// composite positioning. Returns an empty curves vector if the shape has no
+// paths or a zero bounding box.
+// ================================================================================================
+std::pair<Atlas::Curves, Matrix> decomposePath(
+    const NSVGshape* shape,
+    slug_t scale = 1.0_cv
 );
 
 // ================================================================================================
-// Atlas Integration
-// ================================================================================================
-
-// Decompose @p shape in local coords and register it in @p atlas under @p key. The canvas-space
-// offset is written to @p outTransform (TODO: Investigate...)
+// loadShape
 //
-// Returns true if at least one curve was produced and the shape was added.
-bool loadShape(
-	const NSVGshape* shape,
-	Atlas& atlas,
-	uint32_t key,
-	Matrix& outTransform,
-	slug_t scale=1.0_cv
+// Decompose @p shape and register it in @p atlas under @p key.
+// Mirrors slughorn::cairo::loadShape exactly.
+//
+// Returns the canvas-space offset as a Matrix (see decomposePath). Store it
+// in Layer::transform for correct composite positioning. Returns an identity
+// Matrix and does NOT call addShape if the path produces no curves.
+// ================================================================================================
+Matrix loadShape(
+    const NSVGshape* shape,
+    Atlas& atlas,
+    Key key,
+    slug_t scale = 1.0_cv
 );
 
-// Parse an entire NSVGimage into a CompositeShape - one `Layer` per filled `NSVGshape`,
-// back-to-front order preserved.
+// ================================================================================================
+// loadImage
 //
-// @p scale normalizes SVG canvas coordinates into slughorn's [0, 1] em-space. Pass scale = 0.0 to
-// auto-compute from the SVG's viewBox width (equivalent to 1.0 / image->width).
+// Parse an entire NSVGimage into a CompositeShape — one Layer per filled
+// NSVGshape, back-to-front order preserved.
 //
-// Keys are allocated sequentially from @p baseKey. On return, @p baseKey is advanced past the last
-// key used; pass a fresh namespace each call (e.g. 0xD0000).
+// Scale is always auto-computed as 1/image->width, normalizing the SVG canvas
+// to [0,1] em-space. Keys are allocated sequentially from @p baseKey; on
+// return baseKey is advanced past the last key used.
 //
-// Shapes with no fill (fillRule == NSVG_FILLRULE_NONZERO but color alpha==0, or paint type !=
-// solid) are skipped with a warning to stderr.
+// Shapes with no solid fill are skipped with a warning to stderr.
+// ================================================================================================
 CompositeShape loadImage(
-	const NSVGimage* image,
-	Atlas& atlas,
-	uint32_t& baseKey,
-	slug_t scale=0.0_cv
+    const NSVGimage* image,
+    Atlas& atlas,
+    uint32_t& baseKey
 );
 
-// Convenience: parse an SVG file and load it in one call.  @p dpi controls NanoSVG's unit
-// conversion (96.0 is a sensible default).  Returns an empty CompositeShape on parse failure.
+// ================================================================================================
+// loadFile / loadString -- convenience wrappers
+// ================================================================================================
 CompositeShape loadFile(
-	const std::string& path,
-	Atlas& atlas,
-	uint32_t& baseKey,
-	slug_t scale=0.0_cv,
-	float dpi=96.0f
+    const std::string& path,
+    Atlas& atlas,
+    uint32_t& baseKey,
+    float dpi = 96.0f
 );
 
-// Convenience helper to parse an SVG string and load it in one call. The string is copied
-// internally (nsvgParse requires a mutable buffer).
 CompositeShape loadString(
-	const std::string& svg,
-	Atlas& atlas,
-	uint32_t& baseKey,
-	slug_t scale=0.0_cv,
-	float dpi=96.0f
+    const std::string& svg,
+    Atlas& atlas,
+    uint32_t& baseKey,
+    float dpi = 96.0f
 );
 
-}
-}
+} // namespace nanosvg
+} // namespace slughorn
 
 // ================================================================================================
 // IMPLEMENTATION
@@ -169,229 +162,152 @@ CompositeShape loadString(
 namespace slughorn {
 namespace nanosvg {
 
-void decomposeShape(const NSVGshape* shape, Atlas::Curves& curves, slug_t scale) {
-	CurveDecomposer decomposer(curves);
+std::pair<Atlas::Curves, Matrix> decomposePath(const NSVGshape* shape, slug_t scale) {
+    // NanoSVG pre-computes the bounding box for each shape.
+    const slug_t minX = cv(shape->bounds[0]) * scale;
+    const slug_t minY = cv(shape->bounds[1]) * scale;
+    const slug_t maxX = cv(shape->bounds[2]) * scale;
+    const slug_t maxY = cv(shape->bounds[3]) * scale;
 
-	for(const NSVGpath* path = shape->paths; path; path = path->next) {
-		if(path->npts < 4) continue;
+    if(maxX <= minX || maxY <= minY) return { {}, Matrix::identity() };
 
-		// NanoSVG stores paths as a flat array of cubic Bezier control points:
-		// [x0,y0, cx0,cy0, cx1,cy1, x1,y1,  cx0,cy0, ...] repeating. Each cubic uses 4 points
-		// (8 floats), sharing the end point with the next segment's start.
+    Atlas::Curves curves;
+    CurveDecomposer decomposer(curves);
 
-		const float* p = path->pts;
+    for(const NSVGpath* path = shape->paths; path; path = path->next) {
+        if(path->npts < 4) continue;
 
-		decomposer.moveTo(cv(p[0]) * scale, cv(p[1]) * scale);
+        const float* p = path->pts;
 
-		for(int i = 0; i < path->npts - 1; i += 3) {
-			p = path->pts + i * 2;
+        decomposer.moveTo(cv(p[0]) * scale - minX, cv(p[1]) * scale - minY);
 
-			decomposer.cubicTo(
-				cv(p[2]) * scale, cv(p[3]) * scale, // control 1
-				cv(p[4]) * scale, cv(p[5]) * scale, // control 2
-				cv(p[6]) * scale, cv(p[7]) * scale  // end point
-			);
-		}
+        for(int i = 0; i < path->npts - 1; i += 3) {
+            p = path->pts + i * 2;
 
-		if(path->closed) {
-			decomposer.close();
-			// Close back to the path start with a line if needed.  CurveDecomposer::lineTo will
-			// emit a degenerate quadratic.
-			// const float* start = path->pts;
+            decomposer.cubicTo(
+                cv(p[2]) * scale - minX, cv(p[3]) * scale - minY,
+                cv(p[4]) * scale - minX, cv(p[5]) * scale - minY,
+                cv(p[6]) * scale - minX, cv(p[7]) * scale - minY
+            );
+        }
 
-			// decomposer.lineTo(cv(start[0]) * scale, cv(start[1]) * scale);
-		}
-	}
+        if(path->closed) decomposer.close();
+    }
+
+    if(curves.empty()) return { {}, Matrix::identity() };
+
+    Matrix transform = Matrix::identity();
+    transform.dx = minX;
+    transform.dy = minY;
+
+    return { curves, transform };
 }
 
-bool decomposeShapeLocal(
-	const NSVGshape* shape,
-	Atlas::Curves& curves,
-	Matrix& outTransform,
-	slug_t scale
-) {
-	// NanoSVG pre-computes the bounding box for each shape.
-	const float minX = shape->bounds[0];
-	const float minY = shape->bounds[1];
-	const float maxX = shape->bounds[2];
-	const float maxY = shape->bounds[3];
+Matrix loadShape(const NSVGshape* shape, Atlas& atlas, Key key, slug_t scale) {
+    auto [curves, transform] = decomposePath(shape, scale);
 
-	if(maxX <= minX || maxY <= minY) return false;
+    if(curves.empty()) return Matrix::identity();
 
-	// Decompose with a local-origin translation baked into scale application. We can't easily
-	// pre-translate an NSVGshape in place, so instead we subtract the bounding box origin from
-	// every point during decomposition.
+    Atlas::ShapeInfo info;
+    info.autoMetrics = true;
+    info.curves = std::move(curves);
 
-	CurveDecomposer decomposer(curves);
+    atlas.addShape(key, info);
 
-	const size_t curvesBefore = curves.size();
-
-	for(const NSVGpath* path = shape->paths; path; path = path->next) {
-		if(path->npts < 4) continue;
-
-		const float* p = path->pts;
-
-		decomposer.moveTo(cv(p[0] - minX) * scale, cv(p[1] - minY) * scale);
-
-		for(int i = 0; i < path->npts - 1; i += 3) {
-			p = path->pts + i * 2;
-
-			decomposer.cubicTo(
-				cv(p[2] - minX) * scale, cv(p[3] - minY) * scale,
-				cv(p[4] - minX) * scale, cv(p[5] - minY) * scale,
-				cv(p[6] - minX) * scale, cv(p[7] - minY) * scale
-			);
-		}
-
-		if(path->closed) {
-			decomposer.close();
-			// const float* start = path->pts;
-
-			// decomposer.lineTo(cv(start[0] - minX) * scale, cv(start[1] - minY) * scale);
-		}
-	}
-
-	if(curves.size() == curvesBefore) return false;
-
-	// Return canvas-space offset in scaled coordinates.
-	outTransform = Matrix::identity();
-	outTransform.dx = cv(minX) * scale;
-	outTransform.dy = cv(minY) * scale;
-
-	return true;
+    return transform;
 }
 
-bool loadShape(
-	const NSVGshape* shape,
-	Atlas& atlas,
-	uint32_t key,
-	Matrix& outTransform,
-	slug_t scale
-) {
-	Atlas::ShapeInfo info;
+CompositeShape loadImage(const NSVGimage* image, Atlas& atlas, uint32_t& baseKey) {
+    CompositeShape composite;
 
-	info.autoMetrics = true;
+    if(!image) return composite;
 
-	if(!decomposeShapeLocal(shape, info.curves, outTransform, scale)) return false;
+    if(image->width <= 0.0f) {
+        std::cerr
+            << "slughorn::nanosvg::loadImage: image width is zero, cannot normalize."
+            << std::endl;
+        return composite;
+    }
 
-	atlas.addShape(key, info);
+    const slug_t scale = 1.0_cv / cv(image->width);
 
-	return true;
-}
+    composite.advance = 1.0_cv; // normalized width is always 1
 
-CompositeShape loadImage(
-	const NSVGimage* image,
-	Atlas& atlas,
-	uint32_t& baseKey,
-	slug_t scale
-) {
-	CompositeShape composite;
+    for(const NSVGshape* shape = image->shapes; shape; shape = shape->next) {
+        if(!(shape->flags & NSVG_FLAGS_VISIBLE)) continue;
 
-	if(!image) return composite;
+        if(shape->fill.type != NSVG_PAINT_COLOR) {
+            std::cerr
+                << "slughorn::nanosvg: skipping shape with non-solid fill." << std::endl;
+            continue;
+        }
 
-	// Auto-scale from viewBox width if scale not provided.
-	if(scale <= 0.0_cv) {
-		if(image->width > 0.0f) scale = 1.0_cv / cv(image->width);
+        const Color color = colorFromNSVG(shape->fill.color);
 
-		else {
-			std::cerr
-				<< "slughorn::nanosvg::loadImage: image width is zero, "
-				<< "cannot auto-compute scale. Pass scale explicitly." << std::endl
-			;
+        if(color.a < 1e-4_cv) continue;
 
-			return composite;
-		}
-	}
+        const uint32_t key = baseKey++;
 
-	composite.advance = cv(image->width) * scale; // normalized width = 1.0
+        Matrix transform = loadShape(shape, atlas, key, scale);
 
-	for(const NSVGshape* shape = image->shapes; shape; shape = shape->next) {
-		// Skip invisible shapes.
-		if(!(shape->flags & NSVG_FLAGS_VISIBLE)) continue;
+        Layer layer;
+        layer.key       = key;
+        layer.color     = color;
+        layer.transform = transform;
+        // layer.scale is intentionally not set -- world sizing is the caller's
+        // responsibility. layer.scale remains at its default of 1.0.
 
-		// Only solid fills supported for now.
-		if(shape->fill.type != NSVG_PAINT_COLOR) {
-			std::cerr
-				<< "slughorn::nanosvg: skipping shape with non-solid fill "
-				<< "(gradient/pattern support not yet implemented)" << std::endl
-			;
+        composite.layers.push_back(layer);
+    }
 
-			continue;
-		}
-
-		const Color color = colorFromNSVG(shape->fill.color);
-
-		// Skip fully transparent shapes.
-		if(color.a < 1e-4_cv) continue;
-
-		Matrix xform;
-
-		if(!loadShape(shape, atlas, baseKey, xform, scale)) continue;
-
-		Layer layer;
-
-		layer.key = baseKey++;
-		layer.color = color;
-		layer.transform = xform;
-
-		composite.layers.push_back(layer);
-	}
-
-	return composite;
+    return composite;
 }
 
 CompositeShape loadFile(
-	const std::string& path,
-	Atlas& atlas,
-	uint32_t& baseKey,
-	slug_t scale,
-	float dpi
+    const std::string& path,
+    Atlas& atlas,
+    uint32_t& baseKey,
+    float dpi
 ) {
-	// nsvgParseFromFile requires a mutable char* path.
-	NSVGimage* image = nsvgParseFromFile(path.c_str(), "px", dpi);
+    NSVGimage* image = nsvgParseFromFile(path.c_str(), "px", dpi);
 
-	if(!image) {
-		std::cerr
-			<< "slughorn::nanosvg::loadFile: failed to parse '"
-			<< path << "'" << std::endl
-		;
+    if(!image) {
+        std::cerr
+            << "slughorn::nanosvg::loadFile: failed to parse '" << path << "'"
+            << std::endl;
+        return {};
+    }
 
-		return {};
-	}
+    CompositeShape result = loadImage(image, atlas, baseKey);
 
-	CompositeShape result = loadImage(image, atlas, baseKey, scale);
+    nsvgDelete(image);
 
-	nsvgDelete(image);
-
-	return result;
+    return result;
 }
 
 CompositeShape loadString(
-	const std::string& svg,
-	Atlas& atlas,
-	uint32_t& baseKey,
-	slug_t scale,
-	float dpi
+    const std::string& svg,
+    Atlas& atlas,
+    uint32_t& baseKey,
+    float dpi
 ) {
-	// nsvgParse requires a mutable buffer, so we copy the string.
-	std::string buf = svg;
+    std::string buf = svg;
 
-	NSVGimage* image = nsvgParse(buf.data(), "px", dpi);
+    NSVGimage* image = nsvgParse(buf.data(), "px", dpi);
 
-	if(!image) {
-		std::cerr << "slughorn::nanosvg::loadString: failed to parse SVG" << std::endl;
+    if(!image) {
+        std::cerr << "slughorn::nanosvg::loadString: failed to parse SVG" << std::endl;
+        return {};
+    }
 
-		return {};
-	}
+    CompositeShape result = loadImage(image, atlas, baseKey);
 
-	CompositeShape result = loadImage(image, atlas, baseKey, scale);
+    nsvgDelete(image);
 
-	nsvgDelete(image);
-
-	return result;
+    return result;
 }
 
-}
-}
+} // namespace nanosvg
+} // namespace slughorn
 
-#endif
+#endif // SLUGHORN_NANOSVG_IMPLEMENTATION

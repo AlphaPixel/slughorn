@@ -66,9 +66,7 @@ if(SLUGHORN_SERIAL)
 	add_subdirectory("ext/json")
 
 	target_compile_definitions(slughorn PRIVATE SLUGHORN_SERIAL_IMPLEMENTATION)
-	#target_include_directories(slughorn PRIVATE
-	#	"${CMAKE_CURRENT_SOURCE_DIR}/ext/json"
-	#)
+	target_compile_definitions(slughorn PUBLIC  SLUGHORN_HAS_SERIAL)
 	target_link_libraries(slughorn PRIVATE nlohmann_json::nlohmann_json)
 endif()
 
@@ -81,9 +79,7 @@ if(SLUGHORN_NANOSVG)
 	endif()
 
 	target_compile_definitions(slughorn PRIVATE SLUGHORN_NANOSVG_IMPLEMENTATION)
-	#target_include_directories(slughorn PRIVATE
-	#	"${CMAKE_CURRENT_SOURCE_DIR}/ext/nanosvg/src"
-	#)
+	target_compile_definitions(slughorn PUBLIC  SLUGHORN_HAS_NANOSVG)
 	target_include_directories(slughorn
 		PUBLIC
 			$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>

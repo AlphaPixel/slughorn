@@ -207,7 +207,15 @@ struct Layer {
 
 	Color color{};
 
+	// Per-layer offset in scaled units. dx/dy record where this layer's curves
+	// originated on the source canvas (set by decomposePath / loadShape). The
+	// renderer multiplies dx/dy by scale to recover object-space position.
+	// xx/yx/xy/yy are reserved for future rotation/shear support and should be
+	// left as identity for now.
 	Matrix transform = Matrix::identity();
+
+	// TODO: Document WHEN and HOW this "should" be used!
+	slug_t scale = 1.0_cv;
 
 	// Shader effect to apply when rendering this layer. 0 = standard Slug coverage fill (default,
 	// no overhead). Non-zero values select an effect branch in the fragment shader; the set of
@@ -289,24 +297,25 @@ public:
 		slug_t width = 0, height = 0;
 		slug_t advance = 0;
 
-		/* Quad computeQuad(slug_t originX, slug_t originY, slug_t scale, slug_t expand = 0.0_cv) const {
+		// Compute the world-space bounding quad for this shape.
+		//
+		// transform.dx/dy is the canvas-space origin of the shape (as returned
+		// by decomposePath / loadShape). scale converts from source units to
+		// world units. expand adds a uniform outset in world units (useful for
+		// a 1-pixel AA fringe: pass 1.0f / scale).
+		//
+		// The returned quad is relative to (0,0) — scene placement is the
+		// caller's responsibility (e.g. osg::MatrixTransform).
+		Quad computeQuad(const Matrix& transform, slug_t scale = 1.0_cv, slug_t expand = 0.0_cv) const {
+			const slug_t ox = transform.dx * scale;
+			const slug_t oy = transform.dy * scale;
 			return {
-				originX + (bearingX - expand) * scale,
-				originY + (bearingY - height - expand) * scale,
-				originX + (bearingX + width + expand) * scale,
-				originY + (bearingY + expand) * scale
-			};
-		} */
-
-		Quad computeQuad(const Matrix& transform, slug_t expand=0.0_cv) const {
-			return {
-				transform.dx + (bearingX - expand),
-				transform.dy + (bearingY - height - expand),
-				transform.dx + (bearingX + width + expand),
-				transform.dy + (bearingY + expand)
+				ox + (bearingX - expand) * scale,
+				oy + (bearingY - height - expand) * scale,
+				ox + (bearingX + width + expand) * scale,
+				oy + (bearingY + expand) * scale
 			};
 		}
-
 	};
 
 	// Descriptor passed to addShape().
@@ -592,6 +601,7 @@ inline std::ostream& operator<<(std::ostream& os, const Layer& l) {
 		<< "Layer(" << l.key
 		<< " color=" << l.color
 		<< " transform=" << l.transform
+		<< " scale=" << l.scale
 		<< " effectId=" << l.effectId << ")"
 	;
 }
