@@ -256,6 +256,8 @@ void dumpSVGFile(const std::string& path) {
 
     atlas.build();
 
+    std::cerr << "PackingStats: " << atlas.getPackingStats() << std::endl;
+
     slughorn::serial::writeJSON(atlas, std::cout);
 
     std::cout << std::endl;

@@ -354,7 +354,25 @@ void Atlas::packTextures() {
 
 	// -------------------------------------------------------------------------
 	// Pass 2: real packing
+	//
+	// Alignment wrappers record padding waste into _packingStats automatically.
 	// -------------------------------------------------------------------------
+	_packingStats = PackingStats{};
+	_packingStats.curveTexelsTotal = TEX_WIDTH * curveTexHeight;
+	_packingStats.bandTexelsTotal  = TEX_WIDTH * bandTexHeight;
+
+	auto alignCurve = [&](uint32_t cursor, uint32_t span) -> uint32_t {
+		const uint32_t aligned = alignCursorForSpan(cursor, TEX_WIDTH, span);
+		_packingStats.curveTexelsPadding += aligned - cursor;
+		return aligned;
+	};
+
+	auto alignBand = [&](uint32_t cursor, uint32_t span) -> uint32_t {
+		const uint32_t aligned = alignCursorForSpan(cursor, TEX_WIDTH, span);
+		_packingStats.bandTexelsPadding += aligned - cursor;
+		return aligned;
+	};
+
 	uint32_t curveTexelOffset = 0;
 	uint32_t bandTexelOffset = 0;
 
@@ -366,15 +384,16 @@ void Atlas::packTextures() {
 		std::vector<uint32_t> curveLocs(g.curves.size());
 
 		for(size_t ci = 0; ci < g.curves.size(); ci++) {
-			curveTexelOffset = alignCursorForSpan(curveTexelOffset, TEX_WIDTH, 2);
+			curveTexelOffset = alignCurve(curveTexelOffset, 2);
 			curveLocs[ci] = curveTexelOffset;
 
 			const auto& c = g.curves[ci];
 
-			writeCurveTexel(curveTexelOffset, c.x1, c.y1, c.x2, c.y2);
+			writeCurveTexel(curveTexelOffset,     c.x1, c.y1, c.x2, c.y2);
 			writeCurveTexel(curveTexelOffset + 1, c.x3, c.y3, 0_cv, 0_cv);
 
 			curveTexelOffset += 2;
+			_packingStats.curveTexelsUsed += 2;
 		}
 
 		// --- Band headers + lists --------------------------------------------
@@ -389,7 +408,7 @@ void Atlas::packTextures() {
 			continue;
 		}
 
-		bandTexelOffset = alignCursorForSpan(bandTexelOffset, TEX_WIDTH, numHeaders);
+		bandTexelOffset = alignBand(bandTexelOffset, numHeaders);
 
 		const uint32_t shapeStart = bandTexelOffset;
 
@@ -409,7 +428,7 @@ void Atlas::packTextures() {
 
 				if(count > TEX_WIDTH) count = 0; // truncate oversized lists
 
-				cursor = alignCursorForSpan(cursor, TEX_WIDTH, count);
+				cursor = alignBand(cursor, count);
 
 				const uint32_t hi = headerBase + b;
 
@@ -428,6 +447,8 @@ void Atlas::packTextures() {
 
 					cursor++;
 				}
+
+				_packingStats.bandTexelsUsed += count;
 			}
 		};
 
@@ -442,6 +463,8 @@ void Atlas::packTextures() {
 				0, 0
 			);
 		}
+
+		_packingStats.bandTexelsUsed += numHeaders;
 
 		bandTexelOffset = cursor;
 		_shapes[key] = sd;

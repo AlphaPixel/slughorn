@@ -366,6 +366,55 @@ public:
 	};
 
 	// --------------------------------------------------------------------------------------------
+	// Packing statistics — populated by build(), valid after isBuilt() == true.
+	//
+	// Tracks texture memory usage and alignment waste introduced by
+	// alignCursorForSpan() — the mechanism that ensures band curve lists never
+	// straddle a row boundary (required for correct Slug shader behaviour).
+	//
+	// curveTexelsUsed + curveTexelsPadding <= curveTexelsTotal
+	// (total may exceed their sum due to unused space at the end of the last row)
+	// --------------------------------------------------------------------------------------------
+	struct PackingStats {
+		// Curve texture
+		uint32_t curveTexelsUsed    = 0; // texels written with actual curve data
+		uint32_t curveTexelsPadding = 0; // texels wasted to row-alignment bumps
+		uint32_t curveTexelsTotal   = 0; // width * height (allocated)
+
+		// Band texture
+		uint32_t bandTexelsUsed    = 0;
+		uint32_t bandTexelsPadding = 0;
+		uint32_t bandTexelsTotal   = 0;
+
+		// Fraction of allocated texels actually containing live data [0, 1].
+		float curveUtilization() const {
+			return curveTexelsTotal
+				? float(curveTexelsUsed) / float(curveTexelsTotal)
+				: 0.f
+			;
+		}
+
+		float bandUtilization() const {
+			return bandTexelsTotal
+				? float(bandTexelsUsed) / float(bandTexelsTotal)
+				: 0.f
+			;
+		}
+
+		// Fraction of live texels that are padding (not curve data) [0, 1].
+		// High values suggest band count or shape ordering could be improved.
+		float curvePaddingRatio() const {
+			const uint32_t live = curveTexelsUsed + curveTexelsPadding;
+			return live ? float(curveTexelsPadding) / float(live) : 0.f;
+		}
+
+		float bandPaddingRatio() const {
+			const uint32_t live = bandTexelsUsed + bandTexelsPadding;
+			return live ? float(bandTexelsPadding) / float(live) : 0.f;
+		}
+	};
+
+	// --------------------------------------------------------------------------------------------
 	// Population (call before build())
 	// --------------------------------------------------------------------------------------------
 
@@ -407,6 +456,10 @@ public:
 
 	const TextureData& getCurveTextureData() const { return _curveData; }
 	const TextureData& getBandTextureData()  const { return _bandData; }
+
+	// Valid after build(). Reports texture utilization and alignment padding waste.
+	// See PackingStats for field documentation.
+	const PackingStats& getPackingStats() const { return _packingStats; }
 
 	// Bulk accessors — primarily for serialization (slughorn-serial.hpp) and
 	// diagnostics. Prefer getShape() / getCompositeShape() for normal use.
@@ -476,6 +529,8 @@ private:
 
 	TextureData _curveData;
 	TextureData _bandData;
+
+	PackingStats _packingStats; // populated by packTextures()
 
 	bool _built = false;
 
@@ -621,6 +676,23 @@ inline std::ostream& operator<<(std::ostream& os, const Atlas::Curve& c) {
 		<< "(" << c.x1 << "," << c.y1 << ")"
 		<< " -> (" << c.x2 << "," << c.y2 << ")"
 		<< " -> (" << c.x3 << "," << c.y3 << ")"
+		<< ")"
+	;
+}
+
+inline std::ostream& operator<<(std::ostream& os, const Atlas::PackingStats& p) {
+	return os
+		<< "PackingStats("
+		<< "curve: " << p.curveTexelsUsed << " used"
+		<< " + " << p.curveTexelsPadding << " padding"
+		<< " / " << p.curveTexelsTotal << " total"
+		<< " (" << int(p.curveUtilization() * 100.f) << "% util,"
+		<< " " << int(p.curvePaddingRatio() * 100.f) << "% pad)"
+		<< " | band: " << p.bandTexelsUsed << " used"
+		<< " + " << p.bandTexelsPadding << " padding"
+		<< " / " << p.bandTexelsTotal << " total"
+		<< " (" << int(p.bandUtilization() * 100.f) << "% util,"
+		<< " " << int(p.bandPaddingRatio() * 100.f) << "% pad)"
 		<< ")"
 	;
 }
