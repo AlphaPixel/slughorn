@@ -98,8 +98,6 @@ that Skia deliberately doesn't address.**
 
 ## Soon
 
-- [ ] Debug dump of curve counts per glyph
-- [ ] Test `numBands = 2-4` on simple arrow shape (3 curves)
 - [ ] Fix `numBands` auto-calculation — account for spatial curve distribution,
   not just count
 - [x] pybind11 wrapper
