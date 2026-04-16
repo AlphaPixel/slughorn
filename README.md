@@ -98,13 +98,20 @@ that Skia deliberately doesn't address.**
 
 ## Soon
 
+- [ ] Slug "mip-mapping"! Starting with osgSlug, introduce the ability to
+  "short-circuit" the Slug quad based on some "level of detail" rule; when the
+  shape is some threshold of distance AWAY, revert to simple texture lookup
+  approximations. NOTE: `slughorn` MIGHT be able to participate in this
+  optmization as well ... somehow
 - [ ] Fix `numBands` auto-calculation — account for spatial curve distribution,
   not just count
 - [x] pybind11 wrapper
 - [ ] Change `composites` to `compositeShapes` in serialization
+- [ ] Change the `autoMetrics` defaul to `true`
 
 ## Medium Term
 
+- [ ] Helpers for the `9-slice` method of a rounded rectangle
 - [x] `Atlas::createDefaultStateSet()` member instead of free function in
   `Drawable.hpp`
 - [ ] Sync `TEX_WIDTH` / `kLogBandTextureWidth` — uniform or shader preamble
@@ -121,6 +128,11 @@ that Skia deliberately doesn't address.**
 - [x] Conic subdivision for Skia circular geometry (`iter.conicWeight()`)
 - [x] Minimal Skia `args.gn` build config (trim from 25GB)
 - [ ] Non-square band grids (`bandMaxX != bandMaxY`)
+- [ ] Layer::scale — evaluate for removal; currently only meaningful for
+  FT2/text. All geometry backends leave it at 1.0. If osgSlug::Font /
+  osgSlug::Text take full ownership of font-size-to-world scaling, Layer::scale
+  becomes dead weight and computeQuad could take scale as a call-site parameter
+  instead. Defer until text pipeline stabilizes.
 
 ## Someday / Fun
 

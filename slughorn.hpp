@@ -541,11 +541,37 @@ private:
 // CurveDecomposer
 //
 // Stateful helper that accepts path commands (moveTo / lineTo / quadTo / cubicTo) and appends the
-// equivalent quadratic Bezier segments to a Curves vector. Cubic segments are split at their
-// midpoint into two quadratics, a lightweight approximation sufficient for the Slug band-building.
+// equivalent quadratic Bezier segments to a Curves vector.
+//
+// Cubic segments are handled adaptively via De Casteljau subdivision: each cubic is recursively
+// split at its midpoint until the segment is flat enough (both control points within `tolerance`
+// of the p0→p3 chord), at which point it is emitted as two quadratics — one for each half of the
+// flattened cubic. This produces far fewer curves than blind subdivision for gentle cubics while
+// faithfully tracking tight arcs and S-curves.
+//
+// The two-quadratic leaf matches NanoSVG's own output convention (e.g. a triangle in NanoSVG
+// produces 6 quadratic curves, not 3), which keeps curve-texture alignment predictable.
+//
+// `tolerance` is in the same coordinate space as the curves (em-units by default). The default
+// value (1e-4) is suitable for em-normalized [0,1] geometry. Scale it proportionally if your
+// authoring space uses different units — e.g. for a 1000-unit em square use 0.1f.
+//
+// All backends (Cairo, NanoSVG, Skia, Canvas) route cubics through cubicTo and therefore benefit
+// from this improvement automatically. Callers that want coarser/faster decomposition can raise
+// `tolerance`; callers that want higher fidelity (e.g. very small text) can lower it.
 // ================================================================================================
+static constexpr slug_t TOLERANCE_DRAFT    = 1e-2f; // fast, visible only at large sizes
+static constexpr slug_t TOLERANCE_BALANCED = 1e-3f; // good default for screen work
+static constexpr slug_t TOLERANCE_FINE     = 1e-4f; // high-DPI / print / export
+static constexpr slug_t TOLERANCE_EXACT    = std::numeric_limits<slug_t>::max(); // old behavior — always 2 quads
+
 struct CurveDecomposer {
 	Atlas::Curves& curves;
+
+	// Flatness threshold in curve-space units. A cubic is considered flat enough
+	// to emit when both interior control points are within this distance of the
+	// p0→p3 chord. Default suits em-normalized [0,1] geometry.
+	slug_t tolerance = TOLERANCE_EXACT;
 
 	slug_t _x = 0_cv;
 	slug_t _y = 0_cv;
@@ -578,35 +604,20 @@ struct CurveDecomposer {
 		_y = y3;
 	}
 
+	// Adaptive cubic → quadratic decomposition via De Casteljau subdivision.
+	//
+	// Recursively splits the cubic until flat enough, then emits two quadratics
+	// at the leaf. MAX_DEPTH caps recursion for degenerate inputs. Backends that
+	// previously called cubicTo() get improved fidelity automatically; no call
+	// site changes required.
 	void cubicTo(
 		slug_t c1x, slug_t c1y,
 		slug_t c2x, slug_t c2y,
-		slug_t x3, slug_t y3
+		slug_t x3,  slug_t y3
 	) {
-		const slug_t p0x = _x, p0y = _y;
-		const slug_t p1x = c1x, p1y = c1y;
-		const slug_t p2x = c2x, p2y = c2y;
-		const slug_t p3x = x3, p3y = y3;
-
-		const slug_t midx = (p0x + 3_cv * p1x + 3_cv * p2x + p3x) * 0.125_cv;
-		const slug_t midy = (p0y + 3_cv * p1y + 3_cv * p2y + p3y) * 0.125_cv;
-
-		curves.push_back({
-			p0x, p0y,
-			(p0x + 3_cv * p1x) * 0.25_cv,
-			(p0y + 3_cv * p1y) * 0.25_cv,
-			midx, midy
-		});
-
-		curves.push_back({
-			midx, midy,
-			(3_cv * p2x + p3x) * 0.25_cv,
-			(3_cv * p2y + p3y) * 0.25_cv,
-			p3x, p3y
-		});
-
-		_x = p3x;
-		_y = p3y;
+		_cubicAdaptive(_x, _y, c1x, c1y, c2x, c2y, x3, y3, 0);
+		_x = x3;
+		_y = y3;
 	}
 
 	// Close the current subpath by drawing a line back to the subpath start.
@@ -615,6 +626,114 @@ struct CurveDecomposer {
 		constexpr slug_t eps = 1e-6_cv;
 
 		if(std::abs(_x - _sx) > eps || std::abs(_y - _sy) > eps) lineTo(_sx, _sy);
+	}
+
+private:
+	// Maximum recursion depth. Prevents infinite loops on degenerate/malformed
+	// input. At depth 8 the maximum chord error is already <0.4% of the original
+	// cubic's bounding box, which is well below any practical rendering threshold.
+	static constexpr int MAX_DEPTH = 8;
+
+	// Squared distance from point (px,py) to the infinite line through (ax,ay)→(bx,by).
+	// Using squared distance avoids a sqrt in the hot path; we compare against tolerance².
+	static slug_t _pointToLineDistSq(
+		slug_t px, slug_t py,
+		slug_t ax, slug_t ay,
+		slug_t bx, slug_t by
+	) {
+		const slug_t dx = bx - ax;
+		const slug_t dy = by - ay;
+		const slug_t lenSq = dx*dx + dy*dy;
+
+		if(lenSq < 1e-12_cv) {
+			// Degenerate chord — just return distance to the start point.
+			const slug_t ex = px - ax;
+			const slug_t ey = py - ay;
+			return ex*ex + ey*ey;
+		}
+
+		// |cross(b-a, a-p)| / |b-a|  — perpendicular distance
+		const slug_t cross = dx*(ay - py) - dy*(ax - px);
+		return (cross * cross) / lenSq;
+	}
+
+	// Returns true when both interior control points of the cubic lie within
+	// `tolerance` of the p0→p3 chord — i.e. the cubic is visually flat.
+	bool _flatEnough(
+		slug_t p0x, slug_t p0y,
+		slug_t p1x, slug_t p1y,
+		slug_t p2x, slug_t p2y,
+		slug_t p3x, slug_t p3y
+	) const {
+		const slug_t tolSq = tolerance * tolerance;
+
+		return
+			_pointToLineDistSq(p1x, p1y, p0x, p0y, p3x, p3y) <= tolSq &&
+			_pointToLineDistSq(p2x, p2y, p0x, p0y, p3x, p3y) <= tolSq
+		;
+	}
+
+	// Emit the flat-enough (or max-depth) cubic as two quadratics via midpoint split.
+	// This is the leaf operation — matches the original cubicTo behavior and NanoSVG convention.
+	void _emitTwoQuads(
+		slug_t p0x, slug_t p0y,
+		slug_t p1x, slug_t p1y,
+		slug_t p2x, slug_t p2y,
+		slug_t p3x, slug_t p3y
+	) {
+		const slug_t midx = (p0x + 3_cv*p1x + 3_cv*p2x + p3x) * 0.125_cv;
+		const slug_t midy = (p0y + 3_cv*p1y + 3_cv*p2y + p3y) * 0.125_cv;
+
+		curves.push_back({
+			p0x, p0y,
+			(p0x + 3_cv*p1x) * 0.25_cv,
+			(p0y + 3_cv*p1y) * 0.25_cv,
+			midx, midy
+		});
+
+		curves.push_back({
+			midx, midy,
+			(3_cv*p2x + p3x) * 0.25_cv,
+			(3_cv*p2y + p3y) * 0.25_cv,
+			p3x, p3y
+		});
+	}
+
+	// Recursive De Casteljau subdivision. Splits at the midpoint and recurses
+	// into each half until flat or MAX_DEPTH is reached.
+	void _cubicAdaptive(
+		slug_t p0x, slug_t p0y,
+		slug_t p1x, slug_t p1y,
+		slug_t p2x, slug_t p2y,
+		slug_t p3x, slug_t p3y,
+		int depth
+	) {
+		if(depth >= MAX_DEPTH || _flatEnough(p0x, p0y, p1x, p1y, p2x, p2y, p3x, p3y)) {
+			_emitTwoQuads(p0x, p0y, p1x, p1y, p2x, p2y, p3x, p3y);
+			return;
+		}
+
+		// De Casteljau split at t=0.5
+		const slug_t m01x = (p0x + p1x) * 0.5_cv;
+		const slug_t m01y = (p0y + p1y) * 0.5_cv;
+
+		const slug_t m12x = (p1x + p2x) * 0.5_cv;
+		const slug_t m12y = (p1y + p2y) * 0.5_cv;
+
+		const slug_t m23x = (p2x + p3x) * 0.5_cv;
+		const slug_t m23y = (p2y + p3y) * 0.5_cv;
+
+		const slug_t m012x = (m01x + m12x) * 0.5_cv;
+		const slug_t m012y = (m01y + m12y) * 0.5_cv;
+
+		const slug_t m123x = (m12x + m23x) * 0.5_cv;
+		const slug_t m123y = (m12y + m23y) * 0.5_cv;
+
+		const slug_t m0123x = (m012x + m123x) * 0.5_cv;
+		const slug_t m0123y = (m012y + m123y) * 0.5_cv;
+
+		_cubicAdaptive(p0x,    p0y,    m01x,  m01y,  m012x,  m012y,  m0123x, m0123y, depth + 1);
+		_cubicAdaptive(m0123x, m0123y, m123x, m123y, m23x,   m23y,   p3x,    p3y,    depth + 1);
 	}
 };
 

@@ -791,7 +791,8 @@ if __name__ == "__main__":
         atlas = slughorn.Atlas()
         info  = slughorn.ShapeInfo()
 
-        info.num_bands = 2
+        info.num_bands_x = 2
+        info.num_bands_y = 2
         info.curves = [
             slughorn.Curve(0.0, 0.0, 0.5, 0.35, 1.0, 0.0),
             slughorn.Curve(1.0, 0.0, 0.75, 0.35, 0.5, 0.7),

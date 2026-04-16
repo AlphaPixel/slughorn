@@ -50,6 +50,10 @@
 #include "slughorn.hpp"
 #include "slughorn-emoji.hpp"
 
+#ifdef SLUGHORN_HAS_SERIAL
+#include "slughorn-serial.hpp"
+#endif
+
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>       // std::vector, std::optional
 #include <pybind11/functional.h>
@@ -217,6 +221,13 @@ PYBIND11_MODULE(slughorn, m) {
         .def_readwrite("transform", &slughorn::Layer::transform,
             "Local-coords affine transform.  dx/dy carry the canvas offset; "
             "xx/yx/xy/yy carry any additional rotation/scale (COLRv1 paint nodes).")
+        .def_readwrite("scale", &slughorn::Layer::scale,
+            "World-scale multiplier.\n"
+            "  Text / FreeType2: set to the font size in world units (e.g. 0.1 for\n"
+            "    a glyph that should be 0.1 world-units tall).  computeQuad() and\n"
+            "    compile() both read this value.\n"
+            "  SVG / Cairo / NanoSVG: leave at the default of 1.0 — curves are\n"
+            "    already em-normalised by the backend.")
         .def_readwrite("effect_id", &slughorn::Layer::effectId,
             "Fragment-shader fill mode selector.  "
             "0 = standard Slug fill (default).  "
@@ -425,6 +436,7 @@ PYBIND11_MODULE(slughorn, m) {
             py::arg("key"),
             "Return True if key is registered (shape, composite, or pending build).")
 
+#if 0
         // Bulk accessors — primarily for slughorn_serial.py
         .def("get_shapes",
             [](const slughorn::Atlas& a) {
@@ -444,6 +456,7 @@ PYBIND11_MODULE(slughorn, m) {
             },
             "Return a dict of all {Key: CompositeShape} entries. "
             "Primarily used by slughorn_serial for serialization.")
+#endif
 
         // --- Texture access --------------------------------------------------
         //
@@ -496,6 +509,38 @@ PYBIND11_MODULE(slughorn, m) {
             return d.getCurves().size();
         }, "Number of curves accumulated so far.")
     ;
+
+    // =========================================================================
+    // Serial I/O  (only present when built with SLUGHORN_SERIAL=ON)
+    // =========================================================================
+#ifdef SLUGHORN_HAS_SERIAL
+    m.def("read",
+        [](const std::string& path) {
+            // serial::read() returns Atlas by value; move into a shared_ptr so
+            // Python's ref-counting and C++'s shared_ptr cooperate correctly.
+            return std::make_shared<slughorn::Atlas>(
+                slughorn::serial::read(path)
+            );
+        },
+        py::arg("path"),
+        "Load a .slug (JSON) or .slugb (binary) atlas file.\n"
+        "Format is auto-detected from the file header ('{' → JSON, 'S' → binary).\n"
+        "Returns a fully-built Atlas — is_built is True immediately.\n"
+        "Raises RuntimeError if the file cannot be opened or the format is invalid.\n"
+        "Only available when slughorn was compiled with SLUGHORN_SERIAL=ON.")
+    ;
+
+    m.def("write",
+        [](const slughorn::Atlas& atlas, const std::string& path) {
+            slughorn::serial::write(atlas, path);
+        },
+        py::arg("atlas"), py::arg("path"),
+        "Write a built Atlas to disk.\n"
+        "Extension determines format: .slug → JSON + base64, .slugb → binary.\n"
+        "Raises RuntimeError if the atlas is not built or the file cannot be written.\n"
+        "Only available when slughorn was compiled with SLUGHORN_SERIAL=ON.")
+    ;
+#endif
 
     // =========================================================================
     // slughorn.emoji  submodule
