@@ -142,6 +142,28 @@ the CurveDecomposer upgrade. Name chosen to signal "read the comment."
 
 ## TODO — Near term
 
+### arcTo() — investigate bridge seam artifact
+Confirmed bug (Day 8): arcTo() produces visually detached corner circles when
+used for axis-aligned rounded rectangles, even with correct proportions.
+Root cause: the bridging lineTo() inside arcTo() that connects the current
+point to the arc's start tangent point is not landing flush with the prior
+edge endpoint. The tangent point math may be slightly off, or the implicit
+lineTo() is creating a visible micro-gap at the seam.
+
+Workaround: use roundedRect() for axis-aligned rounded rectangles — confirmed
+working correctly (Day 8). arcTo() is safe for irregular paths where edges
+meet at non-right angles.
+
+Debug approach: write a minimal test case — single right-angle corner via
+two lineTo() calls followed by one arcTo() — and verify that:
+  1. The tangent point on leg 0 (current→p1) lands exactly at the end of
+     the prior lineTo()
+  2. The bridging lineTo() is zero-length (i.e. current point IS already
+     at the tangent point)
+  3. The arc end point lands exactly where the next lineTo() begins
+Compare against HTML Canvas arcTo() reference implementation for the same
+coordinates. The KAPPA90 corner math in roundedRect() is the proven baseline.
+
 ### Tests
 Tests were not written during Day 8 — this is the most important near-term task.
 See test cases section at the bottom of this file.
@@ -264,7 +286,8 @@ slughorn-canvas.hpp or CurveDecomposer. The canonical prompt is:
 - arcTo() degenerate (r=0) → falls back to lineTo(x1,y1), no crash
 - arcTo() collinear points → falls back to lineTo(x1,y1), no crash
 - arcTo() zero-length leg → falls back to lineTo(x1,y1), no crash
-- Stadium shape (4× arcTo) → confirmed working in Day 8 testing
+- arcTo() right-angle corner → bridge lineTo() must be zero-length when
+  current point is already on the tangent (regression test for Day 8 artifact)
 
 ### Adaptive subdivision
 - High-curvature cubic (tight S-curve) → more than 2 quads at BALANCED

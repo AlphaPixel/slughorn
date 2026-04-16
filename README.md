@@ -111,6 +111,7 @@ that Skia deliberately doesn't address.**
 
 ## Medium Term
 
+- [ ] Allow `serial::writeJSON` for ANY object (not JUST `Atlas`)
 - [ ] Helpers for the `9-slice` method of a rounded rectangle
 - [x] `Atlas::createDefaultStateSet()` member instead of free function in
   `Drawable.hpp`
