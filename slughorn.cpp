@@ -11,9 +11,9 @@
 #include <algorithm>
 #include <cstring>
 
-// =============================================================================
+// ================================================================================================
 // File-local helpers
-// =============================================================================
+// ================================================================================================
 namespace {
 
 bool curveIntersectsBandY(const slughorn::Atlas::Curve& c, slug_t lo, slug_t hi) {
@@ -30,10 +30,10 @@ bool curveIntersectsBandX(const slughorn::Atlas::Curve& c, slug_t lo, slug_t hi)
 	return maxX >= lo && minX <= hi;
 }
 
-// Advance @p cursor so that a span of @p span texels fits without crossing a
-// row boundary in a texture of @p width texels.
+// Advance @p cursor so that a span of @p span texels fits without crossing a row boundary in a
+// texture of @p width texels.
 uint32_t alignCursorForSpan(uint32_t cursor, uint32_t width, uint32_t span) {
-	if(span == 0) return cursor;
+	if(!span) return cursor;
 
 	const uint32_t x = cursor % width;
 
@@ -49,16 +49,14 @@ namespace slughorn {
 Atlas::Atlas() = default;
 Atlas::~Atlas() = default;
 
-// =============================================================================
+// ================================================================================================
 // Atlas::addShape
-// =============================================================================
+// ================================================================================================
 
 void Atlas::addShape(Key key, const ShapeInfo& desc) {
-	if(_built) {
-		// No logging available in this layer — callers should check isBuilt()
-		// before calling addShape() if they need to diagnose this condition.
-		return;
-	}
+	// No logging available in this layer; callers should check isBuilt() before calling addShape()
+	// if they need to diagnose this condition.
+	if(_built) return;
 
 	ShapeBuild build;
 
@@ -72,32 +70,25 @@ void Atlas::addShape(Key key, const ShapeInfo& desc) {
 		build.metrics.advance = desc.advance;
 	}
 
-	// Clamp negative values to 0 (auto) — the signed sentinel is an API
-	// convenience; internally we always work with uint32_t.
-	const uint32_t numBandsX = desc.numBandsX > 0
-		? static_cast<uint32_t>(desc.numBandsX)
-		: 0u
-	;
-
-	const uint32_t numBandsY = desc.numBandsY > 0
-		? static_cast<uint32_t>(desc.numBandsY)
-		: 0u
-	;
+	// Clamp negative values to 0 (auto); the signed sentinel is an API convenience; internally we
+	// always work with uint32_t.
+	const uint32_t numBandsX = desc.numBandsX > 0 ? static_cast<uint32_t>(desc.numBandsX) : 0u;
+	const uint32_t numBandsY = desc.numBandsY > 0 ? static_cast<uint32_t>(desc.numBandsY) : 0u;
 
 	buildShapeBands(key, build, numBandsX, numBandsY, /*overrideMetrics=*/!desc.autoMetrics);
 }
 
-// =============================================================================
+// ================================================================================================
 // Atlas::addCompositeShape
-// =============================================================================
+// ================================================================================================
 
 void Atlas::addCompositeShape(Key key, CompositeShape composite) {
 	_compositeShapes[key] = std::move(composite);
 }
 
-// =============================================================================
+// ================================================================================================
 // Atlas::build
-// =============================================================================
+// ================================================================================================
 
 void Atlas::build() {
 	if(_built) return;
@@ -107,9 +98,9 @@ void Atlas::build() {
 	_built = true;
 }
 
-// =============================================================================
+// ================================================================================================
 // Atlas::getShape
-// =============================================================================
+// ================================================================================================
 
 const Atlas::Shape* Atlas::getShape(Key key) const {
 	const auto it = _shapes.find(key);
@@ -117,9 +108,9 @@ const Atlas::Shape* Atlas::getShape(Key key) const {
 	return it != _shapes.end() ? &it->second : nullptr;
 }
 
-// =============================================================================
+// ================================================================================================
 // Atlas::getCompositeShape
-// =============================================================================
+// ================================================================================================
 
 const CompositeShape* Atlas::getCompositeShape(Key key) const {
 	const auto it = _compositeShapes.find(key);
@@ -127,9 +118,9 @@ const CompositeShape* Atlas::getCompositeShape(Key key) const {
 	return it != _compositeShapes.end() ? &it->second : nullptr;
 }
 
-// =============================================================================
+// ================================================================================================
 // Atlas::buildShapeBands
-// =============================================================================
+// ================================================================================================
 
 void Atlas::buildShapeBands(
 	Key key,
@@ -146,27 +137,26 @@ void Atlas::buildShapeBands(
 
 	const size_t numCurves = build.curves.size();
 
-	// -------------------------------------------------------------------------
+	// --------------------------------------------------------------------------------------------
 	// Auto band counts
 	//
-	// When 0, pick independently per axis. Currently hardcoded for testing —
+	// When 0, pick independently per axis. Currently hardcoded for testing --
 	// automatic aspect-ratio-aware calculation to follow once we've validated
 	// the non-square grid plumbing with known good values.
 	// -------------------------------------------------------------------------
-	if(numBandsX == 0) {
-		numBandsX = static_cast<uint32_t>(
-			std::min(size_t(16), std::max(size_t(1), numCurves / 2))
-		);
-	}
+	// --------------------------------------------------------------------------------------------
+	if(numBandsX == 0) numBandsX = static_cast<uint32_t>(
+		std::min(size_t(16), std::max(size_t(1), numCurves / 2))
+	);
 
-	if(numBandsY == 0) {
-		numBandsY = static_cast<uint32_t>(
-			std::min(size_t(16), std::max(size_t(1), numCurves / 2))
-		);
-	}
+	if(numBandsY == 0) numBandsY = static_cast<uint32_t>(
+		std::min(size_t(16), std::max(size_t(1), numCurves / 2))
+	);
 
 	// -------------------------------------------------------------------------
+	// --------------------------------------------------------------------------------------------
 	// Bounding box
+	// --------------------------------------------------------------------------------------------
 	// -------------------------------------------------------------------------
 	slug_t minX = 1e9_cv, minY = 1e9_cv;
 	slug_t maxX = -1e9_cv, maxY = -1e9_cv;
@@ -184,9 +174,9 @@ void Atlas::buildShapeBands(
 	if(rangeX < 1e-6_cv) rangeX = 1e-6_cv;
 	if(rangeY < 1e-6_cv) rangeY = 1e-6_cv;
 
-	// -------------------------------------------------------------------------
+	// --------------------------------------------------------------------------------------------
 	// Derive metrics from bounding box when not overridden
-	// -------------------------------------------------------------------------
+	// --------------------------------------------------------------------------------------------
 	if(!overrideMetrics) {
 		build.metrics.width = rangeX;
 		build.metrics.height = rangeY;
@@ -195,19 +185,19 @@ void Atlas::buildShapeBands(
 		build.metrics.advance = rangeX;
 	}
 
-	// -------------------------------------------------------------------------
-	// Band transform — X and Y now use independent band counts
-	// -------------------------------------------------------------------------
-	build.metrics.bandScaleX  = cv(numBandsX) / rangeX;
-	build.metrics.bandScaleY  = cv(numBandsY) / rangeY;
+	// --------------------------------------------------------------------------------------------
+	// Band transform
+	// --------------------------------------------------------------------------------------------
+	build.metrics.bandScaleX = cv(numBandsX) / rangeX;
+	build.metrics.bandScaleY = cv(numBandsY) / rangeY;
 	build.metrics.bandOffsetX = -minX * build.metrics.bandScaleX;
 	build.metrics.bandOffsetY = -minY * build.metrics.bandScaleY;
-	build.metrics.bandMaxX    = numBandsX - 1;
-	build.metrics.bandMaxY    = numBandsY - 1;
+	build.metrics.bandMaxX = numBandsX - 1;
+	build.metrics.bandMaxY = numBandsY - 1;
 
-	// -------------------------------------------------------------------------
-	// Horizontal bands (sliced along Y) — numBandsY slices
-	// -------------------------------------------------------------------------
+	// --------------------------------------------------------------------------------------------
+	// Horizontal bands (sliced along Y) - numBandsY slices
+	// --------------------------------------------------------------------------------------------
 	build.hbands.resize(numBandsY);
 
 	const slug_t bandHeightY = rangeY / cv(numBandsY);
@@ -221,19 +211,29 @@ void Atlas::buildShapeBands(
 			if(curveIntersectsBandY(build.curves[ci], lo, hi)) band.curveIndices.push_back(ci);
 		}
 
-		std::sort(band.curveIndices.begin(), band.curveIndices.end(), [&](size_t a, size_t b_) {
-			const slug_t mA = std::max({build.curves[a].x1, build.curves[a].x2, build.curves[a].x3});
-			const slug_t mB = std::max({build.curves[b_].x1, build.curves[b_].x2, build.curves[b_].x3});
+		std::sort(band.curveIndices.begin(), band.curveIndices.end(), [&](size_t l, size_t r) {
+			/* const slug_t mA = std::max({build.curves[l].x1, build.curves[l].x2, build.curves[l].x3});
+			const slug_t mB = std::max({build.curves[r].x1, build.curves[r].x2, build.curves[r].x3});
 
-			return mA > mB;
+			return mA > mB; */
+
+			return std::max({
+				build.curves[l].x1,
+				build.curves[l].x2,
+				build.curves[l].x3
+			}) > std::max({
+				build.curves[r].x1,
+				build.curves[r].x2,
+				build.curves[r].x3
+			});
 		});
 
 		band.curveCount = static_cast<uint16_t>(band.curveIndices.size());
 	}
 
-	// -------------------------------------------------------------------------
-	// Vertical bands (sliced along X) — numBandsX slices
-	// -------------------------------------------------------------------------
+	// --------------------------------------------------------------------------------------------
+	// Vertical bands (sliced along X) - numBandsX slices
+	// --------------------------------------------------------------------------------------------
 	build.vbands.resize(numBandsX);
 
 	const slug_t bandWidthX = rangeX / cv(numBandsX);
@@ -247,11 +247,30 @@ void Atlas::buildShapeBands(
 			if(curveIntersectsBandX(build.curves[ci], lo, hi)) band.curveIndices.push_back(ci);
 		}
 
-		std::sort(band.curveIndices.begin(), band.curveIndices.end(), [&](size_t a, size_t b_) {
-			const slug_t mA = std::max({build.curves[a].y1, build.curves[a].y2, build.curves[a].y3});
-			const slug_t mB = std::max({build.curves[b_].y1, build.curves[b_].y2, build.curves[b_].y3});
+		std::sort(band.curveIndices.begin(), band.curveIndices.end(), [&](size_t l, size_t r) {
+			/* const slug_t mA = std::max({
+				build.curves[l].y1,
+				build.curves[l].y2,
+				build.curves[l].y3
+			});
 
-			return mA > mB;
+			const slug_t mB = std::max({
+				build.curves[r].y1,
+				build.curves[r].y2,
+				build.curves[r].y3
+			});
+
+			return mA > mB; */
+
+			return std::max({
+				build.curves[l].y1,
+				build.curves[l].y2,
+				build.curves[l].y3
+			}) > std::max({
+				build.curves[r].y1,
+				build.curves[r].y2,
+				build.curves[r].y3
+			});
 		});
 
 		band.curveCount = static_cast<uint16_t>(band.curveIndices.size());
@@ -260,17 +279,17 @@ void Atlas::buildShapeBands(
 	_build[key] = build;
 }
 
-// =============================================================================
+// ================================================================================================
 // Atlas::packTextures
 //
 // Two-pass layout (measure, then write) identical to the original, but writing
 // into TextureData::bytes instead of osg::Image pixel buffers.
-// =============================================================================
+// ================================================================================================
 
 void Atlas::packTextures() {
-	// -------------------------------------------------------------------------
+	// --------------------------------------------------------------------------------------------
 	// Pass 1: measure curve texture height
-	// -------------------------------------------------------------------------
+	// --------------------------------------------------------------------------------------------
 	uint32_t totalCurveTexels = 0;
 
 	for(const auto& kv : _build) {
@@ -285,12 +304,13 @@ void Atlas::packTextures() {
 	_curveData.width = TEX_WIDTH;
 	_curveData.height = curveTexHeight;
 	_curveData.format = TextureData::Format::RGBA32F;
+
 	// 4 floats per texel
 	_curveData.bytes.assign(size_t(TEX_WIDTH) * curveTexHeight * 4 * sizeof(float), 0);
 
-	// -------------------------------------------------------------------------
+	// --------------------------------------------------------------------------------------------
 	// Pass 1: measure band texture height
-	// -------------------------------------------------------------------------
+	// --------------------------------------------------------------------------------------------
 	uint32_t totalBandTexels = 0;
 
 	for(const auto& kv : _build) {
@@ -298,6 +318,7 @@ void Atlas::packTextures() {
 		const uint32_t numHeaders = static_cast<uint32_t>(g.hbands.size() + g.vbands.size());
 
 		totalBandTexels = alignCursorForSpan(totalBandTexels, TEX_WIDTH, numHeaders);
+
 		uint32_t cursor = totalBandTexels + numHeaders;
 
 		auto measureList = [&](const std::vector<BandEntry>& bands) {
@@ -320,12 +341,13 @@ void Atlas::packTextures() {
 	_bandData.width = TEX_WIDTH;
 	_bandData.height = bandTexHeight;
 	_bandData.format = TextureData::Format::RGBA16UI;
+
 	// 4 uint16_t per texel
 	_bandData.bytes.assign(size_t(TEX_WIDTH) * bandTexHeight * 4 * sizeof(uint16_t), 0);
 
-	// -------------------------------------------------------------------------
-	// Write helpers — write directly into TextureData::bytes
-	// -------------------------------------------------------------------------
+	// --------------------------------------------------------------------------------------------
+	// Write helpers - write directly into TextureData::bytes
+	// --------------------------------------------------------------------------------------------
 	auto writeCurveTexel = [&](uint32_t idx, slug_t r, slug_t g, slug_t b, slug_t a) {
 		const uint32_t x = idx % TEX_WIDTH;
 		const uint32_t y = idx / TEX_WIDTH;
@@ -352,24 +374,28 @@ void Atlas::packTextures() {
 		p[0] = r; p[1] = g; p[2] = b; p[3] = a;
 	};
 
-	// -------------------------------------------------------------------------
+	// --------------------------------------------------------------------------------------------
 	// Pass 2: real packing
 	//
 	// Alignment wrappers record padding waste into _packingStats automatically.
-	// -------------------------------------------------------------------------
+	// --------------------------------------------------------------------------------------------
 	_packingStats = PackingStats{};
 	_packingStats.curveTexelsTotal = TEX_WIDTH * curveTexHeight;
-	_packingStats.bandTexelsTotal  = TEX_WIDTH * bandTexHeight;
+	_packingStats.bandTexelsTotal = TEX_WIDTH * bandTexHeight;
 
 	auto alignCurve = [&](uint32_t cursor, uint32_t span) -> uint32_t {
 		const uint32_t aligned = alignCursorForSpan(cursor, TEX_WIDTH, span);
+
 		_packingStats.curveTexelsPadding += aligned - cursor;
+
 		return aligned;
 	};
 
 	auto alignBand = [&](uint32_t cursor, uint32_t span) -> uint32_t {
 		const uint32_t aligned = alignCursorForSpan(cursor, TEX_WIDTH, span);
+
 		_packingStats.bandTexelsPadding += aligned - cursor;
+
 		return aligned;
 	};
 
@@ -380,7 +406,7 @@ void Atlas::packTextures() {
 		const Key& key = kv.first;
 		auto& g = kv.second;
 
-		// --- Curves -----------------------------------------------------------
+		// Curves
 		std::vector<uint32_t> curveLocs(g.curves.size());
 
 		for(size_t ci = 0; ci < g.curves.size(); ci++) {
@@ -389,24 +415,22 @@ void Atlas::packTextures() {
 
 			const auto& c = g.curves[ci];
 
-			writeCurveTexel(curveTexelOffset,     c.x1, c.y1, c.x2, c.y2);
+			writeCurveTexel(curveTexelOffset, c.x1, c.y1, c.x2, c.y2);
 			writeCurveTexel(curveTexelOffset + 1, c.x3, c.y3, 0_cv, 0_cv);
 
 			curveTexelOffset += 2;
 			_packingStats.curveTexelsUsed += 2;
 		}
 
-		// --- Band headers + lists --------------------------------------------
+		// Band headers + lists
 		Shape sd = g.metrics;
 
 		const uint32_t numHBands = static_cast<uint32_t>(g.hbands.size());
 		const uint32_t numVBands = static_cast<uint32_t>(g.vbands.size());
 		const uint32_t numHeaders = numHBands + numVBands;
 
-		if(numHeaders > TEX_WIDTH) {
-			// Skip this shape — header block would exceed a full texture row.
-			continue;
-		}
+		// Skip this shape; header block would exceed a full texture row.
+		if(numHeaders > TEX_WIDTH) continue;
 
 		bandTexelOffset = alignBand(bandTexelOffset, numHeaders);
 
@@ -426,7 +450,8 @@ void Atlas::packTextures() {
 				const auto& band = bands[b];
 				uint32_t count = static_cast<uint32_t>(band.curveIndices.size());
 
-				if(count > TEX_WIDTH) count = 0; // truncate oversized lists
+				// truncate oversized lists
+				if(count > TEX_WIDTH) count = 0;
 
 				cursor = alignBand(cursor, count);
 

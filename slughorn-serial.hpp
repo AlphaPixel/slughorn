@@ -600,14 +600,14 @@ Atlas read(std::istream& in) {
 	const int first = in.peek();
 
 	if(first == '{') {
-		// .slug — JSON
+		// .slug (JSON)
 		json j = json::parse(in);
 
 		return atlasFromJson(j, nullptr);
 	}
 
 	if(first == 'S') {
-		// .slugb - binary container
+		// .slugb (binary container)
 		const uint32_t magic = readU32LE(in);
 		const uint32_t version = readU32LE(in);
 		// TODO: This is related to the TODO below; why aren't we validating?

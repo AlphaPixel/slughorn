@@ -35,9 +35,9 @@ while preserving:
 
 Returns a C++-constructed object containing:
 
-- `curves`   — `vector<Curve>` (same data as Python tuples today)
-- `hbands`   — `vector<vector<uint32_t>>`
-- `vbands`   — `vector<vector<uint32_t>>`
+- `curves` - `vector<Curve>` (same data as Python tuples today)
+- `hbands` - `vector<vector<uint32_t>>`
+- `vbands` - `vector<vector<uint32_t>>`
 - band transform parameters:
   - `band_scale_x`, `band_scale_y`
   - `band_offset_x`, `band_offset_y`

@@ -23,6 +23,9 @@ constexpr slug_t cv(auto x) {
 	return static_cast<slug_t>(x);
 }
 
+// TODO: Something like `slugi_t` for `uint32_t`, since it SEEMS to be the only non-float type
+// we're using (beyond `size_t`).
+
 namespace slughorn {
 
 // ================================================================================================
@@ -48,8 +51,8 @@ struct Color {
 //
 // The transform maps a point (x, y) as:
 //
-//   x' = xx*x + xy*y + dx
-//   y' = yx*x + yy*y + dy
+// x' = xx * x + xy * y + dx
+// y' = yx * x + yy * y + dy
 //
 // xx/yx/xy/yy are dimensionless ratios (already divided by 65536 for FreeType callers). dx/dy are
 // in the same coordinate space as the points being transformed (em-units for glyph work).
@@ -112,9 +115,10 @@ class Atlas;
 //
 // Discriminated union identifying a shape or composite shape in the Atlas. Two flavors:
 //
-//   Key::fromCodepoint(cp) - a Unicode codepoint (or any uint32_t ID). Implicitly constructible
-//                            from uint32_t for backwards compatibility with existing call sites.
-//   Key::fromString(name) - a named shape / composite ("logo", "axolotl", ...)
+// Key::fromCodepoint(cp) - a Unicode codepoint (or any uint32_t ID). Implicitly constructible from
+// uint32_t for backwards compatibility with existing call sites.
+//
+// Key::fromString(name) - a named shape / composite ("logo", "axolotl", ...)
 //
 // The hash is computed once at construction and stored; KeyHash just returns it. operator== uses
 // the hash as a fast pre-check, then falls back to value comparison. The two namespaces are kept
@@ -155,11 +159,11 @@ struct Key {
 	size_t hash() const { return _hash; }
 
 	// Equality
-
 	bool operator==(const Key& o) const {
 		if(_hash != o._hash) return false;
 		if(_type != o._type) return false;
 		if(_type == Type::Codepoint) return _codepoint == o._codepoint;
+
 		return _name == o._name;
 	}
 
@@ -221,10 +225,10 @@ struct Layer {
 	// no overhead). Non-zero values select an effect branch in the fragment shader; the set of
 	// valid IDs and their semantics are defined there. For example, something like:
 	//
-	//   0 - standard fill (color * slug coverage); this should ALWAYS be the 0/default
-	//   1 - texture fill (texture(slug_effectTexture, v_emCoord) * slug coverage)
-	//   2 - GLSL procedural
-	//   3 - Etc, etc.
+	// 0 - standard fill (color * slug coverage); this should ALWAYS be the 0/default
+	// 1 - texture fill (texture(slug_effectTexture, v_emCoord) * slug coverage)
+	// 2 - GLSL procedural
+	// 3 - Etc, etc.
 	//
 	// TODO: It is likely this will be called `fillMode` or similar in future versions!
 	uint32_t effectId = 0;
@@ -256,7 +260,7 @@ struct CompositeShape {
 // other graphics library. After build() the caller retrieves TextureData descriptors and hands them
 // to whatever graphics layer it is using (see osgSlug::Atlas for the OSG adapter).
 //
-// Keys are Atlas::Key values — either a codepoint (uint32_t, implicitly convertible) or a named
+// Keys are Atlas::Key values - either a codepoint (uint32_t, implicitly convertible) or a named
 // string. Both shapes and composite shapes share the same key namespace; do not register the same
 // key under both addShape() and addCompositeShape().
 // ================================================================================================
@@ -264,10 +268,6 @@ class Atlas {
 public:
 	Atlas();
 	virtual ~Atlas();
-
-	// -------------------------------------------------------------------------
-	// Input types
-	// -------------------------------------------------------------------------
 
 	// A single quadratic Bezier segment: p1 -> p2 (control) -> p3.
 	struct Curve {
@@ -278,8 +278,8 @@ public:
 
 	using Curves = std::vector<Curve>;
 
-	// Everything the renderer needs to draw one shape.
-	// Populated by build() and returned by getShape().
+	// Everything the renderer needs to draw one shape. Populated by build() and returned by
+	// getShape().
 	struct Shape {
 		// Location of this shape's band header block in the band texture (texel coords)
 		uint32_t bandTexX = 0, bandTexY = 0;
@@ -304,7 +304,7 @@ public:
 		// world units. expand adds a uniform outset in world units (useful for
 		// a 1-pixel AA fringe: pass 1.0f / scale).
 		//
-		// The returned quad is relative to (0,0) — scene placement is the
+		// The returned quad is relative to (0,0) - scene placement is the
 		// caller's responsibility (e.g. osg::MatrixTransform).
 		Quad computeQuad(const Matrix& transform, slug_t scale = 1.0_cv, slug_t expand = 0.0_cv) const {
 			const slug_t ox = transform.dx * scale;
@@ -351,7 +351,7 @@ public:
 	// a GPU texture (width/height are in texels); `format` tells the graphics backend how to
 	// interpret the bytes:
 	//
-	// RGBA32F  - four 32-bit floats per texel (curve texture)
+	// RGBA32F - four 32-bit floats per texel (curve texture)
 	// RGBA16UI - four 16-bit unsigned ints per texel (band texture)
 	// --------------------------------------------------------------------------------------------
 	struct TextureData {
@@ -366,10 +366,10 @@ public:
 	};
 
 	// --------------------------------------------------------------------------------------------
-	// Packing statistics — populated by build(), valid after isBuilt() == true.
+	// Packing statistics - populated by build(), valid after isBuilt() == true.
 	//
 	// Tracks texture memory usage and alignment waste introduced by
-	// alignCursorForSpan() — the mechanism that ensures band curve lists never
+	// alignCursorForSpan() - the mechanism that ensures band curve lists never
 	// straddle a row boundary (required for correct Slug shader behaviour).
 	//
 	// curveTexelsUsed + curveTexelsPadding <= curveTexelsTotal
@@ -377,14 +377,14 @@ public:
 	// --------------------------------------------------------------------------------------------
 	struct PackingStats {
 		// Curve texture
-		uint32_t curveTexelsUsed    = 0; // texels written with actual curve data
+		uint32_t curveTexelsUsed = 0; // texels written with actual curve data
 		uint32_t curveTexelsPadding = 0; // texels wasted to row-alignment bumps
-		uint32_t curveTexelsTotal   = 0; // width * height (allocated)
+		uint32_t curveTexelsTotal = 0; // width * height (allocated)
 
 		// Band texture
-		uint32_t bandTexelsUsed    = 0;
+		uint32_t bandTexelsUsed = 0;
 		uint32_t bandTexelsPadding = 0;
-		uint32_t bandTexelsTotal   = 0;
+		uint32_t bandTexelsTotal = 0;
 
 		// Fraction of allocated texels actually containing live data [0, 1].
 		float curveUtilization() const {
@@ -401,15 +401,17 @@ public:
 			;
 		}
 
-		// Fraction of live texels that are padding (not curve data) [0, 1].
-		// High values suggest band count or shape ordering could be improved.
+		// Fraction of live texels that are padding (not curve data) [0, 1]. High values suggest
+		// band count or shape ordering could be improved.
 		float curvePaddingRatio() const {
 			const uint32_t live = curveTexelsUsed + curveTexelsPadding;
+
 			return live ? float(curveTexelsPadding) / float(live) : 0.f;
 		}
 
 		float bandPaddingRatio() const {
 			const uint32_t live = bandTexelsUsed + bandTexelsPadding;
+
 			return live ? float(bandTexelsPadding) / float(live) : 0.f;
 		}
 	};
@@ -430,7 +432,7 @@ public:
 	// Register a composite shape (ordered layer stack) under @p key.
 	//
 	// CompositeShapes are stored separately from geometry shapes and are not processed by build().
-	// They can be registered before or after build() — the atlas does not need to be rebuilt when
+	// They can be registered before or after build() - the atlas does not need to be rebuilt when
 	// new composites are added. Calling addCompositeShape() with an already-registered key silently
 	// replaces the previous definition.
 	void addCompositeShape(Key key, CompositeShape composite);
@@ -455,13 +457,13 @@ public:
 	const CompositeShape* getCompositeShape(Key key) const;
 
 	const TextureData& getCurveTextureData() const { return _curveData; }
-	const TextureData& getBandTextureData()  const { return _bandData; }
+	const TextureData& getBandTextureData() const { return _bandData; }
 
 	// Valid after build(). Reports texture utilization and alignment padding waste.
 	// See PackingStats for field documentation.
 	const PackingStats& getPackingStats() const { return _packingStats; }
 
-	// Bulk accessors — primarily for serialization (slughorn-serial.hpp) and
+	// Bulk accessors - primarily for serialization (slughorn-serial.hpp) and
 	// diagnostics. Prefer getShape() / getCompositeShape() for normal use.
 	const std::unordered_map<Key, Shape, KeyHash>& getShapes() const {
 		return _shapes;
@@ -476,24 +478,24 @@ public:
 	}
 
 	// --------------------------------------------------------------------------------------------
-	// Serial reconstruction (used by slughorn-serial.hpp — not for general use)
+	// Serial reconstruction (used by slughorn-serial.hpp - not for general use)
 	//
 	// Injects pre-built texture data and shape/composite maps directly, bypassing build().
 	// The Atlas is marked as built on return; calling build() afterwards is a no-op.
 	// --------------------------------------------------------------------------------------------
 	struct SerialData {
-		TextureData                                      curveData;
-		TextureData                                      bandData;
-		std::unordered_map<Key, Shape, KeyHash>          shapes;
+		TextureData curveData;
+		TextureData bandData;
+		std::unordered_map<Key, Shape, KeyHash> shapes;
 		std::unordered_map<Key, CompositeShape, KeyHash> composites;
 	};
 
 	void loadFromSerial(SerialData&& sd) {
-		_curveData        = std::move(sd.curveData);
-		_bandData         = std::move(sd.bandData);
-		_shapes           = std::move(sd.shapes);
-		_compositeShapes  = std::move(sd.composites);
-		_built            = true;
+		_curveData = std::move(sd.curveData);
+		_bandData = std::move(sd.bandData);
+		_shapes = std::move(sd.shapes);
+		_compositeShapes = std::move(sd.composites);
+		_built = true;
 	}
 
 private:
@@ -501,7 +503,8 @@ private:
 	// Internal build structures (discarded after build())
 	// --------------------------------------------------------------------------------------------
 	struct BandEntry {
-		uint16_t curveCount = 0; // mirrors the uint16_t written to the band texture
+		// mirrors the uint16_t written to the band texture
+		uint16_t curveCount = 0;
 
 		std::vector<size_t> curveIndices;
 	};
@@ -516,16 +519,22 @@ private:
 	// --------------------------------------------------------------------------------------------
 	// Internal pipeline
 	// --------------------------------------------------------------------------------------------
-	void buildShapeBands(Key key, ShapeBuild& build, uint32_t numBandsX, uint32_t numBandsY, bool overrideMetrics);
+	void buildShapeBands(
+		Key key,
+		ShapeBuild& build,
+		uint32_t numBandsX,
+		uint32_t numBandsY,
+		bool overrideMetrics
+	);
 
 	void packTextures();
 
 	// --------------------------------------------------------------------------------------------
 	// Data
 	// --------------------------------------------------------------------------------------------
-	std::unordered_map<Key, ShapeBuild, KeyHash>     _build;           // discarded after build()
-	std::unordered_map<Key, Shape, KeyHash>           _shapes;          // live after build()
-	std::unordered_map<Key, CompositeShape, KeyHash>  _compositeShapes; // live always
+	std::unordered_map<Key, ShapeBuild, KeyHash> _build; // discarded after build()
+	std::unordered_map<Key, Shape, KeyHash> _shapes; // live after build()
+	std::unordered_map<Key, CompositeShape, KeyHash> _compositeShapes; // live always
 
 	TextureData _curveData;
 	TextureData _bandData;
@@ -545,7 +554,7 @@ private:
 //
 // Cubic segments are handled adaptively via De Casteljau subdivision: each cubic is recursively
 // split at its midpoint until the segment is flat enough (both control points within `tolerance`
-// of the p0→p3 chord), at which point it is emitted as two quadratics — one for each half of the
+// of the p0->p3 chord), at which point it is emitted as two quadratics - one for each half of the
 // flattened cubic. This produces far fewer curves than blind subdivision for gentle cubics while
 // faithfully tracking tight arcs and S-curves.
 //
@@ -554,23 +563,26 @@ private:
 //
 // `tolerance` is in the same coordinate space as the curves (em-units by default). The default
 // value (1e-4) is suitable for em-normalized [0,1] geometry. Scale it proportionally if your
-// authoring space uses different units — e.g. for a 1000-unit em square use 0.1f.
+// authoring space uses different units - e.g. for a 1000-unit em square use 0.1f.
 //
 // All backends (Cairo, NanoSVG, Skia, Canvas) route cubics through cubicTo and therefore benefit
 // from this improvement automatically. Callers that want coarser/faster decomposition can raise
 // `tolerance`; callers that want higher fidelity (e.g. very small text) can lower it.
 // ================================================================================================
-static constexpr slug_t TOLERANCE_DRAFT    = 1e-2f; // fast, visible only at large sizes
+static constexpr slug_t TOLERANCE_DRAFT = 1e-2f; // fast, visible only at large sizes
 static constexpr slug_t TOLERANCE_BALANCED = 1e-3f; // good default for screen work
-static constexpr slug_t TOLERANCE_FINE     = 1e-4f; // high-DPI / print / export
-static constexpr slug_t TOLERANCE_EXACT    = std::numeric_limits<slug_t>::max(); // old behavior — always 2 quads
+static constexpr slug_t TOLERANCE_FINE = 1e-4f; // high-DPI / print / export
+
+// This is the DEFAULT value, and always produces the predictable (fast, lowest-quality)
+// "two-leafs" from a cubiz Bezier.
+static constexpr slug_t TOLERANCE_EXACT = std::numeric_limits<slug_t>::max();
 
 struct CurveDecomposer {
 	Atlas::Curves& curves;
 
-	// Flatness threshold in curve-space units. A cubic is considered flat enough
-	// to emit when both interior control points are within this distance of the
-	// p0→p3 chord. Default suits em-normalized [0,1] geometry.
+	// Flatness threshold in curve-space units. A cubic is considered flat enough to emit when both
+	// interior control points are within this distance of the p0->p3 chord. Default suits
+	// em-normalized [0,1] geometry.
 	slug_t tolerance = TOLERANCE_EXACT;
 
 	slug_t _x = 0_cv;
@@ -604,7 +616,7 @@ struct CurveDecomposer {
 		_y = y3;
 	}
 
-	// Adaptive cubic → quadratic decomposition via De Casteljau subdivision.
+	// Adaptive cubic -> quadratic decomposition via De Casteljau subdivision.
 	//
 	// Recursively splits the cubic until flat enough, then emits two quadratics
 	// at the leaf. MAX_DEPTH caps recursion for degenerate inputs. Backends that
@@ -613,9 +625,10 @@ struct CurveDecomposer {
 	void cubicTo(
 		slug_t c1x, slug_t c1y,
 		slug_t c2x, slug_t c2y,
-		slug_t x3,  slug_t y3
+		slug_t x3, slug_t y3
 	) {
 		_cubicAdaptive(_x, _y, c1x, c1y, c2x, c2y, x3, y3, 0);
+
 		_x = x3;
 		_y = y3;
 	}
@@ -634,8 +647,8 @@ private:
 	// cubic's bounding box, which is well below any practical rendering threshold.
 	static constexpr int MAX_DEPTH = 8;
 
-	// Squared distance from point (px,py) to the infinite line through (ax,ay)→(bx,by).
-	// Using squared distance avoids a sqrt in the hot path; we compare against tolerance².
+	// Squared distance from point (px,py) to the infinite line through (ax,ay)->(bx,by).
+	// Using squared distance avoids a sqrt in the hot path; we compare against tolerance2.
 	static slug_t _pointToLineDistSq(
 		slug_t px, slug_t py,
 		slug_t ax, slug_t ay,
@@ -646,19 +659,21 @@ private:
 		const slug_t lenSq = dx*dx + dy*dy;
 
 		if(lenSq < 1e-12_cv) {
-			// Degenerate chord — just return distance to the start point.
+			// Degenerate chord - just return distance to the start point.
 			const slug_t ex = px - ax;
 			const slug_t ey = py - ay;
+
 			return ex*ex + ey*ey;
 		}
 
-		// |cross(b-a, a-p)| / |b-a|  — perpendicular distance
+		// |cross(b-a, a-p)| / |b-a| - perpendicular distance
 		const slug_t cross = dx*(ay - py) - dy*(ax - px);
+
 		return (cross * cross) / lenSq;
 	}
 
 	// Returns true when both interior control points of the cubic lie within
-	// `tolerance` of the p0→p3 chord — i.e. the cubic is visually flat.
+	// `tolerance` of the p0->p3 chord - i.e. the cubic is visually flat.
 	bool _flatEnough(
 		slug_t p0x, slug_t p0y,
 		slug_t p1x, slug_t p1y,
@@ -674,42 +689,43 @@ private:
 	}
 
 	// Emit the flat-enough (or max-depth) cubic as two quadratics via midpoint split.
-	// This is the leaf operation — matches the original cubicTo behavior and NanoSVG convention.
+	// This is the leaf operation - matches the original cubicTo behavior and NanoSVG convention.
 	void _emitTwoQuads(
 		slug_t p0x, slug_t p0y,
 		slug_t p1x, slug_t p1y,
 		slug_t p2x, slug_t p2y,
 		slug_t p3x, slug_t p3y
 	) {
-		const slug_t midx = (p0x + 3_cv*p1x + 3_cv*p2x + p3x) * 0.125_cv;
-		const slug_t midy = (p0y + 3_cv*p1y + 3_cv*p2y + p3y) * 0.125_cv;
+		const slug_t midx = (p0x + 3_cv * p1x + 3_cv * p2x + p3x) * 0.125_cv;
+		const slug_t midy = (p0y + 3_cv * p1y + 3_cv * p2y + p3y) * 0.125_cv;
 
 		curves.push_back({
 			p0x, p0y,
-			(p0x + 3_cv*p1x) * 0.25_cv,
-			(p0y + 3_cv*p1y) * 0.25_cv,
+			(p0x + 3_cv * p1x) * 0.25_cv,
+			(p0y + 3_cv * p1y) * 0.25_cv,
 			midx, midy
 		});
 
 		curves.push_back({
 			midx, midy,
-			(3_cv*p2x + p3x) * 0.25_cv,
-			(3_cv*p2y + p3y) * 0.25_cv,
+			(3_cv * p2x + p3x) * 0.25_cv,
+			(3_cv * p2y + p3y) * 0.25_cv,
 			p3x, p3y
 		});
 	}
 
-	// Recursive De Casteljau subdivision. Splits at the midpoint and recurses
-	// into each half until flat or MAX_DEPTH is reached.
+	// Recursive De Casteljau subdivision. Splits at the midpoint and recurses into each half until
+	// flat or MAX_DEPTH is reached.
 	void _cubicAdaptive(
 		slug_t p0x, slug_t p0y,
 		slug_t p1x, slug_t p1y,
 		slug_t p2x, slug_t p2y,
 		slug_t p3x, slug_t p3y,
-		int depth
+		size_t depth
 	) {
 		if(depth >= MAX_DEPTH || _flatEnough(p0x, p0y, p1x, p1y, p2x, p2y, p3x, p3y)) {
 			_emitTwoQuads(p0x, p0y, p1x, p1y, p2x, p2y, p3x, p3y);
+
 			return;
 		}
 
@@ -732,8 +748,8 @@ private:
 		const slug_t m0123x = (m012x + m123x) * 0.5_cv;
 		const slug_t m0123y = (m012y + m123y) * 0.5_cv;
 
-		_cubicAdaptive(p0x,    p0y,    m01x,  m01y,  m012x,  m012y,  m0123x, m0123y, depth + 1);
-		_cubicAdaptive(m0123x, m0123y, m123x, m123y, m23x,   m23y,   p3x,    p3y,    depth + 1);
+		_cubicAdaptive(p0x, p0y, m01x, m01y, m012x, m012y, m0123x, m0123y, depth + 1);
+		_cubicAdaptive(m0123x, m0123y, m123x, m123y, m23x, m23y, p3x, p3y, depth + 1);
 	}
 };
 

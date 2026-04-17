@@ -91,14 +91,18 @@ uint32_t codepointAtIndex(size_t index);
 inline uint32_t randomCodepoint() {
 	static thread_local std::mt19937 rng(std::random_device{}());
 	static const size_t n = tableSize();
+
 	std::uniform_int_distribution<size_t> dist(0, n - 1);
+
 	return codepointAtIndex(dist(rng));
 }
 
-// Seeded variant — useful for reproducible test sequences.
+// Seeded variant; useful for reproducible test sequences.
 inline uint32_t randomCodepoint(std::mt19937& rng) {
 	static const size_t n = tableSize();
+
 	std::uniform_int_distribution<size_t> dist(0, n - 1);
+
 	return codepointAtIndex(dist(rng));
 }
 
@@ -121,7 +125,7 @@ struct Entry {
 	uint32_t codepoint;
 };
 
-static const Entry kTable[] = {
+static const Entry TABLE[] = {
 	{ "1st_place_medal", 0x1F947 }, // 1st place medal
 	{ "2nd_place_medal", 0x1F948 }, // 2nd place medal
 	{ "3rd_place_medal", 0x1F949 }, // 3rd place medal
@@ -1097,21 +1101,17 @@ static const Entry kTable[] = {
 	{ "zzz", 0x1F4A4 }, // zzz
 };
 
-static constexpr size_t kTableSize = sizeof(kTable) / sizeof(kTable[0]);
-
-// =============================================================================
-// nameToCodepoint
-// =============================================================================
+static constexpr size_t TABLE_SIZE = sizeof(TABLE) / sizeof(TABLE[0]);
 
 std::optional<uint32_t> nameToCodepoint(std::string_view name) {
 	// Binary search: table is sorted lexicographically by name.
-	size_t lo = 0, hi = kTableSize;
+	size_t lo = 0, hi = TABLE_SIZE;
 
 	while(lo < hi) {
 		const size_t mid = lo + (hi - lo) / 2;
-		const int cmp = name.compare(kTable[mid].name);
+		const int cmp = name.compare(TABLE[mid].name);
 
-		if(cmp == 0) return kTable[mid].codepoint;
+		if(cmp == 0) return TABLE[mid].codepoint;
 		if(cmp < 0) hi = mid;
 		else lo = mid + 1;
 	}
@@ -1123,7 +1123,7 @@ std::optional<uint32_t> nameToCodepoint(std::string_view name) {
 // codepointToName
 //
 // We keep a separate index array sorted by codepoint so that the primary table stays sorted by name
-// (needed for the binary search above).  The index is built once on first use via a local static.
+// (needed for the binary search above). The index is built once on first use via a local static.
 // ================================================================================================
 
 std::optional<std::string_view> codepointToName(uint32_t codepoint) {
@@ -1139,16 +1139,16 @@ std::optional<std::string_view> codepointToName(uint32_t codepoint) {
 		// Can't use std::vector in a constexpr context, so build as array.
 		// We use a static local std::array-equivalent via a lambda.
 		struct Table {
-			ByCodepoint entries[kTableSize];
+			ByCodepoint entries[TABLE_SIZE];
 
-			size_t size = kTableSize;
+			size_t size = TABLE_SIZE;
 		};
 
 		Table t;
 
-		for(size_t i = 0; i < kTableSize; i++) t.entries[i] = {
-			kTable[i].codepoint,
-			kTable[i].name
+		for(size_t i = 0; i < TABLE_SIZE; i++) t.entries[i] = {
+			TABLE[i].codepoint,
+			TABLE[i].name
 		};
 
 		std::sort(t.entries, t.entries + t.size);
@@ -1157,7 +1157,7 @@ std::optional<std::string_view> codepointToName(uint32_t codepoint) {
 	}();
 
 	// Binary search by codepoint.
-	size_t lo = 0, hi = kTableSize;
+	size_t lo = 0, hi = TABLE_SIZE;
 
 	while(lo < hi) {
 		const size_t mid = lo + (hi - lo) / 2;
@@ -1173,16 +1173,12 @@ std::optional<std::string_view> codepointToName(uint32_t codepoint) {
 	return std::nullopt;
 }
 
-// =============================================================================
-// tableSize
-// =============================================================================
-
-size_t tableSize() { return kTableSize; }
+size_t tableSize() { return TABLE_SIZE; }
 
 uint32_t codepointAtIndex(size_t index) {
-	if(index >= kTableSize) index = kTableSize - 1;
+	if(index >= TABLE_SIZE) index = TABLE_SIZE - 1;
 
-	return kTable[index].codepoint;
+	return TABLE[index].codepoint;
 }
 
 }

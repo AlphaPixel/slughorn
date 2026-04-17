@@ -5,19 +5,19 @@
 #
 # Three levels of abstraction, each building on the one below:
 #
-#   Level 1 — Pure math  (no slughorn dependency)
+#   Level 1 - Pure math  (no slughorn dependency)
 #     calc_root_code, solve_horiz_poly, solve_vert_poly, calc_coverage
-#     render_sample          — ground truth, iterates all curves, no bands
-#     render_sample_banded   — band-accelerated, mirrors GPU shader exactly
+#     render_sample          - ground truth, iterates all curves, no bands
+#     render_sample_banded   - band-accelerated, mirrors GPU shader exactly
 #
-#   Level 2 — Atlas bridge  (requires compiled slughorn module)
-#     AtlasView              — decodes a built Atlas into Python-native
+#   Level 2 - Atlas bridge  (requires compiled slughorn module)
+#     AtlasView              - decodes a built Atlas into Python-native
 #                              structures that render_sample_banded can consume.
 #                              Constructed once per (atlas, key) pair.
 #
-#   Level 3 — Grid samplers + image output
-#     sample_grid            — reference path (pure Python Curve list)
-#     sample_grid_from_atlas — banded path (AtlasView)
+#   Level 3 - Grid samplers + image output
+#     sample_grid            - reference path (pure Python Curve list)
+#     sample_grid_from_atlas - banded path (AtlasView)
 #     save_image, print_grid
 
 import math
@@ -39,11 +39,11 @@ BAND_TEX_WIDTH     = 512
 LOG_BAND_TEX_WIDTH = 9   # 2^9 == 512
 
 # =============================================================================
-# Level 1 — Pure math
+# Level 1 - Pure math
 # =============================================================================
 
 # -----------------------------------------------------------------------------
-# Curve (pure-Python version — used by render_sample / sample_grid)
+# Curve (pure-Python version - used by render_sample / sample_grid)
 #
 # When working with a compiled Atlas, you can convert a slughorn.Curve to this
 # with:  Curve(*c.to_tuple())   or just build AtlasView which does it for you.
@@ -77,16 +77,16 @@ def clamp(x: float, lo: float, hi: float) -> float:
 
 
 # -----------------------------------------------------------------------------
-# slug_CalcRootCode — exact port of the GLSL function
+# slug_CalcRootCode - exact port of the GLSL function
 #
 # Takes the Y (or X) coordinates of the three control points of a quadratic
-# Bézier, all shifted so that the sample point is at the origin.  Returns a
+# Bezier, all shifted so that the sample point is at the origin.  Returns a
 # two-bit code that tells the caller which roots (if any) of the equation
 # B(t) = 0 are in [0, 1]:
 #
-#   bit 0 set  →  root r1 is relevant (positive winding contribution)
-#   bit 1 set  →  root r2 is relevant (negative winding contribution)
-#   0          →  no roots cross the scan line; skip this curve entirely
+#   bit 0 set  ->  root r1 is relevant (positive winding contribution)
+#   bit 1 set  ->  root r2 is relevant (negative winding contribution)
+#   0          ->  no roots cross the scan line; skip this curve entirely
 #
 # The magic constant 0x2E74 is a 16-entry lookup table packed into a uint16.
 # Each 2-bit entry encodes the root-code for one sign pattern of (y1, y2, y3).
@@ -104,12 +104,12 @@ def calc_root_code(y1: float, y2: float, y3: float) -> int:
 
 
 # -----------------------------------------------------------------------------
-# solve_horiz_poly — find the X intercept(s) of a quadratic Bézier at Y=0
+# solve_horiz_poly - find the X intercept(s) of a quadratic Bezier at Y=0
 #
 # Called after the sample point has been shifted to the origin, so "Y=0" is
 # literally "the horizontal scan line through the current fragment".
 #
-# Returns (x1, x2) — the X positions of the two roots.  When there is only
+# Returns (x1, x2) - the X positions of the two roots.  When there is only
 # one root (the near-linear degenerate case), both values are identical.
 # The caller uses calc_root_code to decide which of the two to actually use.
 # -----------------------------------------------------------------------------
@@ -125,7 +125,7 @@ def solve_horiz_poly(
     by = p1[1] - p2[1]                  # linear coefficient in Y
 
     if abs(ay) < EPS:
-        # Degenerate: curve is nearly linear in Y → single root
+        # Degenerate: curve is nearly linear in Y -> single root
         t = p1[1] * (0.5 / by) if abs(by) >= EPS else 0.0
         x = (ax * t - 2.0 * bx) * t + p1[0]
         return x, x
@@ -141,7 +141,7 @@ def solve_horiz_poly(
 
 
 # -----------------------------------------------------------------------------
-# solve_vert_poly — find the Y intercept(s) of a quadratic Bézier at X=0
+# solve_vert_poly - find the Y intercept(s) of a quadratic Bezier at X=0
 #
 # Symmetric to solve_horiz_poly; roles of X and Y are swapped.
 # -----------------------------------------------------------------------------
@@ -172,7 +172,7 @@ def solve_vert_poly(
 
 
 # -----------------------------------------------------------------------------
-# calc_coverage — combine horizontal and vertical winding accumulators
+# calc_coverage - combine horizontal and vertical winding accumulators
 #
 # xcov/ycov are signed coverage sums from the horizontal/vertical passes.
 # xwgt/ywgt are confidence weights (how close the nearest crossing was to the
@@ -194,15 +194,15 @@ def calc_coverage(
 
 
 # -----------------------------------------------------------------------------
-# render_sample — ground-truth renderer, NO bands, NO sorting, NO early-exit
+# render_sample - ground-truth renderer, NO bands, NO sorting, NO early-exit
 #
 # Parameters
 # ----------
 # curves        : list of Curve (pure-Python)
 # render_coord  : (x, y) in em-space (same space as the curve coordinates)
-# pixels_per_em : how many output pixels span one em unit — controls the
+# pixels_per_em : how many output pixels span one em unit - controls the
 #                 antialiasing kernel width.  Pass (size, size) for a shape
-#                 that fills a size×size pixel image.
+#                 that fills a sizexsize pixel image.
 #
 # Returns a dict with fill + all intermediate accumulators (useful for
 # debugging individual samples).
@@ -274,33 +274,33 @@ def render_sample(
 # calc_root_code returns values from the table (0x2E74 >> shift) & 0x0101.
 # The possible non-zero results are:
 #
-#   0x0001  →  only root r1 is relevant
-#   0x0100  →  only root r2 is relevant
-#   0x0101  →  both roots are relevant
+#   0x0001  ->  only root r1 is relevant
+#   0x0100  ->  only root r2 is relevant
+#   0x0101  ->  both roots are relevant
 #
 # The original code used `code & 1` / `code > 1` which works numerically
 # but obscures the intent.  `code & 0x01` / `code & 0x100` is explicit.
 
 
 # -----------------------------------------------------------------------------
-# render_sample_banded — band-accelerated renderer
+# render_sample_banded - band-accelerated renderer
 #
 # Mirrors the GPU shader exactly, including:
 #   - Band index computation (same formula as the GLSL)
 #   - Early-exit on sorted curve lists (curves sorted by decreasing max-X/Y,
 #     so once a curve is entirely to the left/below the sample it can't
-#     contribute — everything after it in the list is even further away)
+#     contribute - everything after it in the list is even further away)
 #
 # Parameters
 # ----------
 # curves        : flat list of (x1,y1, x2,y2, x3,y3) tuples, indexed by the
 #                 band lists.  Build this from AtlasView.curves.
-# hbands_idx    : list-of-lists; hbands_idx[band_y] → curve indices for the
+# hbands_idx    : list-of-lists; hbands_idx[band_y] -> curve indices for the
 #                 horizontal pass of that Y band.
-# vbands_idx    : list-of-lists; vbands_idx[band_x] → curve indices for the
+# vbands_idx    : list-of-lists; vbands_idx[band_x] -> curve indices for the
 #                 vertical pass of that X band.
 # render_coord  : (x, y) in em-space
-# pixels_per_em : (ppe_x, ppe_y) — same convention as render_sample
+# pixels_per_em : (ppe_x, ppe_y) - same convention as render_sample
 # band_*        : band transform parameters taken directly from slughorn.Shape
 # -----------------------------------------------------------------------------
 
@@ -320,14 +320,14 @@ def render_sample_banded(
     rx, ry   = render_coord
     ppe_x, ppe_y = pixels_per_em
 
-    # Band index — same formula as the GLSL vertex/fragment shader
+    # Band index - same formula as the GLSL vertex/fragment shader
     band_x = int(clamp(rx * band_scale_x + band_offset_x, 0, band_max_x))
     band_y = int(clamp(ry * band_scale_y + band_offset_y, 0, band_max_y))
 
     xcov = xwgt = ycov = ywgt = 0.0
     iters = 0
 
-    # --- Horizontal pass (hband → Y roots → X coverage) ---
+    # --- Horizontal pass (hband -> Y roots -> X coverage) ---
     for ci in hbands_idx[band_y]:
         iters += 1
         c = curves[ci]
@@ -358,7 +358,7 @@ def render_sample_banded(
                 xcov -= clamp(r2 + 0.5, 0.0, 1.0)
                 xwgt  = max(xwgt, clamp(1.0 - abs(r2) * 2.0, 0.0, 1.0))
 
-    # --- Vertical pass (vband → X roots → Y coverage) ---
+    # --- Vertical pass (vband -> X roots -> Y coverage) ---
     for ci in vbands_idx[band_x]:
         iters += 1
         c = curves[ci]
@@ -395,7 +395,7 @@ def render_sample_banded(
 
 
 # =============================================================================
-# Level 2 — Atlas bridge
+# Level 2 - Atlas bridge
 # =============================================================================
 
 class AtlasView:
@@ -403,7 +403,7 @@ class AtlasView:
     Decodes a built slughorn.Atlas for a single shape key into Python-native
     structures that render_sample_banded can consume directly.
 
-    Construct once per (atlas, key) pair — the decode is done in __init__
+    Construct once per (atlas, key) pair - the decode is done in __init__
     and the results are cached as plain Python lists.
 
     Attributes
@@ -411,8 +411,8 @@ class AtlasView:
     shape       : the slughorn.Shape object (band transform, metrics, etc.)
     curves      : flat list of (x1,y1, x2,y2, x3,y3) float tuples, one per
                   curve in the atlas.  Indexed by the band index lists.
-    hbands_idx  : list-of-lists; hbands_idx[band_y] → list of curve indices
-    vbands_idx  : list-of-lists; vbands_idx[band_x] → list of curve indices
+    hbands_idx  : list-of-lists; hbands_idx[band_y] -> list of curve indices
+    vbands_idx  : list-of-lists; vbands_idx[band_x] -> list of curve indices
     curve_list  : same curves as pure-Python Curve objects (for render_sample)
 
     Usage
@@ -448,7 +448,7 @@ class AtlasView:
         """
         Render a single sample at em-space coordinate (em_x, em_y).
 
-        pixels_per_em controls the antialiasing kernel width — pass
+        pixels_per_em controls the antialiasing kernel width - pass
         (image_width, image_height) when the shape fills the whole image,
         or scale accordingly.
 
@@ -527,8 +527,8 @@ class AtlasView:
             [ header_0 | header_1 | ... | header_N-1 | ... curve index lists ... ]
 
         Each header texel: (count, offset, 0, 0)
-            count  — number of curves in this band's list
-            offset — texel offset from the shape's band_tex start to the list
+            count  - number of curves in this band's list
+            offset - texel offset from the shape's band_tex start to the list
 
         Texel addressing wraps within the texture the same way the GLSL shader
         does it:
@@ -541,7 +541,7 @@ class AtlasView:
 
         Returns (hbands_idx, vbands_idx) where each is a list-of-lists of ints.
         The ints are indices into the curve list returned by _decode_curve_texture.
-        They are NOT (cx, cy) texel coordinates — the conversion to curve indices
+        They are NOT (cx, cy) texel coordinates - the conversion to curve indices
         happens here so that render_sample_banded never has to think about textures.
         """
         data = np.frombuffer(tex.bytes, dtype=np.uint16).reshape(
@@ -554,7 +554,7 @@ class AtlasView:
         num_headers = num_h + num_v
 
         # -----------------------------------------------------------------
-        # Build curve-location → index lookup
+        # Build curve-location -> index lookup
         # Each curve occupies two texels; its "address" is the texel index
         # of its first (even-X) texel in the CURVE texture.
         # We store the address as (cx, cy) so it matches what the band
@@ -604,11 +604,11 @@ class AtlasView:
 
 
 # =============================================================================
-# Level 3 — Grid samplers + image I/O
+# Level 3 - Grid samplers + image I/O
 # =============================================================================
 
 def _sample_coords(size: int, margin: float = 0.1):
-    """Generate (px, py) em-space sample coordinates for a size×size grid."""
+    """Generate (px, py) em-space sample coordinates for a sizexsize grid."""
     scale = 1.0 - 2.0 * margin
     for y in range(size):
         for x in range(size):
@@ -622,11 +622,11 @@ def _sample_coords(size: int, margin: float = 0.1):
 
 def sample_grid(curves: List[Curve], size: int = 40, margin: float = 0.1) -> List[List[float]]:
     """
-    Render a size×size grid using the reference (brute-force) renderer.
+    Render a sizexsize grid using the reference (brute-force) renderer.
 
-    curves        — pure-Python Curve list
-    size          — output resolution in pixels
-    margin        — fraction of the em-square to leave as padding on each side
+    curves        - pure-Python Curve list
+    size          - output resolution in pixels
+    margin        - fraction of the em-square to leave as padding on each side
 
     Returns a 2-D list [y][x] of fill values in [0, 1].
     """
@@ -648,14 +648,14 @@ def sample_grid_from_atlas(
     banded: bool  = True,
 ) -> List[List[float]]:
     """
-    Render a size×size grid from a built slughorn.Atlas.
+    Render a sizexsize grid from a built slughorn.Atlas.
 
-    atlas  — a built slughorn.Atlas (or any object with .get_shape() /
+    atlas  - a built slughorn.Atlas (or any object with .get_shape() /
               .curve_texture / .band_texture)
-    key    — slughorn.Key (or uint32_t codepoint — implicit conversion works)
-    size   — output resolution in pixels
-    margin — fraction of the em-square to leave as padding on each side
-    banded — if True (default) use render_sample_banded;
+    key    - slughorn.Key (or uint32_t codepoint - implicit conversion works)
+    size   - output resolution in pixels
+    margin - fraction of the em-square to leave as padding on each side
+    banded - if True (default) use render_sample_banded;
               if False use render_sample for ground-truth comparison
 
     Returns a 2-D list [y][x] of fill values in [0, 1].
@@ -692,7 +692,7 @@ def save_image(grid: List[List[float]], filename: str = "out.png", flip_y: bool 
         for x in range(w):
             px[x, y] = int(clamp(grid[y][x], 0.0, 1.0) * 255)
     img.save(filename)
-    print(f"Saved {w}x{h} image → {filename}")
+    print(f"Saved {w}x{h} image -> {filename}")
 
 
 def save_curves_debug(curves, shape, filename="curves_debug.png", scale=1024):
@@ -722,7 +722,7 @@ def save_curves_debug(curves, shape, filename="curves_debug.png", scale=1024):
         return (int(u * w), int(v * h))
 
     def draw_quad_bezier(p1, p2, p3, color, steps=32):
-        """Approximate a quadratic Bézier as a polyline."""
+        """Approximate a quadratic Bezier as a polyline."""
         pts = []
         for i in range(steps + 1):
             t  = i / steps
@@ -747,18 +747,18 @@ def save_curves_debug(curves, shape, filename="curves_debug.png", scale=1024):
         draw.line([em_to_px(*p1), em_to_px(*p2)], fill=(80, 80, 180), width=1)
         draw.line([em_to_px(*p2), em_to_px(*p3)], fill=(80, 80, 180), width=1)
 
-        # Start/end points — small filled circles (green)
+        # Start/end points - small filled circles (green)
         for px, py in [em_to_px(*p1), em_to_px(*p3)]:
             r = 2
             draw.ellipse([px-r, py-r, px+r, py+r], fill=(80, 220, 80))
 
-        # Control point — slightly larger hollow circle (blue)
+        # Control point - slightly larger hollow circle (blue)
         px, py = em_to_px(*p2)
         r = 3
         draw.ellipse([px-r, py-r, px+r, py+r], outline=(100, 100, 255), width=1)
 
     img.save(filename)
-    print(f"Saved {w}x{h} curve debug → {filename}")
+    print(f"Saved {w}x{h} curve debug -> {filename}")
 
 
 # =============================================================================
@@ -767,7 +767,7 @@ def save_curves_debug(curves, shape, filename="curves_debug.png", scale=1024):
 
 if __name__ == "__main__":
     # -------------------------------------------------------------------------
-    # Test 1: reference renderer — pure Python, no slughorn import needed
+    # Test 1: reference renderer - pure Python, no slughorn import needed
     # -------------------------------------------------------------------------
     print("Test 1: reference renderer (pure Python)")
 
@@ -781,7 +781,7 @@ if __name__ == "__main__":
     save_image(grid, "grid_reference.png")
 
     # -------------------------------------------------------------------------
-    # Test 2: Atlas round-trip — build via slughorn, render via AtlasView
+    # Test 2: Atlas round-trip - build via slughorn, render via AtlasView
     # -------------------------------------------------------------------------
     print("Test 2: Atlas round-trip (requires compiled slughorn module)")
 
@@ -821,4 +821,4 @@ if __name__ == "__main__":
         print(f"  Mean diff:                 {sum(diffs)/len(diffs):.6f}")
 
     except ImportError:
-        print("  slughorn module not available — skipping atlas test")
+        print("  slughorn module not available - skipping atlas test")

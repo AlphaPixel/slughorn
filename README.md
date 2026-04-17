@@ -25,28 +25,28 @@ Skia has two GPU backends: **Ganesh** (the older one, OpenGL/Vulkan/Metal) and
 2. Uploading those triangles to the GPU
 3. Rendering with relatively simple shaders
 
-The key word is *tessellation* — Skia converts your curves into triangle meshes.
+The key word is *tessellation*; Skia converts your curves into triangle meshes.
 This means:
 
-- Quality is **resolution-dependent** — you have to choose a tessellation
+- Quality is **resolution-dependent**; you have to choose a tessellation
   tolerance, and if you zoom in far enough you'll see faceting
 - Every time the path **transforms** (scale, rotation, perspective), you either
   re-tessellate or accept quality loss
-- **Perspective projection** of curves is fundamentally broken with tessellation
-  — a cubic Bézier projected through a perspective matrix is no longer a cubic
-  Bézier
+- **Perspective projection** of curves is fundamentally broken with
+  tessellation; a cubic Bezier projected through a perspective matrix is no
+  longer a cubic Bezier
 
 ### What Slug Does Differently
 
 Slug evaluates the **exact curve equations per-fragment** in the shader. This
 means:
 
-- Quality is **resolution-independent** — zoom in infinitely, edges stay perfect
-- Transforms are **free** — the vertex shader handles them, the fragment shader
+- Quality is **resolution-independent**; zoom in infinitely, edges stay perfect
+- Transforms are **free**; the vertex shader handles them, the fragment shader
   doesn't care
-- **Perspective is correct** — because you're evaluating the curve at each
+- **Perspective is correct**; because you're evaluating the curve at each
   pixel, not approximating it with triangles
-- No CPU tessellation step — the atlas is built once and never rebuilt
+- No CPU tessellation step; the atlas is built once and never rebuilt
   regardless of transform
 
 ### Comparison
@@ -64,55 +64,61 @@ means:
 
 Getting Skia's GPU backend working inside OSG would be genuinely painful:
 
-- Skia wants to **own the OpenGL context** — it manages its own state, its own
+- Skia wants to **own the OpenGL context**; it manages its own state, its own
   FBOs, its own texture atlases. OSG also wants to own the context. Getting them
   to share without stomping each other's state is a known headache.
-- Skia's GPU API is **not designed to be embedded** — it's designed to be the
+- Skia's GPU API is **not designed to be embedded**; it's designed to be the
   renderer, not a component of one.
 - You'd essentially be running two renderers side by side and compositing, which
   introduces synchronization, blending, and depth buffer problems.
 
-Slug, on the other hand, is just **a shader and two textures** — it slots into
+Slug, on the other hand, is just **a shader and two textures**; it slots into
 OSG's existing pipeline as naturally as any other `osg::Program`.
 
 ### The Real Answer to "Are You Reinventing It?"
 
-For **2D UI / document rendering at fixed resolution** — Skia is better. It's
+For **2D UI / document rendering at fixed resolution**; Skia is better. It's
 battle-hardened, handles edge cases you haven't thought of yet, and the
 tessellation quality is fine for screen-resolution work.
 
-For **3D scene graph rendering with arbitrary transforms and perspective** —
+For **3D scene graph rendering with arbitrary transforms and perspective**,
 Slug is genuinely superior. The moment you want text or shapes on a billboard, a
 HUD, a curved surface, or viewed through a perspective camera, Skia's approach
 starts showing cracks and Slug's approach shines.
 
-The fact that this library is built *inside OSG* is itself the answer — you're
+The fact that this library is built *inside OSG* is itself the answer; you're
 in the domain where Slug's properties matter most. A shape rotating in
 perspective with pixel-perfect edges at any zoom level is something Skia simply
 cannot match without re-tessellating every frame.
 
-**Slug is not reinventing what Skia solved — it's solving a different problem
+**Slug is not reinventing what Skia solved; it's solving a different problem
 that Skia deliberately doesn't address.**
 
 # TODO
 
 ## Soon
 
+- [ ] Add an `effectId/shapeId` UDL and helper like `slug_t/_cv/cv`
 - [ ] Slug "mip-mapping"! Starting with osgSlug, introduce the ability to
   "short-circuit" the Slug quad based on some "level of detail" rule; when the
   shape is some threshold of distance AWAY, revert to simple texture lookup
   approximations. NOTE: `slughorn` MIGHT be able to participate in this
   optmization as well ... somehow
-- [ ] Fix `numBands` auto-calculation — account for spatial curve distribution,
-  not just count
+- [ ] Fix `numBands` auto-calculation and account for spatial curve
+  distribution, not just count
 - [x] pybind11 wrapper
-- [ ] Change `composites` to `compositeShapes` in serialization
-- [ ] Change the `autoMetrics` defaul to `true`
+- [ ] Change `composites` to `compositeShapes` in serialization, etc
+- [x] Change the `autoMetrics` defaul to `true`
+- [ ] Rename `slughorn-ft2.hpp` to `slughorn-freetype.hpp`
+- [ ] Enforce VERSION compatibility in backends
 
 ## Medium Term
 
+- [ ] Introduce `slughorn-harfbuzz.hpp` text API, using Harfbuzz to "shape" it
+  properly. Note: it will necessarily NEED to be built on top of the FreeType2
+  backend (`slughorn-ft2.hpp`)!
 - [ ] Qt6 QPainterPath provides moveTo / lineTo / quadTo / cubicTo /
-  closeSubpath via elementAt() iteration — maps cleanly to CurveDecomposer.
+  closeSubpath via elementAt() iteration; maps cleanly to CurveDecomposer.
   Quadratics are native to Qt6 (unlike Cairo which works in cubics). QFont /
   QRawFont provide glyph outline extraction as a potential FreeType2 complement.
   QSvgRenderer provides SVG loading as a potential NanoSVG complement.
@@ -121,7 +127,7 @@ that Skia deliberately doesn't address.**
 - [ ] Helpers for the `9-slice` method of a rounded rectangle
 - [x] `Atlas::createDefaultStateSet()` member instead of free function in
   `Drawable.hpp`
-- [ ] Sync `TEX_WIDTH` / `kLogBandTextureWidth` — uniform or shader preamble
+- [ ] Sync `TEX_WIDTH` / `kLogBandTextureWidth`; uniform or shader preamble
   injection
 - [ ] Premultiplied alpha
 - [ ] Proper depth testing and render order
@@ -130,12 +136,12 @@ that Skia deliberately doesn't address.**
 
 ## When Ready
 
-- [x] `Atlas::Key` type conversion (`uint32_t` → `Codepoint | Name`
+- [x] `Atlas::Key` type conversion (`uint32_t` -> `Codepoint | Name`
   discriminated union)
 - [x] Conic subdivision for Skia circular geometry (`iter.conicWeight()`)
 - [x] Minimal Skia `args.gn` build config (trim from 25GB)
 - [ ] Non-square band grids (`bandMaxX != bandMaxY`)
-- [ ] Layer::scale — evaluate for removal; currently only meaningful for
+- [ ] Layer::scale - evaluate for removal; currently only meaningful for
   FT2/text. All geometry backends leave it at 1.0. If osgSlug::Font /
   osgSlug::Text take full ownership of font-size-to-world scaling, Layer::scale
   becomes dead weight and computeQuad could take scale as a call-site parameter

@@ -1,12 +1,12 @@
-# slughorn — Python Context
+# slughorn - Python Context
 
 ## Files
 
 ```
-ext/slughorn-python.cpp       — pybind11 bindings
-test/slughorn_render.py       — software shader emulator + image output
-test/slughorn_example.py      — end-to-end harness (pure pybind11, no serial.py)
-test/slughorn_serial.py       — pure-Python .slug/.slugb reader/writer (DEFERRED)
+ext/slughorn-python.cpp       - pybind11 bindings
+test/slughorn_render.py       - software shader emulator + image output
+test/slughorn_example.py      - end-to-end harness (pure pybind11, no serial.py)
+test/slughorn_serial.py       - pure-Python .slug/.slugb reader/writer (DEFERRED)
 ```
 
 Raw URLs:
@@ -15,59 +15,59 @@ https://raw.githubusercontent.com/AlphaPixel/slughorn/refs/heads/main/test/slugh
 https://raw.githubusercontent.com/AlphaPixel/slughorn/refs/heads/main/test/slughorn_example.py
 https://raw.githubusercontent.com/AlphaPixel/slughorn/refs/heads/main/test/slughorn_serial.py
 
-## pybind11 bindings — current surface (slughorn-python.cpp)
+## pybind11 bindings - current surface (slughorn-python.cpp)
 
 Module: `slughorn`
 
-Types exposed at module level (flat — see scoping note in file header):
+Types exposed at module level (flat - see scoping note in file header):
 
 ```
 slughorn.Key              fromCodepoint(uint32_t) / from_string(str)
-                          __hash__ / __eq__ — usable as dict key
+                          __hash__ / __eq__ - usable as dict key
 slughorn.KeyType          Codepoint / Name enum
 slughorn.Color            r, g, b, a  (default opaque black)
 slughorn.Matrix           xx, yx, xy, yy, dx, dy  (default identity)
                           identity(), is_identity(), apply(x,y), __mul__
 slughorn.Layer            key, color, transform, scale, effect_id
 slughorn.CompositeShape   layers, advance,  __len__
-slughorn.Curve            x1,y1, x2,y2, x3,y3  (quadratic Bézier)
+slughorn.Curve            x1,y1, x2,y2, x3,y3  (quadratic Bezier)
 slughorn.ShapeInfo        curves, auto_metrics, bearing_x/y, width, height,
                           advance, num_bands_x, num_bands_y
 slughorn.Shape            (read-only) all band/metric fields +
                           em_origin, em_size, em_to_uv(ex, ey)
 slughorn.TextureData      width, height, format ("RGBA32F"/"RGBA16UI"),
-                          bytes (zero-copy memoryview — keep Atlas alive)
+                          bytes (zero-copy memoryview - keep Atlas alive)
 slughorn.Atlas            add_shape, add_composite_shape, build, is_built,
                           get_shape, get_composite_shape, has_key,
                           get_shapes, get_composite_shapes,
                           curve_texture, band_texture
 slughorn.CurveDecomposer  move_to, line_to, quad_to, cubic_to,
                           get_curves, clear, __len__
-slughorn.emoji            submodule — Unicode 15.1 CLDR lookup table
+slughorn.emoji            submodule - Unicode 15.1 CLDR lookup table
 ```
 
 Serial functions (only present when built with SLUGHORN_SERIAL=ON):
 
 ```
-slughorn.read(path)       → shared_ptr<Atlas> (is_built immediately)
+slughorn.read(path)       -> shared_ptr<Atlas> (is_built immediately)
 slughorn.write(atlas, path)  extension determines format (.slug / .slugb)
 ```
 
 Backend submodules (ft2, skia, cairo) are stubbed but not yet bound.
 
-## slughorn_render.py — architecture
+## slughorn_render.py - architecture
 
 Three levels, each building on the one below:
 
-**Level 1 — Pure math** (no slughorn import):
+**Level 1 - Pure math** (no slughorn import):
 
 * `calc_root_code`, `solve_horiz_poly`, `solve_vert_poly`, `calc_coverage`
-* `render_sample(curves, render_coord, pixels_per_em)` — ground truth, all curves, no bands
-* `render_sample_banded(curves, hbands_idx, vbands_idx, ...)` — mirrors GPU shader exactly
+* `render_sample(curves, render_coord, pixels_per_em)` - ground truth, all curves, no bands
+* `render_sample_banded(curves, hbands_idx, vbands_idx, ...)` - mirrors GPU shader exactly
 
-**Level 2 — Atlas bridge (temporary)**:
+**Level 2 - Atlas bridge (temporary)**:
 
-* `AtlasView(atlas, key)` — decodes a built Atlas into Python-native structures
+* `AtlasView(atlas, key)` - decodes a built Atlas into Python-native structures
   that `render_sample_banded` can consume. Constructed once per (atlas, key) pair.
 
   Attributes:
@@ -81,27 +81,27 @@ Three levels, each building on the one below:
   AtlasView is a temporary bridge and will be replaced by a C++-backed
   `DecodedShape` exposed via pybind11.
 
-**Level 3 — Grid samplers + image output**:
+**Level 3 - Grid samplers + image output**:
 
-* `sample_grid(curves, size, margin)` — reference path, pure Curve list
-* `sample_grid_from_atlas(atlas, key, size, margin, banded)` — uses AtlasView
+* `sample_grid(curves, size, margin)` - reference path, pure Curve list
+* `sample_grid_from_atlas(atlas, key, size, margin, banded)` - uses AtlasView
 * `save_image(grid, filename, flip_y)`
-* `save_curves_debug(curves, shape, filename, scale)` — geometry diagram PNG
-* `print_grid(grid)` — ASCII art to stdout
+* `save_curves_debug(curves, shape, filename, scale)` - geometry diagram PNG
+* `print_grid(grid)` - ASCII art to stdout
 
-## AtlasView — why it exists (and why it will go away)
+## AtlasView - why it exists (and why it will go away)
 
 `render_sample_banded` is a Python emulator of the GPU fragment shader. The
 shader performs hardware texture fetches; Python cannot. `AtlasView.__init__`
 decodes the raw texture bytes once into Python-native lists:
 
-* `self.curves` — flat list of `(x1,y1,x2,y2,x3,y3)` tuples (curve texture unpacked)
-* `self.hbands_idx` / `self.vbands_idx` — lists-of-lists of int indices (band texture decoded)
+* `self.curves` - flat list of `(x1,y1,x2,y2,x3,y3)` tuples (curve texture unpacked)
+* `self.hbands_idx` / `self.vbands_idx` - lists-of-lists of int indices (band texture decoded)
 
 Without this one-time decode, `render_sample_banded` would re-parse both textures
-via numpy at every pixel call — completely infeasible.
+via numpy at every pixel call - completely infeasible.
 
-**AtlasView is NOT a data model — it is a shader simulation bridge.**
+**AtlasView is NOT a data model - it is a shader simulation bridge.**
 
 ### Migration path (current direction)
 
@@ -124,7 +124,7 @@ After this:
 
 Refer to `ai/context-todo-pybind.md` for full implementation details.
 
-## slughorn_render.py — role after migration
+## slughorn_render.py - role after migration
 
 The reference math in `slughorn_render.py` remains unchanged.
 
@@ -141,7 +141,7 @@ This ensures:
 * shader parity is always verifiable
 * Python remains simple and inspectable
 
-## AtlasView._decode_band_texture — hidden assumption
+## AtlasView._decode_band_texture - hidden assumption
 
 `loc_to_index` computes curve index algebraically:
 
@@ -156,9 +156,9 @@ This is true for current `packTextures()` but will break if packing changes.
 
 **Future fix:**
 
-* Build explicit `(cx, cy) → index` map during decode instead of relying on math.
+* Build explicit `(cx, cy) -> index` map during decode instead of relying on math.
 
-## slughorn_serial.py — status: DEFERRED
+## slughorn_serial.py - status: DEFERRED
 
 Pure-Python reader/writer for .slug/.slugb.
 
@@ -172,8 +172,8 @@ Deferred because:
 
 ## Known bugs fixed this session (Day 7.5)
 
-1. `Layer.scale` missing from bindings — now fixed
-2. `num_bands` typo — replaced with `num_bands_x / num_bands_y`
+1. `Layer.scale` missing from bindings - now fixed
+2. `num_bands` typo - replaced with `num_bands_x / num_bands_y`
 
 ## Forward-looking: the debugging / inspector goal
 
@@ -190,17 +190,17 @@ Goals:
 Architecture:
 
 ```
-slughorn_render.py      ← reference math (truth)
-DecodedShape (C++)      ← fast execution + decode
-slughorn_example.py     ← harness
-slughorn_inspector.py   ← [future] interactive debugger
+slughorn_render.py      <- reference math (truth)
+DecodedShape (C++)      <- fast execution + decode
+slughorn_example.py     <- harness
+slughorn_inspector.py   <- [future] interactive debugger
 ```
 
-## CompositeShape rendering — design questions (UNRESOLVED)
+## CompositeShape rendering - design questions (UNRESOLVED)
 
-(No changes — still valid as written)
+(No changes - still valid as written)
 
-## TODOs — Python layer
+## TODOs - Python layer
 
 * [x] Run `slughorn_example.py --selftest`
 * [ ] Run `slughorn_example.py <real.slug>` end-to-end

@@ -47,28 +47,27 @@ namespace cairo {
 // Decompose the current path on @p cr into slughorn curves, shifted to local origin for
 // tight atlas bands.
 //
-// The bounding box minimum (x1, y1) is subtracted from every curve point. Returns both
-// the shifted curves and the subtracted offset as a Matrix (dx/dy only; xx/yy are identity).
-// Store the Matrix in Layer::transform if you need to restore the original canvas position
-// at draw time.
+// The bounding box minimum (x1, y1) is subtracted from every curve point. Returns both the shifted
+// curves and the subtracted offset as a Matrix (dx/dy only; xx/yy are identity). Store the Matrix
+// in Layer::transform if you need to restore the original canvas position at draw time.
 //
-// @p scale is applied uniformly to every coordinate after the local shift. Use it to
-// normalize path coordinates into the em-square slughorn expects (e.g. 1/100 if your path
-// is built in a 100-unit space). Pass 1.0 if coordinates are already normalized.
-std::pair<Atlas::Curves, Matrix> decomposePath(cairo_t* cr, slug_t scale = 1.0_cv);
+// @p scale is applied uniformly to every coordinate after the local shift. Use it to normalize path
+// coordinates into the em-square slughorn expects (e.g. 1/100 if your path is built in a 100-unit
+// space). Pass 1.0 if coordinates are already normalized.
+std::pair<Atlas::Curves, Matrix> decomposePath(cairo_t* cr, slug_t scale=1.0_cv);
 
 // Decompose the current path on @p cr and register the result in @p atlas under @p key.
 //
-// Returns the local-origin offset as a Matrix (see decomposePath). Store it in
-// Layer::transform for correct composite positioning.
+// Returns the local-origin offset as a Matrix (see decomposePath). Store it in Layer::transform for
+// correct composite positioning.
 //
 // Returns an identity Matrix and does NOT call addShape if the path is empty.
 Matrix loadShape(
-    cairo_t* cr,
-    Atlas& atlas,
-    Key key,
-    slug_t scale = 1.0_cv,
-    bool autoMetrics = true
+	cairo_t* cr,
+	Atlas& atlas,
+	Key key,
+	slug_t scale=1.0_cv,
+	bool autoMetrics=true
 );
 
 }
@@ -83,70 +82,78 @@ namespace slughorn {
 namespace cairo {
 
 std::pair<Atlas::Curves, Matrix> decomposePath(cairo_t* cr, slug_t scale) {
-    double x1, y1, x2, y2;
-    cairo_path_extents(cr, &x1, &y1, &x2, &y2);
+	double x1, y1, x2, y2;
 
-    const slug_t ox = cv(x1) * scale;
-    const slug_t oy = cv(y1) * scale;
+	cairo_path_extents(cr, &x1, &y1, &x2, &y2);
 
-    Atlas::Curves curves;
-    CurveDecomposer decomposer(curves);
-    cairo_path_t* path = cairo_copy_path(cr);
+	const slug_t ox = cv(x1) * scale;
+	const slug_t oy = cv(y1) * scale;
 
-    for(int i = 0; i < path->num_data; i += path->data[i].header.length) {
-        const cairo_path_data_t* d = &path->data[i];
+	Atlas::Curves curves;
 
-        switch(d->header.type) {
-            case CAIRO_PATH_MOVE_TO:
-                decomposer.moveTo(cv(d[1].point.x) * scale, cv(d[1].point.y) * scale);
-                break;
+	CurveDecomposer decomposer(curves);
 
-            case CAIRO_PATH_LINE_TO:
-                decomposer.lineTo(cv(d[1].point.x) * scale, cv(d[1].point.y) * scale);
-                break;
+	cairo_path_t* path = cairo_copy_path(cr);
 
-            case CAIRO_PATH_CURVE_TO:
-                decomposer.cubicTo(
-                    cv(d[1].point.x) * scale, cv(d[1].point.y) * scale,
-                    cv(d[2].point.x) * scale, cv(d[2].point.y) * scale,
-                    cv(d[3].point.x) * scale, cv(d[3].point.y) * scale
-                );
-                break;
+	for(int i = 0; i < path->num_data; i += path->data[i].header.length) {
+		const cairo_path_data_t* d = &path->data[i];
 
-            case CAIRO_PATH_CLOSE_PATH:
-                decomposer.close();
-                break;
-        }
-    }
+		switch(d->header.type) {
+			case CAIRO_PATH_MOVE_TO:
+				decomposer.moveTo(cv(d[1].point.x) * scale, cv(d[1].point.y) * scale);
 
-    cairo_path_destroy(path);
+				break;
 
-    // Shift all curves to local origin.
-    for(auto& c : curves) {
-        c.x1 -= ox; c.x2 -= ox; c.x3 -= ox;
-        c.y1 -= oy; c.y2 -= oy; c.y3 -= oy;
-    }
+			case CAIRO_PATH_LINE_TO:
+				decomposer.lineTo(cv(d[1].point.x) * scale, cv(d[1].point.y) * scale);
 
-    Matrix transform = Matrix::identity();
+				break;
 
-    transform.dx = ox;
-    transform.dy = oy;
+			case CAIRO_PATH_CURVE_TO:
+				decomposer.cubicTo(
+					cv(d[1].point.x) * scale, cv(d[1].point.y) * scale,
+					cv(d[2].point.x) * scale, cv(d[2].point.y) * scale,
+					cv(d[3].point.x) * scale, cv(d[3].point.y) * scale
+				);
 
-    return { curves, transform };
+				break;
+
+			case CAIRO_PATH_CLOSE_PATH:
+				decomposer.close();
+
+				break;
+		}
+	}
+
+	cairo_path_destroy(path);
+
+	// Shift all curves to local origin.
+	for(auto& c : curves) {
+		c.x1 -= ox; c.x2 -= ox; c.x3 -= ox;
+		c.y1 -= oy; c.y2 -= oy; c.y3 -= oy;
+	}
+
+	Matrix transform = Matrix::identity();
+
+	transform.dx = ox;
+	transform.dy = oy;
+
+	return { curves, transform };
 }
 
 Matrix loadShape(cairo_t* cr, Atlas& atlas, Key key, slug_t scale, bool autoMetrics) {
-    auto [curves, transform] = decomposePath(cr, scale);
+	auto [curves, transform] = decomposePath(cr, scale);
 
-    if(curves.empty()) return Matrix::identity();
+	if(curves.empty()) return Matrix::identity();
 
-    Atlas::ShapeInfo info;
-    info.autoMetrics = autoMetrics;
-    info.curves = std::move(curves);
+	Atlas::ShapeInfo info;
 
-    atlas.addShape(key, info);
+	info.autoMetrics = autoMetrics;
+	info.curves = std::move(curves);
 
-    return transform;
+	atlas.addShape(key, info);
+
+	return transform;
 }
 
 }

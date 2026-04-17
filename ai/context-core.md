@@ -1,15 +1,15 @@
-# slughorn / osgSlug — Core Context
+# slughorn / osgSlug - Core Context
 
 ## What this project is
 
 A GPU-native vector shape renderer based on the Slug algorithm (Lengyel 2017).
-Renders closed quadratic Bezier outlines per-fragment — no tessellation,
+Renders closed quadratic Bezier outlines per-fragment - no tessellation,
 resolution-independent, correct under perspective.
 
 Built in two layers:
-- **slughorn** — pure C++, no graphics dependencies. Builds curve + band textures
+- **slughorn** - pure C++, no graphics dependencies. Builds curve + band textures
   as raw byte buffers. Public output is `TextureData` for the caller to upload.
-- **osgSlug** — OSG adapter. Adds texture upload, ShapeDrawable, Text, and Font.
+- **osgSlug** - OSG adapter. Adds texture upload, ShapeDrawable, Text, and Font.
 
 ## Repository
 
@@ -36,41 +36,41 @@ AI/LLM context bootstrap files:
 
 ## Key types (slughorn.hpp)
 
-- `Atlas` — add shapes/composites, call `build()`, get `TextureData` back
-- `Atlas::Shape` — output: band texture coords, band transform, metrics
-- `Atlas::Shape::computeQuad(transform, scale=1, expand=0)` — world-space quad
-- `Atlas::TextureData` — raw pixel buffer (RGBA32F curve tex, RGBA16UI band tex)
-- `Atlas::PackingStats` — build-time diagnostic
-- `Atlas::ShapeInfo` — input descriptor: curves, autoMetrics, numBandsX/Y
-- `Quad` — `{ x0, y0, x1, y1 }` bottom-left and top-right corners
-- `CurveDecomposer` — path sink: moveTo/lineTo/quadTo/cubicTo/close → Curves
-- `Color` — `{ r, g, b, a }`
-- `Matrix` — 6-float column-major affine: xx, yx, xy, yy, dx, dy
-- `Key` — discriminated union: `fromCodepoint(uint32_t)` or `fromString(string)`
-- `Layer` — `{ Key, Color, Matrix transform, slug_t scale, uint32_t effectId }`
-- `CompositeShape` — `{ vector<Layer>, advance }`
+- `Atlas` - add shapes/composites, call `build()`, get `TextureData` back
+- `Atlas::Shape` - output: band texture coords, band transform, metrics
+- `Atlas::Shape::computeQuad(transform, scale=1, expand=0)` - world-space quad
+- `Atlas::TextureData` - raw pixel buffer (RGBA32F curve tex, RGBA16UI band tex)
+- `Atlas::PackingStats` - build-time diagnostic
+- `Atlas::ShapeInfo` - input descriptor: curves, autoMetrics, numBandsX/Y
+- `Quad` - `{ x0, y0, x1, y1 }` bottom-left and top-right corners
+- `CurveDecomposer` - path sink: moveTo/lineTo/quadTo/cubicTo/close -> Curves
+- `Color` - `{ r, g, b, a }`
+- `Matrix` - 6-float column-major affine: xx, yx, xy, yy, dx, dy
+- `Key` - discriminated union: `fromCodepoint(uint32_t)` or `fromString(string)`
+- `Layer` - `{ Key, Color, Matrix transform, slug_t scale, uint32_t effectId }`
+- `CompositeShape` - `{ vector<Layer>, advance }`
 - `slug_t = float`, `_cv` UDL, `cv()` cast helper ("cv" means "curve value")
 
 
-## Scale contract — CRITICAL
+## Scale contract - CRITICAL
 
 Two distinct uses of "scale" that must never be conflated:
 
-**Backend normalization scale** — internal to each backend, never stored on Layer:
+**Backend normalization scale** - internal to each backend, never stored on Layer:
 - Cairo: scale param to `decomposePath()` normalizes canvas pixels to em-space
 - NanoSVG: always `1/image->width` internally, never exposed to caller
 - FreeType2: `1/unitsPerEM`, internal only
 
-**Layer scale** — stored on `Layer::scale`, read by `computeQuad()` and `compile()`:
+**Layer scale** - stored on `Layer::scale`, read by `computeQuad()` and `compile()`:
 - SVG / Cairo / NanoSVG: always `1.0` (already normalized to em-space)
-- Text / FreeType2: `_fontSize` — scales em-space glyphs to world units
+- Text / FreeType2: `_fontSize` - scales em-space glyphs to world units
 
 The two must never be conflated. `Layer::scale` is not the normalization factor.
 If Text / FreeType2 continues to be the ONLY way `scale` is used, it might be
 worth REMOVING IT from `Layer` and punting the reponsibility to the caller.
 
 
-## SLUG_EXPAND — CRITICAL
+## SLUG_EXPAND - CRITICAL
 
 `expand` in `compile()` must NEVER be derived from scale. It is a fixed constant:
 
@@ -84,7 +84,7 @@ worth REMOVING IT from `Layer` and punting the reponsibility to the caller.
 world size or font size. The old `expand = 1/scale` was always wrong.
 
 
-## computeQuad — current signature
+## computeQuad - current signature
 
     Quad computeQuad(
         const Matrix& transform,
@@ -132,13 +132,13 @@ Use `osg::MatrixTransform::rotate(90deg around X)` to bring SVG content upright
 in a Z-up OSG scene.
 
 
-## Texture packing — key invariants
+## Texture packing - key invariants
 
 - Textures grow vertically: always `TEX_WIDTH` (512) wide, height from content
 - `alignCursorForSpan()` ensures no band curve list straddles a row boundary
   (required for correct Slug shader behaviour)
 - `TEX_WIDTH` (512) must match `kLogBandTextureWidth` (9) in fragment shader
-- Curve padding is always 0 (mathematical guarantee — curves pack in spans of
+- Curve padding is always 0 (mathematical guarantee - curves pack in spans of
   exactly 2 texels; TEX_WIDTH is even; cursor starts at 0 and advances by 2)
 - Band padding is typically very low (<1%) for real SVG content
 
@@ -146,7 +146,7 @@ in a Z-up OSG scene.
 ## PackingStats
 
 Populated by `build()`, accessible via `getPackingStats()`. Build-time diagnostic
-only — not included in serialization (serial path bypasses `packTextures()`).
+only - not included in serialization (serial path bypasses `packTextures()`).
 
 Real-world stats for AlphaPixel logo SVG (~20 layers):
 
@@ -154,7 +154,7 @@ Real-world stats for AlphaPixel logo SVG (~20 layers):
     band:  3791 used + 29 padding / 4096 total  (92% util, 0.7% pad)
 
 
-## ShapeDrawable::compile() — current pattern
+## ShapeDrawable::compile() - current pattern
 
     for(const auto& layer : _layers) {
         const slughorn::Atlas::Shape* shape = _atlas->getShape(layer.key);
@@ -173,12 +173,12 @@ Real-world stats for AlphaPixel logo SVG (~20 layers):
 
 ## Fragment shader debug modes (osgSlug-frag.glsl)
 
-    0 — normal rendering via slug_ApplyEffect
-    1 — checkerboard per band cell
-    2 — 1px band edge lines (AA via fwidth/smoothstep)
-    3 — colored quad borders + shape fill underneath
-    4 — iteration heatmap (blue=cheap, green=moderate, red=expensive)
-    5 — heatmap + 1px band grid overlay
+    0 - normal rendering via slug_ApplyEffect
+    1 - checkerboard per band cell
+    2 - 1px band edge lines (AA via fwidth/smoothstep)
+    3 - colored quad borders + shape fill underneath
+    4 - iteration heatmap (blue=cheap, green=moderate, red=expensive)
+    5 - heatmap + 1px band grid overlay
 
 
 ## Shader vertex attribute layout
@@ -186,9 +186,9 @@ Real-world stats for AlphaPixel logo SVG (~20 layers):
     0: a_position  (vec3)
     1: a_color     (vec4)
     2: a_emCoord   (vec2)
-    3: a_bandXform (vec4)  — bandScaleX/Y, bandOffsetX/Y
-    4: a_glyphData (vec4)  — bandTexX/Y, bandMaxX/Y
-    5: a_effectId  (float) — flat varying
+    3: a_bandXform (vec4)  - bandScaleX/Y, bandOffsetX/Y
+    4: a_glyphData (vec4)  - bandTexX/Y, bandMaxX/Y
+    5: a_effectId  (float) - flat varying
 
 Uniforms: `slug_curveTexture` (unit 0), `slug_bandTexture` (unit 1),
 `slug_effectTexture` (unit 2), `slug_debugMode` (int), `osg_SimulationTime` (float)
@@ -196,11 +196,11 @@ Uniforms: `slug_curveTexture` (unit 0), `slug_bandTexture` (unit 1),
 
 ## Backend status
 
-- **FreeType2** — stable, do not touch
-- **Cairo** — stable
-- **NanoSVG** — redesigned, tests passing (43/43)
-- **Skia** — known issues, pending redesign to match Cairo/NanoSVG API
-- **Serialization** — stable
+- **FreeType2** - stable, do not touch
+- **Cairo** - stable
+- **NanoSVG** - redesigned, tests passing (43/43)
+- **Skia** - known issues, pending redesign to match Cairo/NanoSVG API
+- **Serialization** - stable
 
 
 ## Serial API (slughorn-serial.hpp)
@@ -208,7 +208,7 @@ Uniforms: `slug_curveTexture` (unit 0), `slug_bandTexture` (unit 1),
 Requires `SLUGHORN_SERIAL=ON` at CMake time (pulls in nlohmann/json).
 CMake propagates `SLUGHORN_HAS_SERIAL` define to all consumers.
 
-    // Write (.slug = JSON+base64, .slugb = binary — extension determines format)
+    // Write (.slug = JSON+base64, .slugb = binary - extension determines format)
     slughorn::serial::write(atlas, "logo.slug");
     slughorn::serial::write(atlas, "logo.slugb");
 

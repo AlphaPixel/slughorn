@@ -21,7 +21,7 @@ This leads to:
 - Loss of geometric correctness (especially noticeable with diagonals)
 
 Given that slughorn already computes **exact analytic coverage**, this is
-a fallback—not the ideal solution.
+a fallback, not the ideal solution.
 
 ---
 
@@ -32,7 +32,7 @@ The shader already has everything needed for a correct implementation:
 - Analytic curve evaluation (exact coverage via Slug)
 - em-space coordinates (`v_emCoord`)
 - Local pixel footprint via `fwidth()`
-- Implicit edge definition (coverage ≈ 0.5)
+- Implicit edge definition (coverage approx 0.5)
 
 ---
 
@@ -71,14 +71,14 @@ More correct approach:
 
 - Must operate **after `slug_Render()`**, before discard
 - Must NOT modify Slug core (banding, curve evaluation, packing)
-- Effect should smoothly fade out for ppem > ~32–48
+- Effect should smoothly fade out for ppem > ~32-48
 - Must preserve visual correctness at large sizes (no change vs raw Slug)
 
 ---
 
 ### Test Cases
 
-- Small ppem (8–16):
+- Small ppem (8-16):
   - Vertical stems (`l`, `i`)
   - Diagonals (`v`, `w`)
   - Punctuation

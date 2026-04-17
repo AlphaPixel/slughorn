@@ -273,7 +273,7 @@ bool decomposePathLocal(
 	if(bounds.isEmpty()) return false;
 
 	// Translate path so its bounding box top-left sits at the origin.
-	// All curve coordinates then live in [0, width] x [0, height] — tight
+	// All curve coordinates then live in [0, width] x [0, height]; tight
 	// bands, no wasted em-space from canvas offset.
 	const SkPath local = path.makeTransform(
 		SkMatrix::Translate(-bounds.left(), -bounds.top())
