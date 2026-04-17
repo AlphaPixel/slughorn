@@ -5,14 +5,14 @@
 ```
 ext/slughorn-python.cpp       - pybind11 bindings
 test/slughorn_render.py       - software shader emulator + image output
-test/slughorn_example.py      - end-to-end harness (pure pybind11, no serial.py)
+test/slughorn_export.py      - uses slughorn_render.py to output raster/SVG images
 test/slughorn_serial.py       - pure-Python .slug/.slugb reader/writer (DEFERRED)
 ```
 
 Raw URLs:
 https://raw.githubusercontent.com/AlphaPixel/slughorn/refs/heads/main/ext/slughorn-python.cpp
 https://raw.githubusercontent.com/AlphaPixel/slughorn/refs/heads/main/test/slughorn_render.py
-https://raw.githubusercontent.com/AlphaPixel/slughorn/refs/heads/main/test/slughorn_example.py
+https://raw.githubusercontent.com/AlphaPixel/slughorn/refs/heads/main/test/slughorn_export.py
 https://raw.githubusercontent.com/AlphaPixel/slughorn/refs/heads/main/test/slughorn_serial.py
 
 ## pybind11 bindings - current surface (slughorn-python.cpp)
@@ -192,8 +192,8 @@ Architecture:
 ```
 slughorn_render.py      <- reference math (truth)
 DecodedShape (C++)      <- fast execution + decode
-slughorn_example.py     <- harness
-slughorn_inspector.py   <- [future] interactive debugger
+slughorn_export.py     <- harness (exports rasterized PNGs and outling SVGs)
+slughorny   <- [future] interactive debugger/visualizer/optimizer/etc; will use PySide6
 ```
 
 ## CompositeShape rendering - design questions (UNRESOLVED)
@@ -202,22 +202,19 @@ slughorn_inspector.py   <- [future] interactive debugger
 
 ## TODOs - Python layer
 
-* [x] Run `slughorn_example.py --selftest`
-* [ ] Run `slughorn_example.py <real.slug>` end-to-end
+* [x] Run `slughorn_export.py --selftest`
+* [x] Run `slughorn_export.py <real.slug>` end-to-end
 * [ ] Resolve CompositeShape rendering design
 * [ ] Implement CompositeShape rendering
 
 ### pybind-driven migration
 
-* [ ] Implement `Atlas.decode(key) -> DecodedShape` in pybind11
-* [ ] Move `render_sample_banded` into C++
-* [ ] Replace AtlasView usage with DecodedShape
+* [ ] Move `render_sample_banded` into C++ (IMPORTANT)
+* [ ] Replace AtlasView usage with something powered by C++/pybind11
 * [ ] Keep Python renderer as validation/reference
 
 ### future work
 
-* [ ] Fix `loc_to_index` assumption
+* [ ] Begin writing offline asset inspection/tuning tools (in Python)
 * [ ] Revive `slughorn_serial.py`
 * [ ] Bind FT2 / Cairo / NanoSVG
-* [ ] nanobind port
-* [ ] `slughorn_inspector.py`

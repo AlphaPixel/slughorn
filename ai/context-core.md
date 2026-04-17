@@ -20,15 +20,16 @@ Raw file base: `https://raw.githubusercontent.com/AlphaPixel/slughorn/refs/heads
 Key files:
     slughorn.hpp
     slughorn.cpp
+    slughorn-canvas.hpp
+    slughorn-serial.hpp
     slughorn-ft2.hpp
     slughorn-skia.hpp
     slughorn-cairo.hpp
     slughorn-nanosvg.hpp
-    slughorn-serial.hpp
+    slughorn-emojoi.hpp
     ext/slughorn-python.cpp
     test/slughorn_render.py
-    test/slughorn_serial.py
-    test/slughorn_example.py
+    test/slughorn_export.py
 
 AI/LLM context bootstrap files:
     ai/context-core.md (THIS FILE)

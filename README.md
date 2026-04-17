@@ -3,6 +3,72 @@
 Library for shoehorning the Slug text/graphics GPU rendering library
 (https://sluglibrary.com) into projects.
 
+# TODO
+
+## Soon
+
+- [ ] Change `slughorn_render.py` to dump SVG for the `save_curves_debug`
+- [ ] Add CMake helpers for compiling in each backend
+- [ ] Slug "mip-mapping"! Starting with osgSlug, introduce the ability to
+  "short-circuit" the Slug quad based on some "level of detail" rule; when the
+  shape is some threshold of distance AWAY, revert to simple texture lookup
+  approximations. NOTE: `slughorn` MIGHT be able to participate in this
+  optmization as well ... somehow
+- [ ] Fix `numBands` auto-calculation and account for spatial curve
+  distribution, not just count
+- [x] pybind11 wrapper
+- [ ] Change `composites` to `compositeShapes` in serialization, etc
+- [x] Change the `autoMetrics` defaul to `true`
+- [ ] Rename `slughorn-ft2.hpp` to `slughorn-freetype.hpp`
+- [ ] Enforce VERSION compatibility in backends
+
+## Medium Term
+
+- [ ] Introduce `slughorn-harfbuzz.hpp` text API, using Harfbuzz to "shape" it
+  properly. Note: it will necessarily NEED to be built on top of the FreeType2
+  backend (`slughorn-ft2.hpp`)!
+- [ ] Qt6 QPainterPath provides moveTo / lineTo / quadTo / cubicTo /
+  closeSubpath via elementAt() iteration; maps cleanly to CurveDecomposer.
+  Quadratics are native to Qt6 (unlike Cairo which works in cubics). QFont /
+  QRawFont provide glyph outline extraction as a potential FreeType2 complement.
+  QSvgRenderer provides SVG loading as a potential NanoSVG complement.
+  Structure to match slughorn-cairo.hpp: decomposePath(QPainterPath, Atlas&).
+- [ ] Allow `serial::writeJSON` for ANY object (not JUST `Atlas`)
+- [ ] Helpers for the `9-slice` method of a rounded rectangle
+- [x] `Atlas::createDefaultStateSet()` member instead of free function in
+  `Drawable.hpp`
+- [ ] Sync `TEX_WIDTH` / `kLogBandTextureWidth`; uniform or shader preamble
+  injection
+- [ ] Premultiplied alpha
+- [ ] Proper depth testing and render order
+- [x] Remove `slug_color` uniform remnant from shaders (color is pure vertex
+  attribute now)
+- [ ] Simulate a fragment processing frame in Python and inspect the math
+- [ ] Tooling for "optimizing" Atlas::build
+- [ ] Generate tight carrier mesh from Slug
+  coverage via sampling + contour extraction + triangulation (offline). Preserve
+  em-space UVs.
+- [ ] Generate SDF/MSDF texture data with Python emulator
+
+## When Ready
+
+- [ ] Add an `effectId/shapeId` UDL and helper like `slug_t/_cv/cv`
+- [x] `Atlas::Key` type conversion (`uint32_t` -> `Codepoint | Name`
+  discriminated union)
+- [x] Conic subdivision for Skia circular geometry (`iter.conicWeight()`)
+- [x] Minimal Skia `args.gn` build config (trim from 25GB)
+- [ ] Non-square band grids (`bandMaxX != bandMaxY`)
+- [ ] Layer::scale - evaluate for removal; currently only meaningful for
+  FT2/text. All geometry backends leave it at 1.0. If osgSlug::Font /
+  osgSlug::Text take full ownership of font-size-to-world scaling, Layer::scale
+  becomes dead weight and computeQuad could take scale as a call-site parameter
+  instead. Defer until text pipeline stabilizes.
+
+## Someday / Fun
+
+- [ ] Live `numBands` slider tool with real-time rebuild + heatmap feedback
+- [ ] VSG adapter (trivial now given `slughorn` separation)
+
 # Skia
 
 ## Compilation
@@ -93,61 +159,3 @@ cannot match without re-tessellating every frame.
 
 **Slug is not reinventing what Skia solved; it's solving a different problem
 that Skia deliberately doesn't address.**
-
-# TODO
-
-## Soon
-
-- [ ] Add an `effectId/shapeId` UDL and helper like `slug_t/_cv/cv`
-- [ ] Slug "mip-mapping"! Starting with osgSlug, introduce the ability to
-  "short-circuit" the Slug quad based on some "level of detail" rule; when the
-  shape is some threshold of distance AWAY, revert to simple texture lookup
-  approximations. NOTE: `slughorn` MIGHT be able to participate in this
-  optmization as well ... somehow
-- [ ] Fix `numBands` auto-calculation and account for spatial curve
-  distribution, not just count
-- [x] pybind11 wrapper
-- [ ] Change `composites` to `compositeShapes` in serialization, etc
-- [x] Change the `autoMetrics` defaul to `true`
-- [ ] Rename `slughorn-ft2.hpp` to `slughorn-freetype.hpp`
-- [ ] Enforce VERSION compatibility in backends
-
-## Medium Term
-
-- [ ] Introduce `slughorn-harfbuzz.hpp` text API, using Harfbuzz to "shape" it
-  properly. Note: it will necessarily NEED to be built on top of the FreeType2
-  backend (`slughorn-ft2.hpp`)!
-- [ ] Qt6 QPainterPath provides moveTo / lineTo / quadTo / cubicTo /
-  closeSubpath via elementAt() iteration; maps cleanly to CurveDecomposer.
-  Quadratics are native to Qt6 (unlike Cairo which works in cubics). QFont /
-  QRawFont provide glyph outline extraction as a potential FreeType2 complement.
-  QSvgRenderer provides SVG loading as a potential NanoSVG complement.
-  Structure to match slughorn-cairo.hpp: decomposePath(QPainterPath, Atlas&).
-- [ ] Allow `serial::writeJSON` for ANY object (not JUST `Atlas`)
-- [ ] Helpers for the `9-slice` method of a rounded rectangle
-- [x] `Atlas::createDefaultStateSet()` member instead of free function in
-  `Drawable.hpp`
-- [ ] Sync `TEX_WIDTH` / `kLogBandTextureWidth`; uniform or shader preamble
-  injection
-- [ ] Premultiplied alpha
-- [ ] Proper depth testing and render order
-- [x] Remove `slug_color` uniform remnant from shaders (color is pure vertex
-  attribute now)
-
-## When Ready
-
-- [x] `Atlas::Key` type conversion (`uint32_t` -> `Codepoint | Name`
-  discriminated union)
-- [x] Conic subdivision for Skia circular geometry (`iter.conicWeight()`)
-- [x] Minimal Skia `args.gn` build config (trim from 25GB)
-- [ ] Non-square band grids (`bandMaxX != bandMaxY`)
-- [ ] Layer::scale - evaluate for removal; currently only meaningful for
-  FT2/text. All geometry backends leave it at 1.0. If osgSlug::Font /
-  osgSlug::Text take full ownership of font-size-to-world scaling, Layer::scale
-  becomes dead weight and computeQuad could take scale as a call-site parameter
-  instead. Defer until text pipeline stabilizes.
-
-## Someday / Fun
-
-- [ ] Live `numBands` slider tool with real-time rebuild + heatmap feedback
-- [ ] VSG adapter (trivial now given `slughorn` separation)
