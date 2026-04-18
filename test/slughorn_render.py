@@ -25,7 +25,7 @@ import numpy as np
 
 from dataclasses import dataclass
 from typing import List, Tuple
-from PIL import Image
+from PIL import Image, ImageDraw
 
 # =============================================================================
 # Constants
@@ -44,15 +44,12 @@ LOG_BAND_TEX_WIDTH = 9 # 2^9 == 512
 class EmTransform:
 	"""
 	Shared em-space <-> pixel-space mapping used by:
-	 - sample_grid
-	 - sample_grid_from_atlas
-	 - save_curves_debug
 
 	This is the single source of truth for coordinate mapping so the debug
 	renderer and the samplers cannot drift apart.
 	"""
 
-	def __init__(self, shape, width: int, height: int, margin: float = 0.0):
+	def __init__(self, shape, width: int, height: int, margin: float=0.0):
 		ox, oy = shape.em_origin
 		sx, sy = shape.em_size
 
@@ -74,21 +71,16 @@ class EmTransform:
 		# Pixel-center sampling.
 		u = (i + 0.5) / self.width
 		v = (j + 0.5) / self.height
-		return (
-			self.ox + u * self.sx,
-			self.oy + v * self.sy,
-		)
+
+		return self.ox + u * self.sx, self.oy + v * self.sy
 
 	def em_to_px(self, ex: float, ey: float) -> Tuple[int, int]:
 		u = (ex - self.ox) / self.sx
 		v = (ey - self.oy) / self.sy
-		return (
-			int(u * self.width),
-			int(v * self.height),
-		)
 
+		return int(u * self.width), int(v * self.height)
 
-def compute_render_size(shape, size_hint: int = 256) -> Tuple[int, int]:
+def compute_render_size(shape, size_hint: int=256) -> Tuple[int, int]:
 	"""
 	Use size_hint as the maximum output dimension while preserving aspect ratio.
 	"""
@@ -101,20 +93,15 @@ def compute_render_size(shape, size_hint: int = 256) -> Tuple[int, int]:
 	scale = size_hint / max(w, h)
 	out_w = max(1, int(round(w * scale)))
 	out_h = max(1, int(round(h * scale)))
+
 	return out_w, out_h
 
-
-# =============================================================================
+# ================================================================================================
 # Level 1 - Pure math
-# =============================================================================
+# ================================================================================================
 
-# -----------------------------------------------------------------------------
-# Curve (pure-Python version - used by render_sample / sample_grid)
-#
-# When working with a compiled Atlas, you can convert a slughorn.Curve to this
-# with: Curve(*c.to_tuple()) or just build AtlasView which does it for you.
-# -----------------------------------------------------------------------------
-
+# When working with a compiled Atlas, you can convert a slughorn.Curve to this with:
+# `Curve(*c.to_tuple())`, or just build AtlasView which does it for you.
 @dataclass
 class Curve:
 	x1: float; y1: float
@@ -122,29 +109,23 @@ class Curve:
 	x3: float; y3: float
 
 	def to_tuple(self) -> Tuple[float, ...]:
-		return (self.x1, self.y1, self.x2, self.y2, self.x3, self.y3)
+		return self.x1, self.y1, self.x2, self.y2, self.x3, self.y3
 
 	@staticmethod
 	def from_slughorn(c) -> "Curve":
 		"""Convert a slughorn.Curve (C++ binding) to a pure-Python Curve."""
+
 		return Curve(c.x1, c.y1, c.x2, c.y2, c.x3, c.y3)
-
-
-# -----------------------------------------------------------------------------
-# Helpers
-# -----------------------------------------------------------------------------
 
 def float_bits_to_uint32(x: float) -> int:
 	return struct.unpack(">I", struct.pack(">f", x))[0]
 
-
 def clamp(x: float, lo: float, hi: float) -> float:
 	return lo if x < lo else hi if x > hi else x
 
-
-# -----------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------------------
 # slug_CalcRootCode - exact port of the GLSL function
-# -----------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------------------
 
 def calc_root_code(y1: float, y2: float, y3: float) -> int:
 	i1 = float_bits_to_uint32(y1) >> 31
@@ -156,10 +137,9 @@ def calc_root_code(y1: float, y2: float, y3: float) -> int:
 
 	return (0x2E74 >> shift) & 0x0101
 
-
-# -----------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------------------
 # solve_horiz_poly - find the X intercept(s) of a quadratic Bezier at Y=0
-# -----------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------------------
 
 def solve_horiz_poly(
 	p1: Tuple[float, float],
@@ -174,21 +154,20 @@ def solve_horiz_poly(
 	if abs(ay) < EPS:
 		t = p1[1] * (0.5 / by) if abs(by) >= EPS else 0.0
 		x = (ax * t - 2.0 * bx) * t + p1[0]
+
 		return x, x
 
 	d = math.sqrt(max(by * by - ay * p1[1], 0.0))
 	t1 = (by - d) / ay
 	t2 = (by + d) / ay
-
 	x1 = (ax * t1 - 2.0 * bx) * t1 + p1[0]
 	x2 = (ax * t2 - 2.0 * bx) * t2 + p1[0]
 
 	return x1, x2
 
-
-# -----------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------------------
 # solve_vert_poly - find the Y intercept(s) of a quadratic Bezier at X=0
-# -----------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------------------
 
 def solve_vert_poly(
 	p1: Tuple[float, float],
@@ -203,21 +182,20 @@ def solve_vert_poly(
 	if abs(ax) < EPS:
 		t = p1[0] * (0.5 / bx) if abs(bx) >= EPS else 0.0
 		y = (ay * t - 2.0 * by) * t + p1[1]
+
 		return y, y
 
 	d = math.sqrt(max(bx * bx - ax * p1[0], 0.0))
 	t1 = (bx - d) / ax
 	t2 = (bx + d) / ax
-
 	y1 = (ay * t1 - 2.0 * by) * t1 + p1[1]
 	y2 = (ay * t2 - 2.0 * by) * t2 + p1[1]
 
 	return y1, y2
 
-
-# -----------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------------------
 # calc_coverage - combine horizontal and vertical winding accumulators
-# -----------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------------------
 
 def calc_coverage(
 	xcov: float, ycov: float,
@@ -227,10 +205,9 @@ def calc_coverage(
 	conservative = min(abs(xcov), abs(ycov))
 	return clamp(max(weighted, conservative), 0.0, 1.0)
 
-
-# -----------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------------------
 # render_sample - ground-truth renderer, NO bands
-# -----------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------------------
 
 def render_sample(
 	curves: List[Curve],
@@ -239,7 +216,6 @@ def render_sample(
 ) -> dict:
 	rx, ry = render_coord
 	ppe_x, ppe_y = pixels_per_em
-
 	xcov = xwgt = ycov = ywgt = 0.0
 	iters = 0
 
@@ -287,10 +263,9 @@ def render_sample(
 		"iters": iters,
 	}
 
-
-# -----------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------------------
 # render_sample_banded - band-accelerated renderer
-# -----------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------------------
 
 def render_sample_banded(
 	curves: List[Tuple[float, float, float, float, float, float]],
@@ -302,15 +277,13 @@ def render_sample_banded(
 	band_scale_y: float,
 	band_offset_x: float,
 	band_offset_y: float,
-	band_max_x:	int,
-	band_max_y:	int,
+	band_max_x: int,
+	band_max_y: int,
 ) -> dict:
 	rx, ry = render_coord
 	ppe_x, ppe_y = pixels_per_em
-
 	band_x = int(clamp(rx * band_scale_x + band_offset_x, 0, band_max_x))
 	band_y = int(clamp(ry * band_scale_y + band_offset_y, 0, band_max_y))
-
 	xcov = xwgt = ycov = ywgt = 0.0
 	iters = 0
 
@@ -373,10 +346,9 @@ def render_sample_banded(
 		"iters": iters,
 	}
 
-
-# =============================================================================
+# ================================================================================================
 # Level 2 - Atlas bridge
-# =============================================================================
+# ================================================================================================
 
 class AtlasView:
 	"""
@@ -418,6 +390,7 @@ class AtlasView:
 				self.shape.band_max_x,
 				self.shape.band_max_y,
 			)
+
 		else:
 			return render_sample(self.curve_list, (em_x, em_y), pixels_per_em)
 
@@ -432,6 +405,7 @@ class AtlasView:
 		for y in range(tex.height):
 			for x in range(0, tex.width, 2):
 				t0 = data[y, x]
+
 				if x + 1 >= tex.width:
 					continue
 
@@ -469,6 +443,7 @@ class AtlasView:
 			abs_idx = start + relative_offset
 			ty = abs_idx >> LOG_BAND_TEX_WIDTH
 			tx = abs_idx & (BAND_TEX_WIDTH - 1)
+
 			return data[ty, tx]
 
 		headers = []
@@ -477,32 +452,35 @@ class AtlasView:
 			texel = read_texel(i)
 			count = int(texel[0])
 			offset = int(texel[1])
+
 			headers.append((count, offset))
 
 		def decode_band(count: int, offset: int) -> List[int]:
 			result = []
+
 			for i in range(count):
 				texel = read_texel(offset + i)
-				cx	= int(texel[0])
-				cy	= int(texel[1])
+				cx = int(texel[0])
+				cy = int(texel[1])
+
 				result.append(loc_to_index(cx, cy))
+
 			return result
 
-		hbands_idx = [decode_band(*headers[i])		 for i in range(num_h)]
+		hbands_idx = [decode_band(*headers[i]) for i in range(num_h)]
 		vbands_idx = [decode_band(*headers[num_h + i]) for i in range(num_v)]
 
 		return hbands_idx, vbands_idx
 
-
-# =============================================================================
+# ================================================================================================
 # Level 3 - Grid samplers + image I/O
-# =============================================================================
+# ================================================================================================
 
 def sample_grid(
 	curves: List[Curve],
 	shape,
-	size: int = 128,
-	margin: float = 0.0,
+	size: int=128,
+	margin: float=0.0,
 ) -> List[List[float]]:
 	"""
 	Render a grid using the reference (brute-force) renderer.
@@ -510,10 +488,10 @@ def sample_grid(
 	Unlike the old version, this samples in the shape's actual em-space
 	using the same transform logic as the atlas path and debug renderer.
 	"""
+
 	width, height = compute_render_size(shape, size)
 	xf = EmTransform(shape, width, height, margin)
 	ppe = (float(width), float(height))
-
 	grid = [[0.0] * width for _ in range(height)]
 
 	for j in range(height):
@@ -523,25 +501,22 @@ def sample_grid(
 
 	return grid
 
-
 def sample_grid_from_atlas(
 	atlas,
 	key,
-	size: int = 128,
-	margin: float = 0.0,
-	banded: bool = True,
+	size: int=128,
+	margin: float=0.0,
+	banded: bool=True,
 ) -> List[List[float]]:
 	"""
-	Render a grid from a built slughorn.Atlas using the same em-space mapping
-	as save_curves_debug().
+	Render a grid from a built slughorn.Atlas
 	"""
+
 	view = AtlasView(atlas, key)
 	shape = view.shape
-
 	width, height = compute_render_size(shape, size)
 	xf = EmTransform(shape, width, height, margin)
 	ppe = (float(width), float(height))
-
 	grid = [[0.0] * width for _ in range(height)]
 
 	for j in range(height):
@@ -551,40 +526,47 @@ def sample_grid_from_atlas(
 
 	return grid
 
-
-# -----------------------------------------------------------------------------
-# Debug output
-# -----------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------------------
+# Debug output, file writing
+# ------------------------------------------------------------------------------------------------
 
 def print_grid(grid: List[List[float]]) -> None:
 	chars = " .:-=+*#%@"
+
 	for row in grid:
 		print("".join(chars[int(v * (len(chars) - 1))] for v in row))
-
 
 def save_image(grid: List[List[float]], filename: str = "out.png", flip_y: bool = False) -> None:
 	if flip_y:
 		grid = list(reversed(grid))
+
 	h, w = len(grid), len(grid[0])
 	img = Image.new("L", (w, h))
 	px = img.load()
+
 	for y in range(h):
 		for x in range(w):
 			px[x, y] = int(clamp(grid[y][x], 0.0, 1.0) * 255)
+
 	img.save(filename)
-	print(f"Saved {w}x{h} image -> {filename}")
 
+	return f"Saved {w}x{h} image -> {filename}"
 
-def save_curves_debug(curves, shape, filename="curves_debug.png", scale=1024, margin: float = 0.0, flip_y: bool = False):
+def save_curves(
+	curves,
+	shape,
+	filename="curves_debug.png",
+	scale: int=1024,
+	margin: float=0.0,
+	flip_y: bool=True
+):
 	"""
 	Render the raw curve geometry as a diagnostic diagram using the same
 	em-space -> pixel-space transform as the samplers.
 	"""
-	from PIL import ImageDraw
 
 	w, h = compute_render_size(shape, scale)
 	xf = EmTransform(shape, w, h, margin)
-
 	img = Image.new("RGB", (w, h), (30, 30, 30))
 	draw = ImageDraw.Draw(img)
 
@@ -593,20 +575,25 @@ def save_curves_debug(curves, shape, filename="curves_debug.png", scale=1024, ma
 
 	def em_to_px(ex, ey):
 		px, py = xf.em_to_px(ex, ey)
+
 		if flip_y:
 			py = h - py
+
 		return px, py
 
 	def draw_quad_bezier(p1, p2, p3, color, steps=32):
 		pts = []
+
 		for i in range(steps + 1):
 			t = i / steps
 			mt = 1.0 - t
-			x = mt*mt*p1[0] + 2*mt*t*p2[0] + t*t*p3[0]
-			y = mt*mt*p1[1] + 2*mt*t*p2[1] + t*t*p3[1]
+			x = mt * mt * p1[0] + 2 * mt * t * p2[0] + t * t * p3[0]
+			y = mt * mt * p1[1] + 2 * mt * t * p2[1] + t * t * p3[1]
+
 			pts.append(em_to_px(x, y))
+
 		for i in range(len(pts) - 1):
-			draw.line([pts[i], pts[i+1]], fill=color, width=1)
+			draw.line([pts[i], pts[i + 1]], fill=color, width=1)
 
 	for c in curves:
 		x1, y1, x2, y2, x3, y3 = c
@@ -626,7 +613,8 @@ def save_curves_debug(curves, shape, filename="curves_debug.png", scale=1024, ma
 
 		px, py = em_to_px(*p2)
 		r = 3
-		draw.ellipse([px-r, py-r, px+r, py+r], outline=(100, 100, 255), width=1)
+
+		draw.ellipse([px - r, py - r, px + r, py + r], outline=(100, 100, 255), width=1)
 
 	# -------------------------------------------------------------------------
 	# Band overlay
@@ -653,9 +641,17 @@ def save_curves_debug(curves, shape, filename="curves_debug.png", scale=1024, ma
 		draw.line([(x0, y0), (x1, y1)], fill=(255, 0, 0), width=1)
 
 	img.save(filename)
-	print(f"Saved {w}x{h} curve debug -> {filename}")
 
-def save_curves_debug_svg(curves, shape, filename="curves_debug.svg", scale=1024, margin=0.0, flip_y=True):
+	return f"Saved {w}x{h} curve debug -> {filename}"
+
+def save_curves_svg(
+	curves,
+	shape,
+	filename="curves_debug.svg",
+	scale: int=1024,
+	margin: float=0.0,
+	flip_y: bool=True
+):
 	# --- Size + transform ---
 	w, h = compute_render_size(shape, scale)
 	xf = EmTransform(shape, w, h, margin)
@@ -665,8 +661,10 @@ def save_curves_debug_svg(curves, shape, filename="curves_debug.svg", scale=1024
 
 	def em_to_px(ex, ey):
 		px, py = xf.em_to_px(ex, ey)
+
 		if flip_y:
 			py = h - 1 - py
+
 		return px, py
 
 	# --- SVG builder ---
@@ -680,12 +678,16 @@ def save_curves_debug_svg(curves, shape, filename="curves_debug.svg", scale=1024
 
 	def circle(cx, cy, r, fill=None, stroke=None):
 		parts = [f'cx="{cx}"', f'cy="{cy}"', f'r="{r}"']
+
 		if fill:
 			parts.append(f'fill="{fill}"')
+
 		else:
 			parts.append('fill="none"')
+
 		if stroke:
 			parts.append(f'stroke="{stroke}"')
+
 		elements.append(f'<circle {" ".join(parts)} />')
 
 	def quad_path(p1, p2, p3, color):
@@ -726,7 +728,7 @@ def save_curves_debug_svg(curves, shape, filename="curves_debug.svg", scale=1024
 		circle(px2, py2, 3, stroke="#6464FF")
 
 	# -------------------------------------------------------------------------
-	# 🔴 Band overlay
+	# Band overlay
 	# -------------------------------------------------------------------------
 	for i in range(shape.band_max_y + 1):
 		y = (i - shape.band_offset_y) / shape.band_scale_y
@@ -743,12 +745,16 @@ def save_curves_debug_svg(curves, shape, filename="curves_debug.svg", scale=1024
 	# -------------------------------------------------------------------------
 	# Write SVG
 	# -------------------------------------------------------------------------
-	svg = f'''<svg xmlns="http://www.w3.org/2000/svg"
-		width="{w}" height="{h}"
-		viewBox="0 0 {w} {h}">
-		<rect width="100%" height="100%" fill="#1E1E1E"/>
-		{''.join(elements)}
-	</svg>'''
+	svg = " ".join((
+		'<svg xmlns="http://www.w3.org/2000/svg"',
+		f'width="{w}" height="{h}"',
+		f'viewBox="0 0 {w} {h}">\n'
+	))
+
+	# TODO: Make this background fill OPTIONAL!
+	svg += '\t<rect width="100%" height="100%" fill="#1E1E1E"/>\n'
+	svg += '\n'.join(f"\t{e}" for e in elements)
+	svg += "\n</svg>"
 
 	with open(filename, "w") as f:
 		f.write(svg)
@@ -781,8 +787,10 @@ if __name__ == "__main__":
 	shape = _ShapeStub()
 
 	grid = sample_grid(curves, shape, size=128)
+
 	save_image(grid, "grid_reference.png")
-	save_curves_debug([c.to_tuple() for c in curves], shape, "grid_reference_curves.png")
+
+	save_curves([c.to_tuple() for c in curves], shape, "grid_reference_curves.png")
 
 	print("Test 2: Atlas round-trip (requires compiled slughorn module)")
 
@@ -806,9 +814,11 @@ if __name__ == "__main__":
 		atlas.build()
 
 		grid_banded = sample_grid_from_atlas(atlas, key, size=128, banded=True)
+
 		save_image(grid_banded, "grid_banded.png")
 
 		grid_ref = sample_grid_from_atlas(atlas, key, size=128, banded=False)
+
 		save_image(grid_ref, "grid_atlas_ref.png")
 
 		diffs = [
@@ -816,6 +826,7 @@ if __name__ == "__main__":
 			for y in range(len(grid_banded))
 			for x in range(len(grid_banded[0]))
 		]
+
 		print(f"  Max banded/reference diff: {max(diffs):.6f}")
 		print(f"  Mean diff:                 {sum(diffs)/len(diffs):.6f}")
 
