@@ -100,6 +100,12 @@ struct Matrix {
 	}
 };
 
+// ================================================================================================
+// Quad
+//
+// Used both as a LITERAL "quad" for use in creating compatible 2D geometry and as a "bounding box"
+// holder type.
+// ================================================================================================
 struct Quad {
 	slug_t x0, y0; // bottom-left
 	slug_t x1, y1; // top-right
@@ -200,11 +206,27 @@ struct KeyHash {
 	size_t operator()(const Key& k) const { return k.hash(); }
 };
 
+struct KeyIterator {
+	KeyIterator(uint32_t _counter=0): counter(_counter) {}
+	KeyIterator(const char* _prefix): prefix(_prefix) {}
+	KeyIterator(std::string _prefix): prefix(std::move(_prefix)) {}
+
+	Key next() {
+		if(prefix.empty()) return Key::fromCodepoint(counter++);
+
+		return Key::fromString(prefix + "_" + std::to_string(counter++));
+	}
+
+	std::string prefix;
+
+	uint32_t counter = 0;
+};
+
 // ================================================================================================
 // Layer
 //
 // Represents the "state" of a single `Shape` instance, and includes all of the information the
-// caller will need to contextually process the `Shape` in whatever setting SlugHorn is being used.
+// caller will need to contextually process the `Shape` in whatever setting slughorn is being used.
 // ================================================================================================
 struct Layer {
 	Key key = Key(0u);

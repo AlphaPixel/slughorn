@@ -41,6 +41,7 @@ endif()
 
 option(SLUGHORN_SERIAL "Include serialization support (requires nlohmann)" OFF)
 option(SLUGHORN_NANOSVG "Include NanoSVG support (requires nanosvg)" OFF)
+option(SLUGHORN_FREETYPE "Include FreeType support (requires freetype2)" OFF)
 
 add_library(slughorn STATIC slughorn.cpp)
 
@@ -86,6 +87,27 @@ if(SLUGHORN_NANOSVG)
 			$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/ext/nanosvg/src>
 			$<INSTALL_INTERFACE:include>
 	)
+endif()
+
+if(SLUGHORN_FREETYPE)
+	# if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/ext/nanosvg")
+	# 	message(FATAL_ERROR
+	# 		"ext/nanosvg not found. Run:\n"
+	# 		"  git submodule update --init --recursive"
+	# 	)
+	# endif()
+
+	find_package(Freetype REQUIRED)
+
+	target_compile_definitions(slughorn PRIVATE SLUGHORN_FREETYPE_IMPLEMENTATION)
+	target_compile_definitions(slughorn PUBLIC  SLUGHORN_HAS_FREETYPE)
+	# target_include_directories(slughorn
+	# 	PUBLIC
+	# 		$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+	# 		$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/ext/nanosvg/src>
+	# 		$<INSTALL_INTERFACE:include>
+	# )
+	target_link_libraries(slughorn PUBLIC Freetype::Freetype)
 endif()
 
 # =============================================================================

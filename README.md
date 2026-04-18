@@ -1,4 +1,4 @@
-# SlugHorn
+# slughorn
 
 Library for shoehorning the Slug text/graphics GPU rendering library
 (https://sluglibrary.com) into projects.
@@ -19,14 +19,14 @@ Library for shoehorning the Slug text/graphics GPU rendering library
 - [x] pybind11 wrapper
 - [ ] Change `composites` to `compositeShapes` in serialization, etc
 - [x] Change the `autoMetrics` defaul to `true`
-- [ ] Rename `slughorn-ft2.hpp` to `slughorn-freetype.hpp`
+- [x] Rename `slughorn-ft2.hpp` to `slughorn-freetype.hpp`
 - [ ] Enforce VERSION compatibility in backends
 
 ## Medium Term
 
 - [ ] Introduce `slughorn-harfbuzz.hpp` text API, using Harfbuzz to "shape" it
   properly. Note: it will necessarily NEED to be built on top of the FreeType2
-  backend (`slughorn-ft2.hpp`)!
+  backend (`slughorn-freetype.hpp`)!
 - [ ] Qt6 QPainterPath provides moveTo / lineTo / quadTo / cubicTo /
   closeSubpath via elementAt() iteration; maps cleanly to CurveDecomposer.
   Quadratics are native to Qt6 (unlike Cairo which works in cubics). QFont /

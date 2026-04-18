@@ -8,8 +8,8 @@
 // -----
 // In exactly one .cpp file, before including this header:
 //
-// #define SLUGHORN_FT2_IMPLEMENTATION
-// #include "slughorn-ft2.hpp"
+// #define SLUGHORN_FREETYPE_IMPLEMENTATION
+// #include "slughorn-freetype.hpp"
 //
 // All other translation units include it without the define.
 //
@@ -18,8 +18,8 @@
 // TODO: POTENTIALLY INCLUDE THIS IN OTHER BACKENDS!
 // OPTIONAL: inject a log callback before calling any function
 //
-// slughorn::ft2::setLogCallback([](int level, const std::string& msg) {
-//     if(level >= slughorn::ft2::LOG_WARN) std::cerr << msg << "\n";
+// slughorn::freetype::setLogCallback([](int level, const std::string& msg) {
+//     if(level >= slughorn::freetype::LOG_WARN) std::cerr << msg << "\n";
 // });
 //
 // Log levels: LOG_INFO = 0, LOG_NOTICE = 1, LOG_WARN = 2
@@ -43,7 +43,7 @@
 #include FT_COLOR_H
 
 namespace slughorn {
-namespace ft2 {
+namespace freetype {
 
 // =============================================================================
 // Logging
@@ -155,14 +155,14 @@ bool loadEmojiFont(
 // =============================================================================
 // IMPLEMENTATION
 // =============================================================================
-#ifdef SLUGHORN_FT2_IMPLEMENTATION
+#ifdef SLUGHORN_FREETYPE_IMPLEMENTATION
 
 #include <cmath>
 #include <cstring>
 #include <sstream>
 
 namespace slughorn {
-namespace ft2 {
+namespace freetype {
 
 // =============================================================================
 // Logging
@@ -178,9 +178,9 @@ static LogCallback& logCallbackRef() {
 	static LogCallback cb = [](int level, const std::string& msg) {
 		if(level >= LOG_WARN) {
 			const char* prefix =
-				level >= LOG_WARN ? "[slughorn-ft2 WARN] " :
-				level >= LOG_NOTICE ? "[slughorn-ft2] " :
-				"[slughorn-ft2 info] "
+				level >= LOG_WARN ? "[slughorn-freetype WARN] " :
+				level >= LOG_NOTICE ? "[slughorn-freetype] " :
+				"[slughorn-freetype info] "
 			;
 
 			// fputs(prefix, stderr);
@@ -757,6 +757,7 @@ bool loadColorGlyph(
 	// -------------------------------------------------------------------------
 
 #if FREETYPE_MAJOR > 2 || (FREETYPE_MAJOR == 2 && FREETYPE_MINOR >= 11)
+
 	{
 		detail::processColorGlyphV1(face, codepoint, palette, atlas, out);
 
@@ -770,6 +771,7 @@ bool loadColorGlyph(
 			return true;
 		}
 	}
+
 #endif
 
 	// -------------------------------------------------------------------------

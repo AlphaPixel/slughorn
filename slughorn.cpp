@@ -1,11 +1,15 @@
 #include "slughorn.hpp"
 
 #ifdef SLUGHORN_SERIAL_IMPLEMENTATION
-#  include "slughorn-serial.hpp"
+#include "slughorn-serial.hpp"
 #endif
 
 #ifdef SLUGHORN_NANOSVG_IMPLEMENTATION
-#  include "slughorn-nanosvg.hpp"
+#include "slughorn-nanosvg.hpp"
+#endif
+
+#ifdef SLUGHORN_FREETYPE_IMPLEMENTATION
+#include "slughorn-freetype.hpp"
 #endif
 
 #include <algorithm>
