@@ -1,7 +1,35 @@
 # slughorn
 
-Library for shoehorning the Slug text/graphics GPU rendering library
-(https://sluglibrary.com) into projects.
+`slughorn` is modern C++20 library implementing the recent OSS release of the
+"Slug" GPU vector graphics rendering technique by Eric Lengyel. It makes no
+assumptions about what graphics environment being used (OpenGL, Vulkan, WebGL,
+WebGPU, DirectX, etc) and instead focuses *only* on simplifying the processing
+of creating/ingesting vector data from various backends--or, alternatively, by
+using an HTML "Canas-like" API directly in code--so that the data can be
+directly uploaded to the GPU as easily as possible.
+
+Furthermore, `slughorn` provides tools for traditional "offline asset"
+processing (primarily in Python), as well as a [glTF](#)-compatible JSON file
+format.
+
+# Supported Backends
+
+- NanoSVG
+- Skia
+- Cairo
+- FreeType
+
+In addition to the above backends, `slughorn` provides a "native" API for
+authoring vector graphics inspired by the standard HTML `Canvas` element.
+
+Adding support for other backends is generally as easy using a single helper
+class: `slughorn::CurveDecomposer`. If your vector data can be reduced into
+simple quadratic Bezier curves, `slughorn` can make it render.
+
+## Supported Backends: FreeType
+
+The FreeType2 backend supports stadard OTF/TTF glyphs, all of the COLRv0
+specification, and a large portion of the COLRv1 spec!
 
 # TODO
 
