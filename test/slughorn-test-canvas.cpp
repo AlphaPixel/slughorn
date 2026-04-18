@@ -13,9 +13,8 @@
 int main(int argc, char** argv) {
 	slughorn::Atlas atlas;
 
-	uint32_t keyBase = 0xE0000;
-
-	slughorn::canvas::Canvas canvas(atlas, keyBase);
+	// slughorn::canvas::Canvas canvas(atlas, 0x0);
+	slughorn::canvas::Canvas canvas(atlas, "MyShape");
 
 	// fast, visible only at large sizes
 	canvas.decomposer().tolerance = slughorn::TOLERANCE_DRAFT;

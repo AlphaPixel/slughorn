@@ -44,12 +44,18 @@
 // would exist if Python's GC collected the Curves list before the decomposer.
 // ================================================================================================
 
-#define SLUGHORN_EMOJI_IMPLEMENTATION
 #include "slughorn.hpp"
+#include "slughorn-canvas.hpp"
+
+#define SLUGHORN_EMOJI_IMPLEMENTATION
 #include "slughorn-emoji.hpp"
 
 #ifdef SLUGHORN_HAS_SERIAL
 #include "slughorn-serial.hpp"
+#endif
+
+#ifdef SLUGHORN_HAS_FREETYPE
+#include "slughorn-freetype.hpp"
 #endif
 
 #include <pybind11/pybind11.h>
@@ -122,13 +128,15 @@ PYBIND11_MODULE(slughorn, m) {
 	// Both namespaces are hash-disjoint in C++; __hash__ and __eq__ reflect
 	// that so Key objects can be used as Python dict keys correctly.
 	// ============================================================================================
-	py::enum_<slughorn::Key::Type>(m, "KeyType")
+	auto key_ = py::class_<slughorn::Key>(m, "Key");
+
+	py::enum_<slughorn::Key::Type>(key_, "Type")
 		.value("Codepoint", slughorn::Key::Type::Codepoint)
 		.value("Name", slughorn::Key::Type::Name)
 		.export_values()
 	;
 
-	py::class_<slughorn::Key>(m, "Key")
+	key_
 		// Constructors
 		.def(py::init<>(), "Default key: codepoint 0.")
 		.def(py::init<uint32_t>(), py::arg("codepoint"),
@@ -162,6 +170,34 @@ PYBIND11_MODULE(slughorn, m) {
 		.def("__ne__", &slughorn::Key::operator!=)
 		.def("__hash__", &slughorn::Key::hash, "Enable use as a Python dict key or set member.")
 		.def("__repr__", [](const slughorn::Key& k) { return streamRepr(k); })
+	;
+
+	// =========================================================================
+	// slughorn.KeyIterator
+	// =========================================================================
+	py::class_<slughorn::KeyIterator>(m, "KeyIterator")
+		.def(py::init<>(), "Numeric auto-key iterator starting at 0.")
+		.def(py::init([](std::string prefix) {
+			return slughorn::KeyIterator(prefix);
+		}), py::arg("prefix"),
+			"String key iterator: produces prefix_0, prefix_1, ..."
+		)
+		.def("next", &slughorn::KeyIterator::next, "Return the next Key and advance the counter.")
+		.def("__iter__", [](slughorn::KeyIterator& ki) -> slughorn::KeyIterator& {
+			return ki;
+		}, py::return_value_policy::reference)
+		.def("__next__", &slughorn::KeyIterator::next)
+		.def_readwrite("counter", &slughorn::KeyIterator::counter,
+			"Current counter value (read/write)."
+		)
+		.def_readwrite("prefix", &slughorn::KeyIterator::prefix,
+			"Prefix string, or empty string for numeric mode."
+		)
+		.def("__repr__", [](const slughorn::KeyIterator& ki) {
+			if(ki.prefix.empty()) return "KeyIterator(counter=" + std::to_string(ki.counter) + ")";
+
+			return "KeyIterator(prefix='" + ki.prefix + "', counter=" + std::to_string(ki.counter) + ")";
+		})
 	;
 
 	// ============================================================================================
@@ -544,6 +580,123 @@ PYBIND11_MODULE(slughorn, m) {
 		}, "Number of curves accumulated so far.")
 	;
 
+	// =========================================================================
+	// slughorn.canvas submodule
+	// =========================================================================
+	{
+		py::module_ canvas = m.def_submodule("canvas",
+			"HTML Canvas-style drawing context for slughorn.\n\n"
+			"Build CompositeShapes from 2-D path commands (moveTo, lineTo, quadTo, "
+			"bezierTo, closePath) plus arc primitives and convenience shape helpers "
+			"(rect, roundedRect, circle, ellipse).\n\n"
+			"Each fill() call commits the current path as a new Layer. "
+			"Call finalize() to retrieve the completed CompositeShape."
+		);
+
+		py::class_<slughorn::canvas::Canvas>(canvas, "Canvas")
+			.def(py::init<slughorn::Atlas&, slughorn::KeyIterator>(),
+				py::arg("atlas"), py::arg("key_iterator")=slughorn::KeyIterator(),
+				"Construct a Canvas writing into atlas, using key_iterator for auto-generated keys."
+			)
+
+			// CurveDecomposer access ------------------------------------------
+
+			.def("decomposer", py::overload_cast<>(&slughorn::canvas::Canvas::decomposer),
+				py::return_value_policy::reference_internal,
+				"Access the internal CurveDecomposer to tune tolerance etc."
+			)
+
+			// Path commands ---------------------------------------------------
+
+			.def("begin_path", &slughorn::canvas::Canvas::beginPath,
+				"Discard any accumulated path state and start fresh."
+			)
+			.def("move_to", &slughorn::canvas::Canvas::moveTo, py::arg("x"), py::arg("y"))
+			.def("line_to", &slughorn::canvas::Canvas::lineTo, py::arg("x"), py::arg("y"))
+			.def("quad_to", &slughorn::canvas::Canvas::quadTo,
+				py::arg("cx"), py::arg("cy"), py::arg("x"), py::arg("y")
+			)
+			.def("bezier_to", &slughorn::canvas::Canvas::bezierTo,
+				py::arg("c1x"), py::arg("c1y"), py::arg("c2x"), py::arg("c2y"),
+				py::arg("x"), py::arg("y")
+			)
+			.def("close_path", &slughorn::canvas::Canvas::closePath)
+
+			// Convenience shape helpers ---------------------------------------
+
+			.def("rect", &slughorn::canvas::Canvas::rect,
+				py::arg("x"), py::arg("y"), py::arg("w"), py::arg("h"),
+				"Axis-aligned rectangle."
+			)
+			.def("rounded_rect", &slughorn::canvas::Canvas::roundedRect,
+				py::arg("x"), py::arg("y"), py::arg("w"), py::arg("h"), py::arg("r"),
+				"Rounded rectangle with uniform corner radius r."
+			)
+			.def("circle", &slughorn::canvas::Canvas::circle,
+				py::arg("cx"), py::arg("cy"), py::arg("r")
+			)
+			.def("ellipse", &slughorn::canvas::Canvas::ellipse,
+				py::arg("cx"), py::arg("cy"), py::arg("rx"), py::arg("ry")
+			)
+			.def("arc", &slughorn::canvas::Canvas::arc,
+				py::arg("cx"), py::arg("cy"), py::arg("r"),
+				py::arg("start_angle"), py::arg("end_angle"), py::arg("ccw") = false,
+				"Circular arc. Angles in radians from +X axis, Y-up convention."
+			)
+			.def("arc_to", &slughorn::canvas::Canvas::arcTo,
+				py::arg("x1"), py::arg("y1"), py::arg("x2"), py::arg("y2"), py::arg("r"),
+				"Tangential arc from current point. Matches HTML Canvas arcTo()."
+			)
+
+			// Commit ----------------------------------------------------------
+
+			.def("fill",
+				[](slughorn::canvas::Canvas& c, slughorn::Color color, slug_t scale) {
+					return c.fill(color, scale);
+				},
+				py::arg("color"), py::arg("scale") = 1.0f,
+				"Commit the current path as a new Layer with the given color.\n"
+				"Returns the auto-generated Key, or Key(0) if the path was empty."
+			)
+			.def("define_shape",
+				[](slughorn::canvas::Canvas& c, slughorn::Key key, slug_t scale) {
+					return c.defineShape(key, scale);
+				},
+				py::arg("key"), py::arg("scale") = 1.0f,
+				"Register the current path as a named Shape (geometry only, no Layer).\n"
+				"Returns False if the path was empty."
+			)
+
+			// CompositeShape management ---------------------------------------
+
+			.def("begin_composite", &slughorn::canvas::Canvas::beginComposite,
+				"Discard all accumulated layers and start a fresh composite."
+			)
+			.def("set_advance", &slughorn::canvas::Canvas::setAdvance,
+				py::arg("advance"),
+				"Set the horizontal advance of the composite being built."
+			)
+			.def("finalize",
+				py::overload_cast<>(&slughorn::canvas::Canvas::finalize),
+				"Return the completed CompositeShape and reset internal state."
+			)
+			.def("finalize",
+				py::overload_cast<slughorn::Key>(&slughorn::canvas::Canvas::finalize),
+				py::arg("key"),
+				"Register the completed CompositeShape in the Atlas under key and reset."
+			)
+
+			// Accessors -------------------------------------------------------
+
+			.def_property_readonly("layer_count", &slughorn::canvas::Canvas::layerCount,
+				"Number of Layers accumulated in the current composite."
+			)
+			.def_property_readonly("has_pending_path", &slughorn::canvas::Canvas::hasPendingPath,
+				"True if the pending path has any curves."
+			)
+		;
+	}
+
 	// ============================================================================================
 	// Serial I/O (only present when built with SLUGHORN_SERIAL=ON)
 	// ============================================================================================
@@ -635,9 +788,47 @@ PYBIND11_MODULE(slughorn, m) {
 	// Submodule stubs - uncomment and implement as you add each backend
 	// ============================================================================================
 
-	// py::module_ ft2 = m.def_submodule("ft2",
-	// "FreeType 2 backend - decompose TrueType/OpenType outlines and COLR emoji.");
-	// TODO: bind slughorn::ft2::loadAsciiFont, loadEmojiFont, loadGlyph, etc.
+#ifdef SLUGHORN_HAS_FREETYPE
+	py::module_ freetype = m.def_submodule("freetype",
+		"FreeType backend - decompose TrueType/OpenType outlines and COLR emoji "
+		"into Atlas shapes.\n\n"
+		"High-level functions manage their own FT_Library/FT_Face lifetime; "
+		"no FreeType handles are exposed to Python."
+	);
+
+	freetype.def("load_ascii_font", &slughorn::freetype::loadAsciiFont,
+		py::arg("font_path"),
+		py::arg("atlas"),
+		"Load printable ASCII (codepoints 32-126) from font_path into atlas.\n"
+		"Creates and destroys an FT_Library/FT_Face internally.\n"
+		"Returns True on success, False if the font cannot be opened."
+	);
+
+	freetype.def("load_emoji_font", [](
+		const std::string& fontPath,
+		const std::vector<uint32_t>& codepoints,
+		slughorn::Atlas& atlas
+	) -> py::dict {
+		std::map<uint32_t, slughorn::CompositeShape> colorGlyphs;
+
+		slughorn::freetype::loadEmojiFont(fontPath, codepoints, atlas, colorGlyphs);
+
+		py::dict result;
+
+		for(auto& [cp, cs] : colorGlyphs) result[py::cast(cp)] = std::move(cs);
+
+		return result;
+	},
+		py::arg("font_path"),
+		py::arg("codepoints"),
+		py::arg("atlas"),
+		"Load COLR emoji from font_path for the given codepoints into atlas.\n"
+		"codepoints is a list of uint32_t Unicode codepoints.\n"
+		"Creates and destroys an FT_Library/FT_Face internally.\n"
+		"Returns a dict mapping codepoint (int) -> CompositeShape "
+		"for each successfully loaded glyph."
+	);
+#endif
 
 	// py::module_ skia = m.def_submodule("skia",
 	// "Skia path backend - decompose SkPath objects, stroke-to-fill expansion.");

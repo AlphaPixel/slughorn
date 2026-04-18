@@ -24,7 +24,9 @@ Types exposed at module level (flat - see scoping note in file header):
 ```
 slughorn.Key              fromCodepoint(uint32_t) / from_string(str)
                           __hash__ / __eq__ - usable as dict key
-slughorn.KeyType          Codepoint / Name enum
+slughorn.Key.Type          Codepoint / Name enum
+slughorn.KeyIterator      prefix (str) + counter (uint32_t), next() -> Key
+                          __iter__ / __next__ - usable as Python iterator
 slughorn.Color            r, g, b, a  (default opaque black)
 slughorn.Matrix           xx, yx, xy, yy, dx, dy  (default identity)
                           identity(), is_identity(), apply(x,y), __mul__
@@ -53,7 +55,18 @@ slughorn.read(path)       -> shared_ptr<Atlas> (is_built immediately)
 slughorn.write(atlas, path)  extension determines format (.slug / .slugb)
 ```
 
-Backend submodules (ft2, skia, cairo) are stubbed but not yet bound.
+FreeType submodule (only present when built with SLUGHORN_FREETYPE=ON):
+  slughorn.freetype.load_ascii_font(path, atlas)             -> bool
+  slughorn.freetype.load_emoji_font(path, codepoints, atlas) -> dict[int, CompositeShape]
+
+Canvas submodule (always present):
+  slughorn.canvas.Canvas(atlas, key_iterator)
+    begin_path, move_to, line_to, quad_to, bezier_to, close_path
+    rect, rounded_rect, circle, ellipse, arc, arc_to
+    fill(color, scale) -> Key
+    define_shape(key, scale) -> bool
+    begin_composite, set_advance, finalize() / finalize(key)
+    layer_count, has_pending_path, decomposer()
 
 ## slughorn_render.py - architecture
 
@@ -89,19 +102,19 @@ Three levels, each building on the one below:
 * `save_curves_debug(curves, shape, filename, scale)` - geometry diagram PNG
 * `print_grid(grid)` - ASCII art to stdout
 
-## AtlasView - why it exists (and why it will go away)
+## AtlasView - temporary shader simulation bridge
 
-`render_sample_banded` is a Python emulator of the GPU fragment shader. The
-shader performs hardware texture fetches; Python cannot. `AtlasView.__init__`
-decodes the raw texture bytes once into Python-native lists:
+Decodes raw texture bytes once into Python-native lists so per-pixel
+render_sample_banded calls are feasible. NOT a data model.
 
-* `self.curves` - flat list of `(x1,y1,x2,y2,x3,y3)` tuples (curve texture unpacked)
-* `self.hbands_idx` / `self.vbands_idx` - lists-of-lists of int indices (band texture decoded)
+Hidden assumption in _decode_band_texture: loc_to_index computes curve
+index algebraically, assuming dense packing at texel positions 0,2,4...
+Will break if packTextures() changes. Fix: build explicit (cx,cy)->index
+map during decode instead.
 
-Without this one-time decode, `render_sample_banded` would re-parse both textures
-via numpy at every pixel call - completely infeasible.
-
-**AtlasView is NOT a data model - it is a shader simulation bridge.**
+Migration path: Atlas.decode(key) -> DecodedShape (C++/pybind11)
+DecodedShape provides curves, hbands/vbands, and render_sample_banded()
+natively. AtlasView is removed after this lands.
 
 ### Migration path (current direction)
 
@@ -124,40 +137,6 @@ After this:
 
 Refer to `ai/context-todo-pybind.md` for full implementation details.
 
-## slughorn_render.py - role after migration
-
-The reference math in `slughorn_render.py` remains unchanged.
-
-* It continues to serve as:
-
-  * correctness oracle
-  * debugging tool
-  * algorithm reference
-
-* The performance-critical path (banded rendering) migrates to C++
-
-This ensures:
-
-* shader parity is always verifiable
-* Python remains simple and inspectable
-
-## AtlasView._decode_band_texture - hidden assumption
-
-`loc_to_index` computes curve index algebraically:
-
-```
-def loc_to_index(cx: int, cy: int) -> int:
-    return (cy * BAND_TEX_WIDTH + cx) // 2
-```
-
-This assumes curves are densely packed at texel positions 0,2,4,6... in scan order.
-
-This is true for current `packTextures()` but will break if packing changes.
-
-**Future fix:**
-
-* Build explicit `(cx, cy) -> index` map during decode instead of relying on math.
-
 ## slughorn_serial.py - status: DEFERRED
 
 Pure-Python reader/writer for .slug/.slugb.
@@ -169,11 +148,6 @@ Deferred because:
 * currently out of sync with bindings
 
 **Do not use until pybind path is fully validated.**
-
-## Known bugs fixed this session (Day 7.5)
-
-1. `Layer.scale` missing from bindings - now fixed
-2. `num_bands` typo - replaced with `num_bands_x / num_bands_y`
 
 ## Forward-looking: the debugging / inspector goal
 
@@ -196,25 +170,19 @@ slughorn_export.py     <- harness (exports rasterized PNGs and outling SVGs)
 slughorny   <- [future] interactive debugger/visualizer/optimizer/etc; will use PySide6
 ```
 
-## CompositeShape rendering - design questions (UNRESOLVED)
+## TODOs
 
-(No changes - still valid as written)
+- Implement Atlas.decode(key) -> DecodedShape in C++/pybind11
+- Replace AtlasView with DecodedShape
+- numpy-vectorize render_sample / render_sample_banded (intermediate speedup)
+- Bind Cairo / NanoSVG / Skia backends
+- Revive slughorn_serial.py once pybind path is stable
+- KeyIterator: support true Key instances + string-mode _N suffix increment
 
-## TODOs - Python layer
+## Performance notes
 
-* [x] Run `slughorn_export.py --selftest`
-* [x] Run `slughorn_export.py <real.slug>` end-to-end
-* [ ] Resolve CompositeShape rendering design
-* [ ] Implement CompositeShape rendering
-
-### pybind-driven migration
-
-* [ ] Move `render_sample_banded` into C++ (IMPORTANT)
-* [ ] Replace AtlasView usage with something powered by C++/pybind11
-* [ ] Keep Python renderer as validation/reference
-
-### future work
-
-* [ ] Begin writing offline asset inspection/tuning tools (in Python)
-* [ ] Revive `slughorn_serial.py`
-* [ ] Bind FT2 / Cairo / NanoSVG
+render_sample and render_sample_banded are pure Python per-pixel per-curve.
+Banded path is already ~5x+ faster - always prefer it.
+Two planned speedup approaches in order of effort:
+1. numpy vectorization across curves per pixel (no C++ required)
+2. DecodedShape migration (the real fix, eliminates AtlasView entirely)

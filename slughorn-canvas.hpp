@@ -68,12 +68,12 @@ namespace canvas {
 class Canvas {
 public:
 	// @p atlas - the Atlas to register shapes into (must outlive the Canvas).
-	// @p baseKey - reference to a key counter; incremented once per fill() / defineShape() call.
+	// @p key - reference to a KeyIterator; incremented once per fill() / defineShape() call.
 	// Pass a fresh namespace per Canvas (e.g. 0xE0000) or share one across multiple Canvas
 	// instances that write to the same Atlas.
-	Canvas(Atlas& atlas, uint32_t& baseKey):
+	Canvas(Atlas& atlas, KeyIterator key=KeyIterator()):
 	_atlas(atlas),
-	_baseKey(baseKey),
+	_key(key),
 	_decomposer(_pendingCurves) {
 	}
 
@@ -362,7 +362,7 @@ public:
 	// Layer::scale; see Scale Contract in the file header.
 	//
 	// The curves are shifted to local origin (tight atlas bands); the canvas-space offset is stored
-	// in Layer::transform (dx/dy). An internal key is auto-generated and _baseKey is incremented.
+	// in Layer::transform (dx/dy). An internal key is auto-generated and _key is incremented.
 	//
 	// Returns the auto-generated Key, or Key(0u) if the current path is empty.
 	Key fill(Color color, slug_t scale = 1.0_cv) {
@@ -371,11 +371,12 @@ public:
 		Atlas::Curves scaled = _scaleCurves(_pendingCurves, scale);
 
 		Matrix transform;
+
 		Atlas::Curves local = _toLocalOrigin(scaled, transform);
 
 		if(local.empty()) return Key(0u);
 
-		const Key key(_baseKey++);
+		const auto key = _key.next();
 
 		Atlas::ShapeInfo info;
 
@@ -602,23 +603,10 @@ private:
 		return out;
 	}
 
-	// -------------------------------------------------------------------------
-	// Data
-	// -------------------------------------------------------------------------
-
 	Atlas& _atlas;
-
-	// TODO: This should be a TRUE `Key` instance, and support the `uint32_t` approach of just
-	// incrementing the value OR--when the value is a "string"--incrementing the number, converting
-	// it to a string, and appending it! Important!
-	uint32_t& _baseKey;
-
-	// Path accumulator
+	KeyIterator _key;
 	Atlas::Curves _pendingCurves;
-
 	CurveDecomposer _decomposer;
-
-	// Composite being built
 	CompositeShape _composite;
 };
 
