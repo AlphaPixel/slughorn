@@ -147,7 +147,6 @@ void Atlas::buildShapeBands(
 	// When 0, pick independently per axis. Currently hardcoded for testing --
 	// automatic aspect-ratio-aware calculation to follow once we've validated
 	// the non-square grid plumbing with known good values.
-	// -------------------------------------------------------------------------
 	// --------------------------------------------------------------------------------------------
 	if(numBandsX == 0) numBandsX = static_cast<uint32_t>(
 		std::min(size_t(16), std::max(size_t(1), numCurves / 2))
@@ -157,11 +156,9 @@ void Atlas::buildShapeBands(
 		std::min(size_t(16), std::max(size_t(1), numCurves / 2))
 	);
 
-	// -------------------------------------------------------------------------
 	// --------------------------------------------------------------------------------------------
 	// Bounding box
 	// --------------------------------------------------------------------------------------------
-	// -------------------------------------------------------------------------
 	slug_t minX = 1e9_cv, minY = 1e9_cv;
 	slug_t maxX = -1e9_cv, maxY = -1e9_cv;
 
@@ -216,11 +213,6 @@ void Atlas::buildShapeBands(
 		}
 
 		std::sort(band.curveIndices.begin(), band.curveIndices.end(), [&](size_t l, size_t r) {
-			/* const slug_t mA = std::max({build.curves[l].x1, build.curves[l].x2, build.curves[l].x3});
-			const slug_t mB = std::max({build.curves[r].x1, build.curves[r].x2, build.curves[r].x3});
-
-			return mA > mB; */
-
 			return std::max({
 				build.curves[l].x1,
 				build.curves[l].x2,
@@ -252,20 +244,6 @@ void Atlas::buildShapeBands(
 		}
 
 		std::sort(band.curveIndices.begin(), band.curveIndices.end(), [&](size_t l, size_t r) {
-			/* const slug_t mA = std::max({
-				build.curves[l].y1,
-				build.curves[l].y2,
-				build.curves[l].y3
-			});
-
-			const slug_t mB = std::max({
-				build.curves[r].y1,
-				build.curves[r].y2,
-				build.curves[r].y3
-			});
-
-			return mA > mB; */
-
 			return std::max({
 				build.curves[l].y1,
 				build.curves[l].y2,
@@ -319,7 +297,7 @@ void Atlas::packTextures() {
 
 	for(const auto& kv : _build) {
 		const auto& g = kv.second;
-		const uint32_t numHeaders = static_cast<uint32_t>(g.hbands.size() + g.vbands.size());
+		const auto numHeaders = static_cast<uint32_t>(g.hbands.size() + g.vbands.size());
 
 		totalBandTexels = alignCursorForSpan(totalBandTexels, TEX_WIDTH, numHeaders);
 
@@ -327,7 +305,7 @@ void Atlas::packTextures() {
 
 		auto measureList = [&](const std::vector<BandEntry>& bands) {
 			for(const auto& band : bands) {
-				const uint32_t count = static_cast<uint32_t>(band.curveIndices.size());
+				const auto count = static_cast<uint32_t>(band.curveIndices.size());
 
 				cursor = alignCursorForSpan(cursor, TEX_WIDTH, count);
 				cursor += count;
@@ -429,8 +407,8 @@ void Atlas::packTextures() {
 		// Band headers + lists
 		Shape sd = g.metrics;
 
-		const uint32_t numHBands = static_cast<uint32_t>(g.hbands.size());
-		const uint32_t numVBands = static_cast<uint32_t>(g.vbands.size());
+		const auto numHBands = static_cast<uint32_t>(g.hbands.size());
+		const auto numVBands = static_cast<uint32_t>(g.vbands.size());
 		const uint32_t numHeaders = numHBands + numVBands;
 
 		// Skip this shape; header block would exceed a full texture row.
@@ -452,7 +430,7 @@ void Atlas::packTextures() {
 		auto packBandList = [&](const std::vector<BandEntry>& bands, uint32_t headerBase) {
 			for(uint32_t b = 0; b < static_cast<uint32_t>(bands.size()); b++) {
 				const auto& band = bands[b];
-				uint32_t count = static_cast<uint32_t>(band.curveIndices.size());
+				auto count = static_cast<uint32_t>(band.curveIndices.size());
 
 				// truncate oversized lists
 				if(count > TEX_WIDTH) count = 0;

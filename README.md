@@ -3,10 +3,10 @@
 `slughorn` is modern C++20 library implementing the recent OSS release of the
 "Slug" GPU vector graphics rendering technique by Eric Lengyel. It makes no
 assumptions about what graphics environment being used (OpenGL, Vulkan, WebGL,
-WebGPU, DirectX, etc) and instead focuses *only* on simplifying the processing
+WebGPU, DirectX, etc) and instead focuses *only* on simplifying the process
 of creating/ingesting vector data from various backends--or, alternatively, by
-using an HTML "Canas-like" API directly in code--so that the data can be
-directly uploaded to the GPU as easily as possible.
+using an HTML "Canas-like" API directly in code--so it can be directly uploaded
+to the GPU as easily as possible.
 
 Furthermore, `slughorn` provides tools for traditional "offline asset"
 processing (primarily in Python), as well as a [glTF](#)-compatible JSON file
@@ -33,6 +33,20 @@ specification, and a large portion of the COLRv1 spec!
 
 # TODO
 
+## Curve/Band Texture Magic Number Sentinel
+
+Unbound/mismatched band/curve textures cause runaway per-fragment iteration,
+leading to GPU hang and system lock. A magic number at texel (0,0) or at the END
+of each row (where there is almost ALWAYS extra bytes)
+checked by the shader would allow clean discard instead of GPU DoS.
+
+This would require:
+
+- Writing 0x534C5547 ("SLUG") from C++ during packTextures()
+- Adding guard in the fragment shader before any band reads
+
+Avoidable by careful uniform naming. High value as a robustness/debug aid.
+
 ## Soon
 
 - [ ] Change `slughorn_render.py` to dump SVG for the `save_curves_debug`
@@ -49,6 +63,9 @@ specification, and a large portion of the COLRv1 spec!
 - [x] Change the `autoMetrics` defaul to `true`
 - [x] Rename `slughorn-ft2.hpp` to `slughorn-freetype.hpp`
 - [ ] Enforce VERSION compatibility in backends
+- [ ] UDL types for `slughorn::Key::from{String,Codepoing}`, potentially as
+  `_ukey`, `_skey` or similar?
+- [ ] Add additional per-vertex metadata (like which "quad corner" we are)
 
 ## Medium Term
 
