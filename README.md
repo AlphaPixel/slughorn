@@ -5,14 +5,19 @@
 assumptions about what graphics environment being used (OpenGL, Vulkan, WebGL,
 WebGPU, DirectX, etc) and instead focuses *only* on simplifying the process
 of creating/ingesting vector data from various backends--or, alternatively, by
-using an HTML "Canas-like" API directly in code--so it can be directly uploaded
-to the GPU as easily as possible.
+using an HTML "Canvas-like" API directly in code--so it can be directly uploaded
+to the GPU as easily as possible. A backend is simply an implementation that
+produces Bezier curves for `slughorn` to process to facilitate drawing. Further
+code outside of `slughorn` draws the curves with a graphics API like OpneGL, Vulkan,
+WebGL, WebGPU, Metal, DirectX or similar, potentially using toolkits like but not
+limited to OSG / OpenSceneGraph or VSG / VulkanSceneGraph. Companion projects
+( https://github.com/AlphaPixel/osgSlug ) assist with this integration.
 
 Furthermore, `slughorn` provides tools for traditional "offline asset"
 processing (primarily in Python), as well as a [glTF](#)-compatible JSON file
 format.
 
-# Supported Backends
+# Current Supported Backends
 
 - NanoSVG
 - Skia
@@ -197,10 +202,29 @@ Slug is genuinely superior. The moment you want text or shapes on a billboard, a
 HUD, a curved surface, or viewed through a perspective camera, Skia's approach
 starts showing cracks and Slug's approach shines.
 
-The fact that this library is built *inside OSG* is itself the answer; you're
-in the domain where Slug's properties matter most. A shape rotating in
-perspective with pixel-perfect edges at any zoom level is something Skia simply
-cannot match without re-tessellating every frame.
+Slug is solving a different problem that Skia deliberately doesn't address.
 
-**Slug is not reinventing what Skia solved; it's solving a different problem
-that Skia deliberately doesn't address.**
+# AI Disclosure Declaration
+
+AI tools such as ChatGPT and Claude have been used for research and some code
+development. However, this is not a "fire and forget" AI project. It was
+carefully designed, planned, architected and implemented by Jeremy 'Cubicool'
+Moles, an expert in both GPU development and typography and glyph rendering.
+AI tools were also used for producing documentation and ancillary data products
+to accelerate development.
+
+# Sponsorship
+
+This project was created and implemented by Jeremy 'Cubicool' Moles, author of
+the osgCairo and osgPango, as well as numberous SDF-rendering and other
+glyph-centric projects. Jeremy produced this work for AlphaPixel
+([AlphaPixelDev.com](https://alphapixeldev.com/)) based on the 2026 release
+of the Slug algorithm ( https://terathon.com/blog/decade-slug.html) patent
+by its author, Eric Lengyel, for whom the whole Slug-using community is
+extremely grateful.
+
+If you are interested in assistance with Slug, slughorn, OpenGL, OpenSceneGraph,
+Vulkan, VulkanSceneGraph, AR, VR, xR, 3d mapping, or almost any other
+performance-centric computing, please contact AlphaPixel. We are mercenary
+programmers who can provide rapid assitance to any challenge, and our motto is
+"We Solve Your Difficult Problems."
