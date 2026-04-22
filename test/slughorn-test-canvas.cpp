@@ -28,36 +28,38 @@ int main(int argc, char** argv) {
 	// The DEFAULT; lowest quality, always results in the simplest cubic -> 2x quadratics
 	// canvas.decomposer().tolerance = slughorn::TOLERANCE_EXACT;
 
+	slug_t scale = 1_cv / 4096_cv;
+
 	// Shape 1: a filled red triangle
 	canvas.beginPath();
-	canvas.moveTo(0.0_cv, 0.0_cv);
-	canvas.lineTo(1.0_cv, 0.0_cv);
-	canvas.lineTo(0.5_cv, 1.0_cv);
+	canvas.moveTo(0.0_cv * scale, 0.0_cv * scale);
+	canvas.lineTo(1.0_cv * scale, 0.0_cv * scale);
+	canvas.lineTo(0.5_cv * scale, 1.0_cv * scale);
 	canvas.closePath();
-	canvas.fill({1_cv, 0_cv, 0_cv, 1_cv});
+	canvas.fill({1_cv, 0_cv, 0_cv, 1_cv}, scale);
 
 	// Shape 2: a blue semicircle via arc()
 	canvas.beginPath();
-	canvas.arc(0.5_cv, 0.5_cv, 0.4_cv, 0.0_cv, cv(M_PI));
+	canvas.arc(0.5_cv * scale, 0.5_cv * scale, 0.4_cv * scale, 0.0_cv, cv(M_PI));
 	canvas.closePath();
-	canvas.fill({0_cv, 0_cv, 1_cv, 1_cv});
+	canvas.fill({0_cv, 0_cv, 1_cv, 1_cv}, scale);
 
 	// Shape 3: a green stadium shape via arcTo() rounded corners
 	canvas.beginPath();
-	canvas.moveTo(0.2_cv, 0.3_cv);
-	canvas.arcTo(0.8_cv, 0.3_cv, 0.8_cv, 0.7_cv, 0.1_cv);
-	canvas.arcTo(0.8_cv, 0.7_cv, 0.2_cv, 0.7_cv, 0.1_cv);
-	canvas.arcTo(0.2_cv, 0.7_cv, 0.2_cv, 0.3_cv, 0.1_cv);
-	canvas.arcTo(0.2_cv, 0.3_cv, 0.8_cv, 0.3_cv, 0.1_cv);
+	canvas.moveTo(0.2_cv * scale, 0.3_cv * scale);
+	canvas.arcTo(0.8_cv * scale, 0.3_cv * scale, 0.8_cv * scale, 0.7_cv * scale, 0.1_cv);
+	canvas.arcTo(0.8_cv * scale, 0.7_cv * scale, 0.2_cv * scale, 0.7_cv * scale, 0.1_cv);
+	canvas.arcTo(0.2_cv * scale, 0.7_cv * scale, 0.2_cv * scale, 0.3_cv * scale, 0.1_cv);
+	canvas.arcTo(0.2_cv * scale, 0.3_cv * scale, 0.8_cv * scale, 0.3_cv * scale, 0.1_cv);
 	canvas.closePath();
-	canvas.fill({0_cv, 0.6_cv, 0_cv, 1_cv});
+	canvas.fill({0_cv, 0.6_cv, 0_cv, 1_cv}, scale);
 
 	// Commit all three layers as one named composite shape
 	canvas.finalize(slughorn::Key::fromString("my_scene"));
 
 	atlas.build();
 
-	std::cerr << "PackingStats: " << atlas.getPackingStats() << std::endl;
+	// std::cerr << "PackingStats: " << atlas.getPackingStats() << std::endl;
 
 	slughorn::serial::writeJSON(atlas, std::cout);
 

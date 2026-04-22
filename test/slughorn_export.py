@@ -154,20 +154,25 @@ def main():
 	view = AtlasView(atlas, key)
 
 	# Debug geometry
-	save_curves_svg(view.curves, shape, out_path + ".svg")
+	# save_curves_svg(view.curves, shape, out_path + ".svg")
+	save_curves(view.curves, shape, out_path + "_lines.png")
 
 	msg = ""
 
 	# Banded render
 	with timer("\nRendering banded"):
 		grid_banded = sample_grid_from_atlas(atlas, key, size=256, banded=True)
+
 		msg = save_image(grid_banded, out_path + ".png")
 
 	print(f"{msg}\n")
 
+	sys.exit(0)
+
 	# Reference render
 	with timer("Rendering reference"):
 		grid_ref = sample_grid_from_atlas(atlas, key, size=256, banded=False)
+
 		msg = save_image(grid_ref, out_path + "_ref.png")
 
 	print(f"{msg}\n")

@@ -250,7 +250,7 @@ public:
 	// canvas.closePath();
 	// canvas.fill(color);
 	void arc(slug_t cx, slug_t cy, slug_t r, slug_t startAngle, slug_t endAngle, bool ccw = false) {
-		// Normalise the sweep so it is always positive and <= 2?. HTML Canvas semantics: if ccw,
+		// Normalize the sweep so it is always positive and <= 2?. HTML Canvas semantics: if ccw,
 		// sweep is endAngle->startAngle going CCW.
 		slug_t sweep;
 

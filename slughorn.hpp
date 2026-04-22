@@ -137,8 +137,10 @@ struct Key {
 	// With this in the public section:
 	Key(): _type(Type::Codepoint), _codepoint(0), _hash(_hashCp(0)) {}
 
-	// Implicit from uint32_t - preserves all existing call sites unchanged.
+	// TODO: Do these make the static helpers below unnecessary?!
 	Key(uint32_t cp): _type(Type::Codepoint), _codepoint(cp), _hash(_hashCp(cp)) {}
+	Key(const std::string& name): _type(Type::Name), _name(name), _hash(_hashStr(name)) {}
+	Key(const char* name): _type(Type::Name), _name(name), _hash(_hashStr(name)) {}
 
 	static Key fromCodepoint(uint32_t cp) { return Key(cp); }
 

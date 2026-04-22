@@ -54,14 +54,15 @@ Avoidable by careful uniform naming. High value as a robustness/debug aid.
 
 ## Soon
 
-- [ ] Change `slughorn_render.py` to dump SVG for the `save_curves_debug`
+- [ ] Emphasize `osgSlug` as the "testbed" for visualization (when ready)
+- [x] Change `slughorn_render.py` to dump SVG for the `save_curves_debug`
 - [ ] Add CMake helpers for compiling in each backend
 - [ ] Slug "mip-mapping"! Starting with osgSlug, introduce the ability to
   "short-circuit" the Slug quad based on some "level of detail" rule; when the
   shape is some threshold of distance AWAY, revert to simple texture lookup
   approximations. NOTE: `slughorn` MIGHT be able to participate in this
   optmization as well ... somehow
-- [ ] Fix `numBands` auto-calculation and account for spatial curve
+- [ ] Fix `numBands*` auto-calculation and account for spatial curve
   distribution, not just count
 - [x] pybind11 wrapper
 - [ ] Change `composites` to `compositeShapes` in serialization, etc
@@ -70,7 +71,6 @@ Avoidable by careful uniform naming. High value as a robustness/debug aid.
 - [ ] Enforce VERSION compatibility in backends
 - [ ] UDL types for `slughorn::Key::from{String,Codepoing}`, potentially as
   `_ukey`, `_skey` or similar?
-- [ ] Add additional per-vertex metadata (like which "quad corner" we are)
 
 ## Medium Term
 
@@ -84,17 +84,8 @@ Avoidable by careful uniform naming. High value as a robustness/debug aid.
   QSvgRenderer provides SVG loading as a potential NanoSVG complement.
   Structure to match slughorn-cairo.hpp: decomposePath(QPainterPath, Atlas&).
 - [ ] Allow `serial::writeJSON` for ANY object (not JUST `Atlas`)
-- [ ] Helpers for the `9-slice` method of a rounded rectangle
-- [x] `Atlas::createDefaultStateSet()` member instead of free function in
-  `Drawable.hpp`
-- [ ] Sync `TEX_WIDTH` / `kLogBandTextureWidth`; uniform or shader preamble
-  injection
-- [ ] Premultiplied alpha
-- [ ] Proper depth testing and render order
-- [x] Remove `slug_color` uniform remnant from shaders (color is pure vertex
-  attribute now)
-- [ ] Simulate a fragment processing frame in Python and inspect the math
-- [ ] Tooling for "optimizing" Atlas::build
+- [x] Simulate a fragment processing frame in Python and inspect the math
+- [ ] Tooling for "optimizing" `Atlas::build`
 - [ ] Generate tight carrier mesh from Slug
   coverage via sampling + contour extraction + triangulation (offline). Preserve
   em-space UVs.
@@ -102,17 +93,11 @@ Avoidable by careful uniform naming. High value as a robustness/debug aid.
 
 ## When Ready
 
-- [ ] Add an `effectId/shapeId` UDL and helper like `slug_t/_cv/cv`
 - [x] `Atlas::Key` type conversion (`uint32_t` -> `Codepoint | Name`
   discriminated union)
 - [x] Conic subdivision for Skia circular geometry (`iter.conicWeight()`)
 - [x] Minimal Skia `args.gn` build config (trim from 25GB)
-- [ ] Non-square band grids (`bandMaxX != bandMaxY`)
-- [ ] Layer::scale - evaluate for removal; currently only meaningful for
-  FT2/text. All geometry backends leave it at 1.0. If osgSlug::Font /
-  osgSlug::Text take full ownership of font-size-to-world scaling, Layer::scale
-  becomes dead weight and computeQuad could take scale as a call-site parameter
-  instead. Defer until text pipeline stabilizes.
+- [x] Non-square band grids (`bandMaxX != bandMaxY`)
 
 ## Someday / Fun
 

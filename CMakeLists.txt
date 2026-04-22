@@ -42,6 +42,7 @@ endif()
 option(SLUGHORN_SERIAL "Include serialization support (requires nlohmann)" OFF)
 option(SLUGHORN_NANOSVG "Include NanoSVG support (requires nanosvg)" OFF)
 option(SLUGHORN_FREETYPE "Include FreeType support (requires freetype2)" OFF)
+# option(SLUGHORN_GLFW "Include GLFW support (requires glfw3)" OFF)
 
 add_library(slughorn STATIC slughorn.cpp)
 
@@ -154,7 +155,7 @@ if(SLUGHORN_BUILD_TESTS)
 	pkg_check_modules(CAIRO IMPORTED_TARGET cairo)
 
 	if(CAIRO_FOUND)
-		add_executable(slughorn-test-cairo test/slughorn-test-cairo.cpp)
+		add_executable(slughorn-test-cairo "test/slughorn-test-cairo.cpp")
 		target_link_libraries(slughorn-test-cairo PRIVATE slughorn PkgConfig::CAIRO)
 		add_test(NAME cairo COMMAND slughorn-test-cairo)
 		message(STATUS "slughorn tests: Cairo found, building slughorn-test-cairo")
@@ -164,7 +165,7 @@ if(SLUGHORN_BUILD_TESTS)
 
 	# NanoSVG (optional - requires SLUGHORN_NANOSVG=ON)
 	if(SLUGHORN_NANOSVG)
-		add_executable(slughorn-test-nanosvg test/slughorn-test-nanosvg.cpp)
+		add_executable(slughorn-test-nanosvg "test/slughorn-test-nanosvg.cpp")
 
 		target_include_directories(slughorn-test-nanosvg PRIVATE
 			"${CMAKE_CURRENT_SOURCE_DIR}/ext/nanosvg/src"
@@ -178,11 +179,41 @@ if(SLUGHORN_BUILD_TESTS)
 	endif()
 
 	if(SLUGHORN_SERIAL)
-		add_executable(slughorn-test-canvas test/slughorn-test-canvas.cpp)
+		add_executable(slughorn-test-canvas "test/slughorn-test-canvas.cpp")
 		target_link_libraries(slughorn-test-canvas PRIVATE slughorn)
 		add_test(NAME canvas COMMAND slughorn-test-canvas)
 		message(STATUS "slughorn tests: serial found, building slughorn-test-canvas")
 	else()
 		message(STATUS "slughorn tests: SLUGHORN_SERIAL=OFF, skipping slughorn-test-canvas")
 	endif()
+
+	# if(SLUGHORN_GLFW)
+	# 	find_package(glfw3 REQUIRED)
+	# 	add_executable(slughorn-test-glfw "test/slughorn-test-glfw.cpp")
+	# 	target_link_libraries(slughorn-test-glfw PRIVATE slughorn glfw glad)
+	# 	message(STATUS "slughorn tests: GLFW found, building slughorn-test-glfw")
+	# else()
+	# 	message(STATUS "slughorn tests: SLUGHORN_GLFW=OFF, skipping slughorn-test-glfw")
+	# endif()
+
+	# add_executable(slughorn-test-mvt "test/slughorn-test-mvt.cpp")
+	# target_link_libraries(slughorn-test-mvt PRIVATE slughorn)
+	# target_compile_options(slughorn-test-mvt PRIVATE ${SLUGHORN_COMPILE_OPTIONS})
+	# target_include_directories(slughorn-test-mvt PRIVATE
+	# 	"${CMAKE_CURRENT_SOURCE_DIR}/../protozero/include"
+	# 	"${CMAKE_CURRENT_SOURCE_DIR}/../vtzero/include"
+	# )
+
+	add_executable(slughorn-test-gdal "test/slughorn-test-gdal.cpp")
+	target_link_libraries(slughorn-test-gdal PRIVATE slughorn gdal)
+	target_compile_options(slughorn-test-gdal PRIVATE ${SLUGHORN_COMPILE_OPTIONS})
+	target_include_directories(slughorn-test-gdal PRIVATE "/usr/include/gdal")
+endif()
+
+# Let's be honest... I mostly care about the frontends I care about! So, these
+# will all likely be AI-generated things (for now).
+option(SLUGHORN_BUILD_EXAMPLES "Build example programs" OFF)
+
+if(SLUGHORN_BUILD_EXAMPLES)
+	add_subdirectory("example")
 endif()
