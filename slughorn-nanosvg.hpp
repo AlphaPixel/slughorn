@@ -47,16 +47,23 @@
 #include "slughorn.hpp"
 
 #ifdef SLUGHORN_NANOSVG_IMPLEMENTATION
-#   define NANOSVG_IMPLEMENTATION
+#define NANOSVG_IMPLEMENTATION
 #endif
 
-_Pragma("GCC diagnostic push")
-_Pragma("GCC diagnostic ignored \"-Wsign-conversion\"")
-_Pragma("GCC diagnostic ignored \"-Wshadow\"")
+SLUGHORN_DIAGNOSTIC_PUSH()
+
+#if defined(__clang__)
+SLUGHORN_IGNORE("-Wimplicit-float-conversion")
+SLUGHORN_IGNORE("-Wfloat-conversion")
+SLUGHORN_IGNORE("-Wimplicit-int-conversion")
+#endif
+
+SLUGHORN_IGNORE("-Wshadow")
+SLUGHORN_IGNORE("-Wsign-conversion")
 
 #include "nanosvg.h"
 
-_Pragma("GCC diagnostic pop")
+SLUGHORN_DIAGNOSTIC_POP()
 
 #include <string>
 #include <utility>

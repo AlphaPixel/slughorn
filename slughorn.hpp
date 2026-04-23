@@ -265,6 +265,7 @@ struct Layer {
 // be conceptually treated as a SINGLE `Shape`.
 // ================================================================================================
 struct CompositeShape {
+	// TODO: Should there be an alias for this; something like `slughorn::Layers`?
 	std::vector<Layer> layers;
 
 	// Usage is obvious in text situations; in "pure shape" modes, can be used to help arrange
@@ -857,3 +858,21 @@ inline std::ostream& operator<<(std::ostream& os, const Atlas::PackingStats& p) 
 }
 
 }
+
+#if defined(__clang__)
+	#define SLUGHORN_PRAGMA(x) _Pragma(#x)
+	#define SLUGHORN_DIAGNOSTIC_PUSH() SLUGHORN_PRAGMA(clang diagnostic push)
+	#define SLUGHORN_DIAGNOSTIC_POP() SLUGHORN_PRAGMA(clang diagnostic pop)
+	#define SLUGHORN_IGNORE(w) SLUGHORN_PRAGMA(clang diagnostic ignored w)
+
+#elif defined(__GNUC__)
+	#define SLUGHORN_PRAGMA(x) _Pragma(#x)
+	#define SLUGHORN_DIAGNOSTIC_PUSH() SLUGHORN_PRAGMA(GCC diagnostic push)
+	#define SLUGHORN_DIAGNOSTIC_POP() SLUGHORN_PRAGMA(GCC diagnostic pop)
+	#define SLUGHORN_IGNORE(w) SLUGHORN_PRAGMA(GCC diagnostic ignored w)
+
+#else
+	#define SLUGHORN_DIAGNOSTIC_PUSH()
+	#define SLUGHORN_DIAGNOSTIC_POP()
+	#define SLUGHORN_IGNORE(w)
+#endif
