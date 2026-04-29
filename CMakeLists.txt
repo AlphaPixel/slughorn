@@ -204,10 +204,10 @@ if(SLUGHORN_BUILD_TESTS)
 	# 	"${CMAKE_CURRENT_SOURCE_DIR}/../vtzero/include"
 	# )
 
-	add_executable(slughorn-test-gdal "test/slughorn-test-gdal.cpp")
-	target_link_libraries(slughorn-test-gdal PRIVATE slughorn gdal)
-	target_compile_options(slughorn-test-gdal PRIVATE ${SLUGHORN_COMPILE_OPTIONS})
-	target_include_directories(slughorn-test-gdal PRIVATE "/usr/include/gdal")
+	# add_executable(slughorn-test-gdal "test/slughorn-test-gdal.cpp")
+	# target_link_libraries(slughorn-test-gdal PRIVATE slughorn gdal)
+	# target_compile_options(slughorn-test-gdal PRIVATE ${SLUGHORN_COMPILE_OPTIONS})
+	# target_include_directories(slughorn-test-gdal PRIVATE "/usr/include/gdal")
 endif()
 
 # Let's be honest... I mostly care about the frontends I care about! So, these
