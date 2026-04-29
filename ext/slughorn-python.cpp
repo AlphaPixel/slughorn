@@ -111,6 +111,9 @@ struct PyCurveDecomposer {
 	) { decomposer.cubicTo(c1x, c1y, c2x, c2y, x3, y3); }
 
 	const slughorn::Atlas::Curves& getCurves() const { return curves; }
+	void close() { decomposer.close(); }
+	slug_t getTolerance() const { return decomposer.tolerance; }
+	void setTolerance(slug_t tolerance) { decomposer.tolerance = tolerance; }
 	void clear() { curves.clear(); }
 };
 
@@ -141,6 +144,9 @@ PYBIND11_MODULE(slughorn, m) {
 		.def(py::init<>(), "Default key: codepoint 0.")
 		.def(py::init<uint32_t>(), py::arg("codepoint"),
 			"Construct a Codepoint key from a uint32_t (e.g. ord('A'))."
+		)
+		.def(py::init<const std::string&>(), py::arg("name"),
+			"Construct a named key from a string (e.g. Key('logo'))."
 		)
 
 		// Static factories
@@ -177,6 +183,9 @@ PYBIND11_MODULE(slughorn, m) {
 	// =========================================================================
 	py::class_<slughorn::KeyIterator>(m, "KeyIterator")
 		.def(py::init<>(), "Numeric auto-key iterator starting at 0.")
+		.def(py::init<uint32_t>(), py::arg("counter"),
+			"Numeric auto-key iterator starting at counter."
+		)
 		.def(py::init([](std::string prefix) {
 			return slughorn::KeyIterator(prefix);
 		}), py::arg("prefix"),
@@ -214,11 +223,16 @@ PYBIND11_MODULE(slughorn, m) {
 		.def_readwrite("g", &slughorn::Color::g)
 		.def_readwrite("b", &slughorn::Color::b)
 		.def_readwrite("a", &slughorn::Color::a)
-		.def("to_tuple", [](const slughorn::Color& c) {
+		.def_property_readonly("values", [](const slughorn::Color& c) {
 			return py::make_tuple(c.r, c.g, c.b, c.a);
 		}, "Return (r, g, b, a) as a Python tuple.")
 		.def("__repr__", [](const slughorn::Color& c) { return streamRepr(c); })
 	;
+
+	m.attr("TOLERANCE_DRAFT") = py::float_(slughorn::TOLERANCE_DRAFT);
+	m.attr("TOLERANCE_BALANCED") = py::float_(slughorn::TOLERANCE_BALANCED);
+	m.attr("TOLERANCE_FINE") = py::float_(slughorn::TOLERANCE_FINE);
+	m.attr("TOLERANCE_EXACT") = py::float_(slughorn::TOLERANCE_EXACT);
 
 	// ============================================================================================
 	// slughorn.Matrix
@@ -252,6 +266,23 @@ PYBIND11_MODULE(slughorn, m) {
 			"Concatenate: (self * rhs) - rhs is applied first."
 		)
 		.def("__repr__", [](const slughorn::Matrix& mat) { return streamRepr(mat); })
+	;
+
+	// ============================================================================================
+	// slughorn.Quad
+	// ============================================================================================
+	py::class_<slughorn::Quad>(m, "Quad")
+		.def(py::init([](slug_t x0, slug_t y0, slug_t x1, slug_t y1) {
+			return slughorn::Quad{x0, y0, x1, y1};
+		}), py::arg("x0"), py::arg("y0"), py::arg("x1"), py::arg("y1"))
+		.def_readwrite("x0", &slughorn::Quad::x0)
+		.def_readwrite("y0", &slughorn::Quad::y0)
+		.def_readwrite("x1", &slughorn::Quad::x1)
+		.def_readwrite("y1", &slughorn::Quad::y1)
+		.def_property_readonly("values", [](const slughorn::Quad& q) {
+			return py::make_tuple(q.x0, q.y0, q.x1, q.y1);
+		}, "Return (x0, y0, x1, y1) as a Python tuple.")
+		.def("__repr__", [](const slughorn::Quad& q) { return streamRepr(q); })
 	;
 
 	// ============================================================================================
@@ -416,6 +447,12 @@ PYBIND11_MODULE(slughorn, m) {
 			"Convert an em-space coordinate to a normalized [0,1] UV. "
 			"Python port of the GLSL slug_EmToUV() helper. "
 			"(0,0) = bottom-left of bounding box, (1,1) = top-right.")
+		.def("compute_quad", &slughorn::Atlas::Shape::computeQuad,
+			py::arg("transform"),
+			py::arg("scale") = 1.0f,
+			py::arg("expand") = 0.0f,
+			"Compute the world-space bounding quad for this shape."
+		)
 		.def("__repr__", [](const slughorn::Atlas::Shape& s) { return streamRepr(s); })
 	;
 
@@ -444,6 +481,23 @@ PYBIND11_MODULE(slughorn, m) {
 				std::to_string(td.bytes.size()) + " bytes)"
 			;
 		})
+	;
+
+	// ============================================================================================
+	// slughorn.PackingStats (Atlas::PackingStats in C++, flat in Python)
+	// ============================================================================================
+	py::class_<slughorn::Atlas::PackingStats>(m, "PackingStats")
+		.def_readonly("curve_texels_used", &slughorn::Atlas::PackingStats::curveTexelsUsed)
+		.def_readonly("curve_texels_padding", &slughorn::Atlas::PackingStats::curveTexelsPadding)
+		.def_readonly("curve_texels_total", &slughorn::Atlas::PackingStats::curveTexelsTotal)
+		.def_readonly("band_texels_used", &slughorn::Atlas::PackingStats::bandTexelsUsed)
+		.def_readonly("band_texels_padding", &slughorn::Atlas::PackingStats::bandTexelsPadding)
+		.def_readonly("band_texels_total", &slughorn::Atlas::PackingStats::bandTexelsTotal)
+		.def("curve_utilization", &slughorn::Atlas::PackingStats::curveUtilization)
+		.def("band_utilization", &slughorn::Atlas::PackingStats::bandUtilization)
+		.def("curve_padding_ratio", &slughorn::Atlas::PackingStats::curvePaddingRatio)
+		.def("band_padding_ratio", &slughorn::Atlas::PackingStats::bandPaddingRatio)
+		.def("__repr__", [](const slughorn::Atlas::PackingStats& p) { return streamRepr(p); })
 	;
 
 	// ============================================================================================
@@ -507,7 +561,6 @@ PYBIND11_MODULE(slughorn, m) {
 			"Return True if key is registered (shape, composite, or pending build)."
 		)
 
-#if 0
 		// Bulk accessors - primarily for slughorn_serial.py
 		.def("get_shapes",
 			[](const slughorn::Atlas& a) {
@@ -527,7 +580,14 @@ PYBIND11_MODULE(slughorn, m) {
 			},
 			"Return a dict of all {Key: CompositeShape} entries. "
 			"Primarily used by slughorn_serial for serialization.")
-#endif
+
+		.def_property_readonly("packing_stats",
+			[](const slughorn::Atlas& a) -> const slughorn::Atlas::PackingStats& {
+				return a.getPackingStats();
+			},
+			py::return_value_policy::reference_internal,
+			"Packing statistics for the built atlas."
+		)
 
 		.def_property_readonly("curve_texture",
 			[](const slughorn::Atlas& a) -> const slughorn::Atlas::TextureData& {
@@ -558,6 +618,9 @@ PYBIND11_MODULE(slughorn, m) {
 		"Call get_curves() to retrieve the resulting Curves list, then pass "
 		"it to ShapeInfo.curves.")
 		.def(py::init<>())
+		.def_property("tolerance", &PyCurveDecomposer::getTolerance, &PyCurveDecomposer::setTolerance,
+			"Flatness threshold for cubic decomposition in curve-space units."
+		)
 		.def("move_to", &PyCurveDecomposer::moveTo, py::arg("x"), py::arg("y"))
 		.def("line_to", &PyCurveDecomposer::lineTo, py::arg("x3"), py::arg("y3"))
 		.def("quad_to", &PyCurveDecomposer::quadTo,
@@ -571,6 +634,9 @@ PYBIND11_MODULE(slughorn, m) {
 		.def("get_curves", &PyCurveDecomposer::getCurves,
 			py::return_value_policy::copy,
 			"Return a copy of the accumulated Curves list."
+		)
+		.def("close", &PyCurveDecomposer::close,
+			"Close the current subpath by drawing a line back to the start point."
 		)
 		.def("clear", &PyCurveDecomposer::clear,
 			"Discard all accumulated curves (reuse the decomposer for a new path)."
