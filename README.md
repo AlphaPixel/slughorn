@@ -39,205 +39,25 @@ specification, and a large portion of the COLRv1 spec!
 
 # Demos
 
+| Preview | Description |
+|:---:|---|
+| ![Emoji Demo](https://ambaince.com/osgSlug/emojis.png) | **Emoji**<br><br>Demonstrates loading **COLRv0** and **COLRv1** emojis using the `slughorn-freetype.hpp` backend. Each layer of the emoji is composited into its own quad and positioned relative to the base.<br><br>*NOTE*: Not all features of **COLRv1** are currently supported, but will be soon. |
+| [![Animated Glyphs Demo](https://ambaince.com/osgSlug/glyph-animate.webp)](https://ambaince.com/osgSlug/glyph-animate.mp4) | **Animated Glyphs**<br><br>Shader-driven animation applied to Slug-rendered glyph geometry, accomplished by adjusting the output positions in the vertex shader. |
+| [![Layer Effects Demo](https://ambaince.com/osgSlug/logo.webp)](https://ambaince.com/osgSlug/logo.mp4) | **Layer Effects**<br><br>Shows how individual layers in a `CompositeShape` can not only be distinguished in the shader pipeline, but also how each layer can have its own unique fragment output. From left to right: basic fill, two GLSL algorithmic fills, traditional texture lookup, and finally an animated GLSL algorithmic fill. |
+| [![Morphing Demo](https://ambaince.com/osgSlug/morph.webp)](https://ambaince.com/osgSlug/morph.mp4) | **Morphing**<br><br>Similar to the animated glyphs demo, this example shows both the shape, a simple triangle, and the debugging bounding box using the `OSGSLUG_DEBUG=3` environment variable. |
+| ![2D Demo](https://ambaince.com/osgSlug/project2d.png) | **2D Projection**<br><br>The standard orthographic-style 2D placement/rendering. |
+| ![3D Demo](https://ambaince.com/osgSlug/project3d.png) | **3D Projection**<br><br>The same scene as the 2D Projection above, but with a traditional perspective-style view. |
+| ![Shapes/CompositeShapes](https://ambaince.com/osgSlug/shapes-compositeshapes.png) | **Shapes/CompositeShapes**<br><br>Each backend has its own examples of how to create both simple `Shape` and `CompositeShape` objects, groups of `Shape` instances layered together. The last screenshot demonstrates the `slughorn-canvas.hpp` backend, in addition to showing how the traditional punch-out effect can be achieved by manually using opposite winding directions in order to cut out one closed path from another.<br><br>*NOTE*: The `skia` backend is currently the **only** backend that supports a true stroke-to-path feature, the jigsaw puzzle piece. |
+| [![3D Objects](https://ambaince.com/osgSlug/sphere3d.webp)](https://ambaince.com/osgSlug/sphere3d.mp4) | **3D Objects**<br><br>Slug is not restricted to simple quads; any 3D object or mesh can be assigned compatible `slughorn` coordinate mappings, such as spheres, cubes, curved surfaces, etc. |
+| ![SVG Demo](https://ambaince.com/osgSlug/svgs.png) | **SVG**<br><br>SVG content fits easily within the `slughorn` ecosystem via the `slughorn-nanosvg.hpp` backend.<br><br>*NOTE*: Similar to the emoji support, gradients are not currently supported. |
+| [![Mixed Text Demo](https://ambaince.com/osgSlug/text-mix.webp)](https://ambaince.com/osgSlug/text-mix.mp4) | **Mixed Text**<br><br>Text glyphs are simply an instance of `Shape`, and can be freely mixed with any **other** `Shape` or `CompositeShape` object. This example demonstrates replacing the character `F` with a simple triangle, which fits seamlessly into the layout process. |
+| [![Text Demo](https://ambaince.com/osgSlug/text.webp)](https://ambaince.com/osgSlug/text.mp4) | **Text**<br><br>Text was the original inspiration for Slug, and will always be incredibly well-supported. As mentioned above, each glyph in a text layout is nothing more than an instance of `Shape`, and can be manipulated in any way you can imagine. :) |
+
 > **Note on demos:** All video demonstrations below are captured from
 > [osgSlug](https://github.com/AlphaPixel/osgSlug), the intentionally separate
 > OpenSceneGraph-based testbed developed alongside `slughorn`. `slughorn` itself
 > has no graphics dependencies, and `osgSlug` exists to prove the integration
 > story and serve as a reference implementation for other graphics backends.
-
-<table>
-  <thead>
-    <tr>
-      <th align="center">Preview</th>
-      <th align="left">Description</th>
-    </tr>
-  </thead>
-
-  <tbody>
-    <tr>
-      <td align="center">
-        <img
-          src="https://ambaince.com/osgSlug/emojis.png"
-          alt="Emoji Demo"
-          width="300">
-      </td>
-      <td>
-        <strong>Emoji</strong><br><br>
-        Demonstrates loading **COLRv0** and **COLRv1** emojis using the
-        `slughorn-freetype.hpp` backend. Each "layer" of the emoji as composited
-        into its own quad and positioned relative to the "base."<p>*NOTE*: Not
-        all features of **COLRv1** are currently supported, but will be soon.
-      </td>
-    </tr>
-
-    <tr>
-      <td align="center">
-        <a href="https://ambaince.com/osgSlug/glyph-animate.mp4">
-          <img
-            src="https://ambaince.com/osgSlug/glyph-animate.webp"
-            alt="Animated Glyphs Demo"
-            width="300">
-        </a>
-      </td>
-      <td>
-        <strong>Animated Glyphs</strong><br><br>
-        Shader-driven animation applied to Slug-rendered glyph geometry,
-        accomplished by adjusting the output positions in the vertex shader.
-      </td>
-    </tr>
-
-    <tr>
-      <td align="center">
-        <a href="https://ambaince.com/osgSlug/logo.mp4">
-          <img
-            src="https://ambaince.com/osgSlug/logo.webp"
-            alt="Layer Effects Demo"
-            width="300">
-        </a>
-      </td>
-      <td>
-        <strong>Layer Effects</strong><br><br>
-        Shows how individual layers in a `CompositeShape` (the rectangular
-        regions) can not only be distinguished in the shader pipeline, but also
-        how each layer can have its own unique fragment output. From left to
-        right: basic fill, two GLSL algorihmic fills, traditional texture lookup
-        and finally an animated GLSL algorithmic fill.
-      </td>
-    </tr>
-
-    <tr>
-      <td align="center">
-        <a href="https://ambaince.com/osgSlug/morph.mp4">
-          <img
-            src="https://ambaince.com/osgSlug/morph.webp"
-            alt="Morphing Demo"
-            width="300">
-        </a>
-      </td>
-      <td>
-        <strong>Morphing</strong><br><br>
-        Similar to the "animated glyphs" demo, this example shows both the
-        "shape" (the simple triangle) and the "debugging bounding box" (using
-        the `OSGSLUG_DEBUG=3` environment variable).
-      </td>
-    </tr>
-
-    <tr>
-      <td align="center">
-        <img
-          src="https://ambaince.com/osgSlug/project2d.png"
-          alt="2D Demo"
-          width="300">
-      </td>
-      <td>
-        <strong>2D Projection</strong><br><br>
-        The standard orthographic-style 2D placement/rendering.
-      </td>
-    </tr>
-
-    <tr>
-      <td align="center">
-        <img
-          src="https://ambaince.com/osgSlug/project3d.png"
-          alt="3D Demo"
-          width="300">
-      </td>
-      <td>
-        <strong>3D Projection</strong><br><br>
-        The same scene as the 2D Projection above, but with a traditional
-        perspective-style view.
-      </td>
-    </tr>
-
-    <tr>
-      <td align="center">
-        <img
-          src="https://ambaince.com/osgSlug/shapes-compositeshapes.png"
-          alt="Shapes/CompositeShapes"
-          width="300">
-      </td>
-      <td>
-        <strong>Shapes/CompositeShapes</strong><br><br>
-        Each backend has its own examples of how to create both simple `Shape`
-        and `CompositeShape` objects (groups of `Shape` instances layered
-        together). The last screenshot demonstrates the `slughorn-canvas.hpp`
-        backend, in addition to showing how the traditional "punch out" effect
-        can be achieved by manually using opposite winding directions in order
-        to "cut out" one closed path from another.<p>*NOTE*: The `skia` backend
-        is currently the **only** backend that supports a true "stroke to path"
-        feature (the jigsaw puzzle piece).
-      </td>
-    </tr>
-
-    <tr>
-      <td align="center">
-        <a href="https://ambaince.com/osgSlug/sphere3d.mp4">
-          <img
-            src="https://ambaince.com/osgSlug/sphere3d.webp"
-            alt="3D Objects"
-            width="300">
-        </a>
-      </td>
-      <td>
-        <strong>3D Objects</strong><br><br>
-        Slug isn't restricted to simple quads; any 3D object/mesh can be
-        assigned compatible `slughorn` coordiante mappings (such as spheres,
-        cubes, curved surfaces, etc).
-      </td>
-    </tr>
-
-    <tr>
-      <td align="center">
-        <img
-          src="https://ambaince.com/osgSlug/svgs.png"
-          alt="SVG Demo"
-          width="300">
-      </td>
-      <td>
-        <strong>SVG</strong><br><br>
-        SVG content fits easily within the `slughorn` ecosystem via the
-        `slughorn-nanosvg.hpp` backend.<p>*NOTE*: Similar to the emoji support,
-        gradients are not currently supported.
-      </td>
-    </tr>
-
-    <tr>
-      <td align="center">
-        <a href="https://ambaince.com/osgSlug/text-mix.mp4">
-          <img
-            src="https://ambaince.com/osgSlug/text-mix.webp"
-            alt="Mixed Text Demo"
-            width="300">
-        </a>
-      </td>
-      <td>
-        <strong>Mixed Text</strong><br><br>
-        Text glyphs are simply an instance of `Shape`, and can be freely mixed
-        with any **other** `Shape/CompositeShape` object. This example
-        demonstrates replacing the character `F` with a simple triangle, which
-        fits seamlessly into the layout process.
-      </td>
-    </tr>
-
-    <tr>
-      <td align="center">
-        <a href="https://ambaince.com/osgSlug/text.mp4">
-          <img
-            src="https://ambaince.com/osgSlug/text.webp"
-            alt="Text Demo"
-            width="300">
-        </a>
-      </td>
-      <td>
-        <strong>Text</strong><br><br>
-        Text was the original inspiration for Slug, and will always be
-        incredibly well-supported. As mentioned above, each glyph in a text
-        layout is nothing more than an instance of `Shape`, and can be
-        manipulated in any way you can imagine. :)
-      </td>
-    </tr>
-  </tbody>
-</table>
 
 # TODO
 
@@ -407,9 +227,8 @@ Slug is solving a different problem that Skia deliberately doesn't address.
 AI tools such as ChatGPT and Claude have been used for research and some code
 development. However, this is not a "fire and forget" AI project. It was
 carefully designed, planned, architected and implemented by Jeremy 'Cubicool'
-Moles, an expert in both GPU development and typography and glyph rendering.
-AI tools were also used for producing documentation and ancillary data products
-to accelerate development.
+Moles (cubicool@gmail.com). AI tools were also used for producing documentation
+and ancillary data products to accelerate development.
 
 # Sponsorship
 
