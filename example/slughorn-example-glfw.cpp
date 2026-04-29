@@ -1,4 +1,4 @@
-// slughorn-test-glfw.cpp
+// XXX: This example was created entirely by AI! osgSlug is the REAL "testbed" (for now)...
 //
 // Minimal single-file GLFW + GLAD demo for the slughorn Atlas pipeline.
 //
@@ -19,11 +19,10 @@
 //
 // Shader uniforms (intentionally renamed away from osgSlug names):
 //
-// u_mvp            mat4       orthographic projection
-// u_time           float      seconds since start
-// u_curveTexture   sampler2D  (unit 0) RGBA32F curve data
-// u_bandTexture    usampler2D (unit 1) RGBA16UI band data
-// ---------------------------------------------------------------------------
+// u_mvp          mat4       orthographic projection
+// u_time         float      seconds since start
+// u_curveTexture sampler2D  (unit 0) RGBA32F curve data
+// u_bandTexture  usampler2D (unit 1) RGBA16UI band data
 
 #include "slughorn.hpp"
 #include "slughorn-canvas.hpp"
@@ -438,7 +437,6 @@ static void onKey(GLFWwindow* win, int key, int /*scancode*/, int action, int /*
 // ============================================================================
 
 int main(int /*argc*/, char** /*argv*/) {
-
 	// ------------------------------------------------------------------------
 	// 1. Build Atlas via slughorn::canvas::Canvas
 	// (same shape as osgslug-shape-canvas — swap in anything else here)

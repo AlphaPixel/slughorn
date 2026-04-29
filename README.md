@@ -1,17 +1,18 @@
 # slughorn
 
 `slughorn` is modern C++20 library implementing the recent OSS release of the
-"Slug" GPU vector graphics rendering technique by Eric Lengyel. It makes no
-assumptions about what graphics environment being used (OpenGL, Vulkan, WebGL,
-WebGPU, DirectX, etc) and instead focuses *only* on simplifying the process
-of creating/ingesting vector data from various backends--or, alternatively, by
-using an HTML "Canvas-like" API directly in code--so it can be directly uploaded
-to the GPU as easily as possible. A backend is simply an implementation that
-produces Bezier curves for `slughorn` to process to facilitate drawing. Further
-code outside of `slughorn` draws the curves with a graphics API like OpneGL, Vulkan,
-WebGL, WebGPU, Metal, DirectX or similar, potentially using toolkits like but not
-limited to OSG / OpenSceneGraph or VSG / VulkanSceneGraph. Companion projects
-( https://github.com/AlphaPixel/osgSlug ) assist with this integration.
+"Slug" GPU vector graphics rendering technique by [Eric Lengyel](https://terathon.com/blog/).
+It makes no assumptions about what graphics environment being used (OpenGL,
+Vulkan, WebGL, WebGPU, DirectX, etc) and instead focuses *only* on simplifying
+the process of creating/ingesting vector data from various backends--or,
+alternatively, by using an HTML "Canvas-like" API directly in code--so it can be
+directly uploaded to the GPU as easily as possible. A backend is simply an
+implementation that produces Bezier curves for `slughorn` to process to
+facilitate drawing. Further code outside of `slughorn` draws the curves with a
+graphics API like OpenGL, Vulkan, WebGL, WebGPU, Metal, DirectX or similar,
+potentially using toolkits like but not limited to OSG / OpenSceneGraph or VSG /
+VulkanSceneGraph. Companion projects ( https://github.com/AlphaPixel/osgSlug )
+assist with this integration.
 
 Furthermore, `slughorn` provides tools for traditional "offline asset"
 processing (primarily in Python), as well as a [glTF](#)-compatible JSON file
@@ -33,8 +34,210 @@ simple quadratic Bezier curves, `slughorn` can make it render.
 
 ## Supported Backends: FreeType
 
-The FreeType2 backend supports stadard OTF/TTF glyphs, all of the COLRv0
+The FreeType2 backend supports standard OTF/TTF glyphs, all of the COLRv0
 specification, and a large portion of the COLRv1 spec!
+
+# Demos
+
+> **Note on demos:** All video demonstrations below are captured from
+> [osgSlug](https://github.com/AlphaPixel/osgSlug), the intentionally separate
+> OpenSceneGraph-based testbed developed alongside `slughorn`. `slughorn` itself
+> has no graphics dependencies, and `osgSlug` exists to prove the integration
+> story and serve as a reference implementation for other graphics backends.
+
+<table>
+  <thead>
+    <tr>
+      <th align="center">Preview</th>
+      <th align="left">Description</th>
+    </tr>
+  </thead>
+
+  <tbody>
+    <tr>
+      <td align="center">
+        <img
+          src="https://ambaince.com/osgSlug/emojis.png"
+          alt="Emoji Demo"
+          width="300">
+      </td>
+      <td>
+        <strong>Emoji</strong><br><br>
+        Demonstrates loading **COLRv0** and **COLRv1** emojis using the
+        `slughorn-freetype.hpp` backend. Each "layer" of the emoji as composited
+        into its own quad and positioned relative to the "base."<p>*NOTE*: Not
+        all features of **COLRv1** are currently supported, but will be soon.
+      </td>
+    </tr>
+
+    <tr>
+      <td align="center">
+        <a href="https://ambaince.com/osgSlug/glyph-animate.mp4">
+          <img
+            src="https://ambaince.com/osgSlug/glyph-animate.webp"
+            alt="Animated Glyphs Demo"
+            width="300">
+        </a>
+      </td>
+      <td>
+        <strong>Animated Glyphs</strong><br><br>
+        Shader-driven animation applied to Slug-rendered glyph geometry,
+        accomplished by adjusting the output positions in the vertex shader.
+      </td>
+    </tr>
+
+    <tr>
+      <td align="center">
+        <a href="https://ambaince.com/osgSlug/logo.mp4">
+          <img
+            src="https://ambaince.com/osgSlug/logo.webp"
+            alt="Layer Effects Demo"
+            width="300">
+        </a>
+      </td>
+      <td>
+        <strong>Layer Effects</strong><br><br>
+        Shows how individual layers in a `CompositeShape` (the rectangular
+        regions) can not only be distinguished in the shader pipeline, but also
+        how each layer can have its own unique fragment output. From left to
+        right: basic fill, two GLSL algorihmic fills, traditional texture lookup
+        and finally an animated GLSL algorithmic fill.
+      </td>
+    </tr>
+
+    <tr>
+      <td align="center">
+        <a href="https://ambaince.com/osgSlug/morph.mp4">
+          <img
+            src="https://ambaince.com/osgSlug/morph.webp"
+            alt="Morphing Demo"
+            width="300">
+        </a>
+      </td>
+      <td>
+        <strong>Morphing</strong><br><br>
+        Similar to the "animated glyphs" demo, this example shows both the
+        "shape" (the simple triangle) and the "debugging bounding box" (using
+        the `OSGSLUG_DEBUG=3` environment variable).
+      </td>
+    </tr>
+
+    <tr>
+      <td align="center">
+        <img
+          src="https://ambaince.com/osgSlug/project2d.png"
+          alt="2D Demo"
+          width="300">
+      </td>
+      <td>
+        <strong>2D Projection</strong><br><br>
+        The standard orthographic-style 2D placement/rendering.
+      </td>
+    </tr>
+
+    <tr>
+      <td align="center">
+        <img
+          src="https://ambaince.com/osgSlug/project3d.png"
+          alt="3D Demo"
+          width="300">
+      </td>
+      <td>
+        <strong>3D Projection</strong><br><br>
+        The same scene as the 2D Projection above, but with a traditional
+        perspective-style view.
+      </td>
+    </tr>
+
+    <tr>
+      <td align="center">
+        <img
+          src="https://ambaince.com/osgSlug/shapes-compositeshapes.png"
+          alt="Shapes/CompositeShapes"
+          width="300">
+      </td>
+      <td>
+        <strong>Shapes/CompositeShapes</strong><br><br>
+        Each backend has its own examples of how to create both simple `Shape`
+        and `CompositeShape` objects (groups of `Shape` instances layered
+        together). The last screenshot demonstrates the `slughorn-canvas.hpp`
+        backend, in addition to showing how the traditional "punch out" effect
+        can be achieved by manually using opposite winding directions in order
+        to "cut out" one closed path from another.<p>*NOTE*: The `skia` backend
+        is currently the **only** backend that supports a true "stroke to path"
+        feature (the jigsaw puzzle piece).
+      </td>
+    </tr>
+
+    <tr>
+      <td align="center">
+        <a href="https://ambaince.com/osgSlug/sphere3d.mp4">
+          <img
+            src="https://ambaince.com/osgSlug/sphere3d.webp"
+            alt="3D Objects"
+            width="300">
+        </a>
+      </td>
+      <td>
+        <strong>3D Objects</strong><br><br>
+        Slug isn't restricted to simple quads; any 3D object/mesh can be
+        assigned compatible `slughorn` coordiante mappings (such as spheres,
+        cubes, curved surfaces, etc).
+      </td>
+    </tr>
+
+    <tr>
+      <td align="center">
+        <img
+          src="https://ambaince.com/osgSlug/svgs.png"
+          alt="SVG Demo"
+          width="300">
+      </td>
+      <td>
+        <strong>SVG</strong><br><br>
+        SVG content fits easily within the `slughorn` ecosystem via the
+        `slughorn-nanosvg.hpp` backend.<p>*NOTE*: Similar to the emoji support,
+        gradients are not currently supported.
+      </td>
+    </tr>
+
+    <tr>
+      <td align="center">
+        <a href="https://ambaince.com/osgSlug/text-mix.mp4">
+          <img
+            src="https://ambaince.com/osgSlug/text-mix.webp"
+            alt="Mixed Text Demo"
+            width="300">
+        </a>
+      </td>
+      <td>
+        <strong>Mixed Text</strong><br><br>
+        Text glyphs are simply an instance of `Shape`, and can be freely mixed
+        with any **other** `Shape/CompositeShape` object. This example
+        demonstrates replacing the character `F` with a simple triangle, which
+        fits seamlessly into the layout process.
+      </td>
+    </tr>
+
+    <tr>
+      <td align="center">
+        <a href="https://ambaince.com/osgSlug/text.mp4">
+          <img
+            src="https://ambaince.com/osgSlug/text.webp"
+            alt="Text Demo"
+            width="300">
+        </a>
+      </td>
+      <td>
+        <strong>Text</strong><br><br>
+        Text was the original inspiration for Slug, and will always be
+        incredibly well-supported. As mentioned above, each glyph in a text
+        layout is nothing more than an instance of `Shape`, and can be
+        manipulated in any way you can imagine. :)
+      </td>
+    </tr>
+  </tbody>
+</table>
 
 # TODO
 
@@ -54,6 +257,8 @@ Avoidable by careful uniform naming. High value as a robustness/debug aid.
 
 ## Soon
 
+- [ ] Add `KeyIterator` to `slughorn::nanosvg::load` (instead of forcing numeric
+  codepoint)
 - [ ] Emphasize `osgSlug` as the "testbed" for visualization (when ready)
 - [x] Change `slughorn_render.py` to dump SVG for the `save_curves_debug`
 - [ ] Add CMake helpers for compiling in each backend
@@ -66,14 +271,22 @@ Avoidable by careful uniform naming. High value as a robustness/debug aid.
   distribution, not just count
 - [x] pybind11 wrapper
 - [ ] Change `composites` to `compositeShapes` in serialization, etc
-- [x] Change the `autoMetrics` defaul to `true`
+- [x] Change the `autoMetrics` default to `true`
 - [x] Rename `slughorn-ft2.hpp` to `slughorn-freetype.hpp`
 - [ ] Enforce VERSION compatibility in backends
-- [ ] UDL types for `slughorn::Key::from{String,Codepoing}`, potentially as
+- [ ] UDL types for `slughorn::Key::from{String,Codepoint}`, potentially as
   `_ukey`, `_skey` or similar?
 
 ## Medium Term
 
+- [ ] Remove `slughorn::Key::from*` helpers (if the ctors really cover
+  everything)
+- [ ] Move `slug_t` into `slughorn::literals`, and introduce:
+  ```
+  using slugf_t = float;
+  using slugi_t = std::uint16_t;
+  using slugid_t = std::uint32_t;
+  ```
 - [ ] Introduce `slughorn-harfbuzz.hpp` text API, using Harfbuzz to "shape" it
   properly. Note: it will necessarily NEED to be built on top of the FreeType2
   backend (`slughorn-freetype.hpp`)!
@@ -201,7 +414,7 @@ to accelerate development.
 # Sponsorship
 
 This project was created and implemented by Jeremy 'Cubicool' Moles, author of
-the osgCairo and osgPango, as well as numberous SDF-rendering and other
+the osgCairo and osgPango, as well as numerous SDF-rendering and other
 glyph-centric projects. Jeremy produced this work for AlphaPixel
 ([AlphaPixelDev.com](https://alphapixeldev.com/)) based on the 2026 release
 of the Slug algorithm ( https://terathon.com/blog/decade-slug.html) patent
@@ -211,5 +424,5 @@ extremely grateful.
 If you are interested in assistance with Slug, slughorn, OpenGL, OpenSceneGraph,
 Vulkan, VulkanSceneGraph, AR, VR, xR, 3d mapping, or almost any other
 performance-centric computing, please contact AlphaPixel. We are mercenary
-programmers who can provide rapid assitance to any challenge, and our motto is
+programmers who can provide rapid assistance to any challenge, and our motto is
 "We Solve Your Difficult Problems."
