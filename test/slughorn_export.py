@@ -154,7 +154,7 @@ def main():
 	view = AtlasView(atlas, key)
 
 	# Debug geometry
-	save_curves_svg(view.curves, shape, out_path + ".svg")
+	save_curves_svg(view, out_path + ".svg")
 	# save_curves(view.curves, shape, out_path + "_lines.png")
 
 	msg = ""

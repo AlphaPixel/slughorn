@@ -267,6 +267,27 @@ def render_sample(
 # render_sample_banded - band-accelerated renderer
 # ------------------------------------------------------------------------------------------------
 
+def _find_band_scan(coord_scaled: float, splits: List[float], band_max: int) -> int:
+	"""
+	Python mirror of slug_FindBandY/X: scans adaptive split fractions to find the band index.
+	If splits is empty or sentinel (first entry == 0.0), falls back to the direct formula.
+	coord_scaled = em * band_scale + band_offset  (the raw linear index, possibly fractional).
+	"""
+	if not splits or splits[0] == 0.0:
+		return int(clamp(coord_scaled, 0, band_max))
+
+	norm = coord_scaled / (band_max + 1)
+
+	if norm < splits[0]:
+		return 0
+
+	for b in range(1, band_max):
+		if norm < splits[b]:
+			return b
+
+	return band_max
+
+
 def render_sample_banded(
 	curves: List[Tuple[float, float, float, float, float, float]],
 	hbands_idx: List[List[int]],
@@ -279,11 +300,13 @@ def render_sample_banded(
 	band_offset_y: float,
 	band_max_x: int,
 	band_max_y: int,
+	hband_splits: List[float] = None,
+	vband_splits: List[float] = None,
 ) -> dict:
 	rx, ry = render_coord
 	ppe_x, ppe_y = pixels_per_em
-	band_x = int(clamp(rx * band_scale_x + band_offset_x, 0, band_max_x))
-	band_y = int(clamp(ry * band_scale_y + band_offset_y, 0, band_max_y))
+	band_x = _find_band_scan(rx * band_scale_x + band_offset_x, vband_splits or [], band_max_x)
+	band_y = _find_band_scan(ry * band_scale_y + band_offset_y, hband_splits or [], band_max_y)
 	xcov = xwgt = ycov = ywgt = 0.0
 	iters = 0
 
@@ -365,9 +388,8 @@ class AtlasView:
 		self.curves = self._decode_curve_texture(atlas.curve_texture)
 		self.curve_list = [Curve(*c) for c in self.curves]
 
-		self.hbands_idx, self.vbands_idx = self._decode_band_texture(
-			atlas.band_texture, self.shape
-		)
+		self.hbands_idx, self.vbands_idx, self.hband_splits, self.vband_splits = \
+			self._decode_band_texture(atlas.band_texture, self.shape)
 
 	def render(
 		self,
@@ -389,6 +411,8 @@ class AtlasView:
 				self.shape.band_offset_y,
 				self.shape.band_max_x,
 				self.shape.band_max_y,
+				self.hband_splits,
+				self.vband_splits,
 			)
 
 		else:
@@ -452,10 +476,11 @@ class AtlasView:
 			texel = read_texel(i)
 			count = int(texel[0])
 			offset = int(texel[1])
+			split_b = int(texel[2])
 
-			headers.append((count, offset))
+			headers.append((count, offset, split_b))
 
-		def decode_band(count: int, offset: int) -> List[int]:
+		def decode_band(count: int, offset: int, split_b: int) -> List[int]:
 			result = []
 
 			for i in range(count):
@@ -467,10 +492,12 @@ class AtlasView:
 
 			return result
 
-		hbands_idx = [decode_band(*headers[i]) for i in range(num_h)]
-		vbands_idx = [decode_band(*headers[num_h + i]) for i in range(num_v)]
+		hbands_idx   = [decode_band(*headers[i])          for i in range(num_h)]
+		vbands_idx   = [decode_band(*headers[num_h + i])  for i in range(num_v)]
+		hband_splits = [headers[i][2] / 65535.0           for i in range(num_h)]
+		vband_splits = [headers[num_h + i][2] / 65535.0   for i in range(num_v)]
 
-		return hbands_idx, vbands_idx
+		return hbands_idx, vbands_idx, hband_splits, vband_splits
 
 # ================================================================================================
 # Level 3 - Grid samplers + image I/O
@@ -553,17 +580,21 @@ def save_image(grid: List[List[float]], filename: str = "out.png", flip_y: bool 
 	return f"Saved {w}x{h} image -> {filename}"
 
 def save_curves(
-	curves,
-	shape,
+	view: "AtlasView",
 	filename="curves_debug.png",
 	scale: int=1024,
 	margin: float=0.0,
-	flip_y: bool=True
+	flip_y: bool=True,
 ):
 	"""
 	Render the raw curve geometry as a diagnostic diagram using the same
 	em-space -> pixel-space transform as the samplers.
 	"""
+
+	curves       = view.curves
+	shape        = view.shape
+	hband_splits = view.hband_splits
+	vband_splits = view.vband_splits
 
 	w, h = compute_render_size(shape, scale)
 	xf = EmTransform(shape, w, h, margin)
@@ -622,19 +653,28 @@ def save_curves(
 	ox, oy = shape.em_origin
 	sx, sy = shape.em_size
 
-	# Horizontal bands
-	for i in range(shape.band_max_y + 1):
-		y = (i - shape.band_offset_y) / shape.band_scale_y
+	adaptive_y = hband_splits and hband_splits[0] != 0.0
+	adaptive_x = vband_splits and vband_splits[0] != 0.0
 
+	# Horizontal band lines (Y splits)
+	if adaptive_y:
+		ys = [oy + f * sy for f in hband_splits]
+	else:
+		ys = [(i - shape.band_offset_y) / shape.band_scale_y for i in range(shape.band_max_y + 1)]
+
+	for y in ys:
 		x0, y0 = em_to_px(ox, y)
 		x1, y1 = em_to_px(ox + sx, y)
 
 		draw.line([(x0, y0), (x1, y1)], fill=(255, 0, 0), width=1)
 
-	# Vertical bands
-	for i in range(shape.band_max_x + 1):
-		x = (i - shape.band_offset_x) / shape.band_scale_x
+	# Vertical band lines (X splits)
+	if adaptive_x:
+		xs = [ox + f * sx for f in vband_splits]
+	else:
+		xs = [(i - shape.band_offset_x) / shape.band_scale_x for i in range(shape.band_max_x + 1)]
 
+	for x in xs:
 		x0, y0 = em_to_px(x, oy)
 		x1, y1 = em_to_px(x, oy + sy)
 
@@ -645,13 +685,17 @@ def save_curves(
 	return f"Saved {w}x{h} curve debug -> {filename}"
 
 def save_curves_svg(
-	curves,
-	shape,
+	view: "AtlasView",
 	filename="curves_debug.svg",
 	scale: int=1024,
 	margin: float=0.0,
-	flip_y: bool=True
+	flip_y: bool=True,
 ):
+	curves       = view.curves
+	shape        = view.shape
+	hband_splits = view.hband_splits
+	vband_splits = view.vband_splits
+
 	# --- Size + transform ---
 	w, h = compute_render_size(shape, scale)
 	xf = EmTransform(shape, w, h, margin)
@@ -730,14 +774,21 @@ def save_curves_svg(
 	# -------------------------------------------------------------------------
 	# Band overlay
 	# -------------------------------------------------------------------------
-	for i in range(shape.band_max_y + 1):
-		y = (i - shape.band_offset_y) / shape.band_scale_y
+	adaptive_y = hband_splits and hband_splits[0] != 0.0
+	adaptive_x = vband_splits and vband_splits[0] != 0.0
+
+	ys = [oy + f * sy for f in hband_splits] if adaptive_y else \
+		[(i - shape.band_offset_y) / shape.band_scale_y for i in range(shape.band_max_y + 1)]
+
+	xs = [ox + f * sx for f in vband_splits] if adaptive_x else \
+		[(i - shape.band_offset_x) / shape.band_scale_x for i in range(shape.band_max_x + 1)]
+
+	for y in ys:
 		x0, y0 = em_to_px(ox, y)
 		x1, y1 = em_to_px(ox + sx, y)
 		line(x0, y0, x1, y1, "#FF0000", width=1)
 
-	for i in range(shape.band_max_x + 1):
-		x = (i - shape.band_offset_x) / shape.band_scale_x
+	for x in xs:
 		x0, y0 = em_to_px(x, oy)
 		x1, y1 = em_to_px(x, oy + sy)
 		line(x0, y0, x1, y1, "#FF0000", width=1)
@@ -790,7 +841,7 @@ if __name__ == "__main__":
 
 	save_image(grid, "grid_reference.png")
 
-	save_curves([c.to_tuple() for c in curves], shape, "grid_reference_curves.png")
+	# save_curves requires an AtlasView; stub shape has no band data so this is skipped here.
 
 	print("Test 2: Atlas round-trip (requires compiled slughorn module)")
 

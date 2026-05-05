@@ -367,6 +367,14 @@ public:
 		// Signed: 0 means "pick automatically"; negative values are invalid.
 		int numBandsX = 0;
 		int numBandsY = 0;
+
+		// Interior X split positions in em-space (sorted ascending, within the shape's X range).
+		// If non-empty, overrides numBandsX; resulting numBands = splitsX.size() + 1.
+		std::vector<slug_t> splitsX;
+
+		// Interior Y split positions in em-space (sorted ascending, within the shape's Y range).
+		// If non-empty, overrides numBandsY; resulting numBands = splitsY.size() + 1.
+		std::vector<slug_t> splitsY;
 	};
 
 	// --------------------------------------------------------------------------------------------
@@ -440,6 +448,24 @@ public:
 			return live ? float(bandTexelsPadding) / float(live) : 0.f;
 		}
 	};
+
+	// --------------------------------------------------------------------------------------------
+	// Adaptive split placement
+	// --------------------------------------------------------------------------------------------
+
+	// Computes adaptive split positions for numBandsY horizontal and numBandsX vertical bands.
+	//
+	// Projects each curve's bounding box onto each axis, sweeps to build a curve-density profile,
+	// then places splits at the lowest-density positions (valleys) so that band boundaries fall
+	// where the fewest curves cross, minimizing per-fragment curve iterations in the shader.
+	//
+	// Returns {splitsX, splitsY}. Assign directly to ShapeInfo::splitsX / splitsY before calling
+	// addShape(). numBands <= 1 for either axis returns an empty vector for that axis.
+	static std::pair<std::vector<slug_t>, std::vector<slug_t>> computeAdaptiveSplits(
+		const Curves& curves,
+		int numBandsX,
+		int numBandsY
+	);
 
 	// --------------------------------------------------------------------------------------------
 	// Population (call before build())
@@ -532,6 +558,10 @@ private:
 		uint16_t curveCount = 0;
 
 		std::vector<size_t> curveIndices;
+
+		// Normalized [0..1] upper boundary of this band over the shape's Y (hband) or X (vband)
+		// range. Encoded into the .b channel of the band header texel by packTextures().
+		float splitFraction = 0.f;
 	};
 
 	struct ShapeBuild {
@@ -539,6 +569,9 @@ private:
 		Curves curves;
 		std::vector<BandEntry> hbands;
 		std::vector<BandEntry> vbands;
+		// Input splits forwarded from ShapeInfo; consumed by buildShapeBands().
+		std::vector<slug_t> splitsY;
+		std::vector<slug_t> splitsX;
 	};
 
 	// --------------------------------------------------------------------------------------------

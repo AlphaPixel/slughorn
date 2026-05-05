@@ -20,6 +20,119 @@
 // ================================================================================================
 namespace {
 
+// Sweep-line density analysis for one axis. Returns numBands-1 split positions in em-space,
+// placed at curve-density valleys (positions where fewest curves' bounding boxes cross).
+//
+// Uses the same bounding-box interval test as curveIntersectsBandY/X so the density profile
+// exactly predicts which curves land in each band after buildShapeBands runs.
+std::vector<slug_t> computeAxisSplits(
+	const slughorn::Atlas::Curves& curves,
+	bool useY,
+	slug_t axisMin, slug_t axisMax, slug_t axisRange,
+	uint32_t numBands
+) {
+	if(numBands <= 1) return {};
+
+	const uint32_t numSplits = numBands - 1;
+	const slug_t minSpacing = axisRange / slug_t(numBands * 4);
+
+	// Build event list: +1 where a curve's bbox starts on this axis, -1 where it ends.
+	struct Event { slug_t pos; int delta; };
+	std::vector<Event> events;
+	events.reserve(curves.size() * 2);
+
+	for(const auto& c : curves) {
+		const slug_t lo = useY
+			? std::min({c.y1, c.y2, c.y3})
+			: std::min({c.x1, c.x2, c.x3});
+		const slug_t hi = useY
+			? std::max({c.y1, c.y2, c.y3})
+			: std::max({c.x1, c.x2, c.x3});
+
+		if(hi > lo) {
+			events.push_back({std::max(lo, axisMin), +1});
+			events.push_back({std::min(hi, axisMax), -1});
+		}
+	}
+
+	// Sort by position; at ties, process decrements before increments so that
+	// a curve ending exactly where another begins produces a zero-density gap.
+	std::sort(events.begin(), events.end(), [](const Event& a, const Event& b) {
+		return a.pos < b.pos || (a.pos == b.pos && a.delta < b.delta);
+	});
+
+	// Sweep: record density of each region between consecutive event positions.
+	struct Region { slug_t lo, hi; int density; };
+	std::vector<Region> regions;
+	int active = 0;
+	slug_t prevPos = axisMin;
+
+	for(size_t i = 0; i < events.size(); ) {
+		const slug_t evPos = events[i].pos;
+
+		if(evPos > prevPos + 1e-7f) {
+			regions.push_back({prevPos, evPos, active});
+			prevPos = evPos;
+		}
+
+		while(i < events.size() && events[i].pos <= evPos + 1e-7f) {
+			active = std::max(0, active + events[i].delta);
+			i++;
+		}
+	}
+
+	if(axisMax > prevPos + 1e-7f)
+		regions.push_back({prevPos, axisMax, active});
+
+	if(regions.empty()) {
+		std::vector<slug_t> splits(numSplits);
+		for(uint32_t i = 0; i < numSplits; i++)
+			splits[i] = axisMin + axisRange * float(i + 1) / float(numBands);
+		return splits;
+	}
+
+	// Sort regions by density ascending: lowest density = best valley candidates.
+	std::vector<Region> sorted = regions;
+	std::sort(sorted.begin(), sorted.end(), [](const Region& a, const Region& b) {
+		return a.density < b.density;
+	});
+
+	// Greedily pick valley midpoints, enforcing minimum spacing between splits.
+	std::vector<slug_t> splits;
+	splits.reserve(numSplits);
+
+	for(const auto& region : sorted) {
+		if(splits.size() >= numSplits) break;
+
+		const slug_t mid = (region.lo + region.hi) * 0.5f;
+		bool tooClose = false;
+
+		for(slug_t s : splits) {
+			if(std::abs(mid - s) < minSpacing) { tooClose = true; break; }
+		}
+
+		if(!tooClose) splits.push_back(mid);
+	}
+
+	// Fallback: fill any remaining slots with uniform positions.
+	for(uint32_t i = 1; i <= numSplits && splits.size() < numSplits; i++) {
+		const slug_t pos = axisMin + axisRange * float(i) / float(numBands);
+		bool tooClose = false;
+
+		for(slug_t s : splits) {
+			if(std::abs(pos - s) < minSpacing) { tooClose = true; break; }
+		}
+
+		if(!tooClose) splits.push_back(pos);
+	}
+
+	std::sort(splits.begin(), splits.end());
+
+	for(auto& s : splits) s = (s - axisMin) / axisRange;
+
+	return splits;
+}
+
 bool curveIntersectsBandY(const slughorn::Atlas::Curve& c, slug_t lo, slug_t hi) {
 	const slug_t minY = std::min({c.y1, c.y2, c.y3});
 	const slug_t maxY = std::max({c.y1, c.y2, c.y3});
@@ -54,6 +167,39 @@ Atlas::Atlas() = default;
 Atlas::~Atlas() = default;
 
 // ================================================================================================
+// Atlas::computeAdaptiveSplits
+// ================================================================================================
+
+std::pair<std::vector<slug_t>, std::vector<slug_t>> Atlas::computeAdaptiveSplits(
+	const Curves& curves,
+	int numBandsX,
+	int numBandsY
+) {
+	if(curves.empty()) return {};
+
+	slug_t minX = 1e9_cv, minY = 1e9_cv;
+	slug_t maxX = -1e9_cv, maxY = -1e9_cv;
+
+	for(const auto& c : curves) {
+		minX = std::min({minX, c.x1, c.x2, c.x3});
+		minY = std::min({minY, c.y1, c.y2, c.y3});
+		maxX = std::max({maxX, c.x1, c.x2, c.x3});
+		maxY = std::max({maxY, c.y1, c.y2, c.y3});
+	}
+
+	const slug_t rangeX = std::max(maxX - minX, 1e-6_cv);
+	const slug_t rangeY = std::max(maxY - minY, 1e-6_cv);
+
+	const uint32_t nY = numBandsY > 1 ? static_cast<uint32_t>(numBandsY) : 0u;
+	const uint32_t nX = numBandsX > 1 ? static_cast<uint32_t>(numBandsX) : 0u;
+
+	return {
+		computeAxisSplits(curves, /*useY=*/false, minX, maxX, rangeX, nX),
+		computeAxisSplits(curves, /*useY=*/true,  minY, maxY, rangeY, nY),
+	};
+}
+
+// ================================================================================================
 // Atlas::addShape
 // ================================================================================================
 
@@ -78,6 +224,9 @@ void Atlas::addShape(Key key, const ShapeInfo& desc) {
 	// always work with uint32_t.
 	const uint32_t numBandsX = desc.numBandsX > 0 ? static_cast<uint32_t>(desc.numBandsX) : 0u;
 	const uint32_t numBandsY = desc.numBandsY > 0 ? static_cast<uint32_t>(desc.numBandsY) : 0u;
+
+	build.splitsY = desc.splitsY;
+	build.splitsX = desc.splitsX;
 
 	buildShapeBands(key, build, numBandsX, numBandsY, /*overrideMetrics=*/!desc.autoMetrics);
 }
@@ -133,6 +282,8 @@ void Atlas::buildShapeBands(
 	uint32_t numBandsY,
 	bool overrideMetrics
 ) {
+	const auto& splitsY = build.splitsY;
+	const auto& splitsX = build.splitsX;
 	if(build.curves.empty()) {
 		_build[key] = build;
 
@@ -142,17 +293,15 @@ void Atlas::buildShapeBands(
 	const size_t numCurves = build.curves.size();
 
 	// --------------------------------------------------------------------------------------------
-	// Auto band counts
-	//
-	// When 0, pick independently per axis. Currently hardcoded for testing --
-	// automatic aspect-ratio-aware calculation to follow once we've validated
-	// the non-square grid plumbing with known good values.
+	// Band counts: splits override numBands; otherwise auto-pick or use caller's value.
 	// --------------------------------------------------------------------------------------------
-	if(numBandsX == 0) numBandsX = static_cast<uint32_t>(
+	if(!splitsY.empty()) numBandsY = static_cast<uint32_t>(splitsY.size() + 1);
+	else if(numBandsY == 0) numBandsY = static_cast<uint32_t>(
 		std::min(size_t(16), std::max(size_t(1), numCurves / 2))
 	);
 
-	if(numBandsY == 0) numBandsY = static_cast<uint32_t>(
+	if(!splitsX.empty()) numBandsX = static_cast<uint32_t>(splitsX.size() + 1);
+	else if(numBandsX == 0) numBandsX = static_cast<uint32_t>(
 		std::min(size_t(16), std::max(size_t(1), numCurves / 2))
 	);
 
@@ -199,63 +348,91 @@ void Atlas::buildShapeBands(
 	// --------------------------------------------------------------------------------------------
 	// Horizontal bands (sliced along Y) - numBandsY slices
 	// --------------------------------------------------------------------------------------------
-	build.hbands.resize(numBandsY);
+	{
+		std::vector<slug_t> hboundaries(numBandsY + 1);
+		hboundaries[0] = minY;
+		hboundaries[numBandsY] = maxY;
 
-	const slug_t bandHeightY = rangeY / cv(numBandsY);
-
-	for(uint32_t b = 0; b < numBandsY; b++) {
-		const slug_t lo = minY + cv(b) * bandHeightY;
-		const slug_t hi = lo + bandHeightY;
-		auto& band = build.hbands[b];
-
-		for(size_t ci = 0; ci < numCurves; ci++) {
-			if(curveIntersectsBandY(build.curves[ci], lo, hi)) band.curveIndices.push_back(ci);
+		if(!splitsY.empty()) {
+			for(uint32_t i = 0; i < static_cast<uint32_t>(splitsY.size()); i++)
+				hboundaries[i + 1] = minY + splitsY[i] * rangeY;
+		} else {
+			const slug_t bandHeightY = rangeY / cv(numBandsY);
+			for(uint32_t i = 1; i < numBandsY; i++)
+				hboundaries[i] = minY + cv(i) * bandHeightY;
 		}
 
-		std::sort(band.curveIndices.begin(), band.curveIndices.end(), [&](size_t l, size_t r) {
-			return std::max({
-				build.curves[l].x1,
-				build.curves[l].x2,
-				build.curves[l].x3
-			}) > std::max({
-				build.curves[r].x1,
-				build.curves[r].x2,
-				build.curves[r].x3
-			});
-		});
+		build.hbands.resize(numBandsY);
 
-		band.curveCount = static_cast<uint16_t>(band.curveIndices.size());
+		for(uint32_t b = 0; b < numBandsY; b++) {
+			const slug_t lo = hboundaries[b];
+			const slug_t hi = hboundaries[b + 1];
+			auto& band = build.hbands[b];
+
+			for(size_t ci = 0; ci < numCurves; ci++) {
+				if(curveIntersectsBandY(build.curves[ci], lo, hi)) band.curveIndices.push_back(ci);
+			}
+
+			std::sort(band.curveIndices.begin(), band.curveIndices.end(), [&](size_t l, size_t r) {
+				return std::max({
+					build.curves[l].x1,
+					build.curves[l].x2,
+					build.curves[l].x3
+				}) > std::max({
+					build.curves[r].x1,
+					build.curves[r].x2,
+					build.curves[r].x3
+				});
+			});
+
+			band.curveCount = static_cast<uint16_t>(band.curveIndices.size());
+			if(!splitsY.empty()) band.splitFraction = (hi - minY) / rangeY;
+		}
 	}
 
 	// --------------------------------------------------------------------------------------------
 	// Vertical bands (sliced along X) - numBandsX slices
 	// --------------------------------------------------------------------------------------------
-	build.vbands.resize(numBandsX);
+	{
+		std::vector<slug_t> vboundaries(numBandsX + 1);
+		vboundaries[0] = minX;
+		vboundaries[numBandsX] = maxX;
 
-	const slug_t bandWidthX = rangeX / cv(numBandsX);
-
-	for(uint32_t b = 0; b < numBandsX; b++) {
-		const slug_t lo = minX + cv(b) * bandWidthX;
-		const slug_t hi = lo + bandWidthX;
-		auto& band = build.vbands[b];
-
-		for(size_t ci = 0; ci < numCurves; ci++) {
-			if(curveIntersectsBandX(build.curves[ci], lo, hi)) band.curveIndices.push_back(ci);
+		if(!splitsX.empty()) {
+			for(uint32_t i = 0; i < static_cast<uint32_t>(splitsX.size()); i++)
+				vboundaries[i + 1] = minX + splitsX[i] * rangeX;
+		} else {
+			const slug_t bandWidthX = rangeX / cv(numBandsX);
+			for(uint32_t i = 1; i < numBandsX; i++)
+				vboundaries[i] = minX + cv(i) * bandWidthX;
 		}
 
-		std::sort(band.curveIndices.begin(), band.curveIndices.end(), [&](size_t l, size_t r) {
-			return std::max({
-				build.curves[l].y1,
-				build.curves[l].y2,
-				build.curves[l].y3
-			}) > std::max({
-				build.curves[r].y1,
-				build.curves[r].y2,
-				build.curves[r].y3
-			});
-		});
+		build.vbands.resize(numBandsX);
 
-		band.curveCount = static_cast<uint16_t>(band.curveIndices.size());
+		for(uint32_t b = 0; b < numBandsX; b++) {
+			const slug_t lo = vboundaries[b];
+			const slug_t hi = vboundaries[b + 1];
+			auto& band = build.vbands[b];
+
+			for(size_t ci = 0; ci < numCurves; ci++) {
+				if(curveIntersectsBandX(build.curves[ci], lo, hi)) band.curveIndices.push_back(ci);
+			}
+
+			std::sort(band.curveIndices.begin(), band.curveIndices.end(), [&](size_t l, size_t r) {
+				return std::max({
+					build.curves[l].y1,
+					build.curves[l].y2,
+					build.curves[l].y3
+				}) > std::max({
+					build.curves[r].y1,
+					build.curves[r].y2,
+					build.curves[r].y3
+				});
+			});
+
+			band.curveCount = static_cast<uint16_t>(band.curveIndices.size());
+			if(!splitsX.empty()) band.splitFraction = (hi - minX) / rangeX;
+		}
 	}
 
 	_build[key] = build;
@@ -462,13 +639,16 @@ void Atlas::packTextures() {
 		packBandList(g.hbands, 0);
 		packBandList(g.vbands, numHBands);
 
-		for(uint32_t i = 0; i < numHeaders; i++) {
-			writeBandTexel(
-				shapeStart + i,
-				headers[i].count,
-				headers[i].offset,
-				0, 0
-			);
+		for(uint32_t i = 0; i < numHBands; i++) {
+			const uint16_t splitB = static_cast<uint16_t>(g.hbands[i].splitFraction * 65535.0f + 0.5f);
+
+			writeBandTexel(shapeStart + i, headers[i].count, headers[i].offset, splitB, 0);
+		}
+
+		for(uint32_t i = 0; i < numVBands; i++) {
+			const uint16_t splitB = static_cast<uint16_t>(g.vbands[i].splitFraction * 65535.0f + 0.5f);
+
+			writeBandTexel(shapeStart + numHBands + i, headers[numHBands + i].count, headers[numHBands + i].offset, splitB, 0);
 		}
 
 		_packingStats.bandTexelsUsed += numHeaders;

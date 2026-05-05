@@ -208,6 +208,10 @@ if(SLUGHORN_BUILD_TESTS)
 	# target_link_libraries(slughorn-test-gdal PRIVATE slughorn gdal)
 	# target_compile_options(slughorn-test-gdal PRIVATE ${SLUGHORN_COMPILE_OPTIONS})
 	# target_include_directories(slughorn-test-gdal PRIVATE "/usr/include/gdal")
+
+	add_executable(slughorn-test-bands "test/slughorn-test-bands.cpp")
+	target_link_libraries(slughorn-test-bands PRIVATE slughorn)
+	target_compile_options(slughorn-test-bands PRIVATE ${SLUGHORN_COMPILE_OPTIONS})
 endif()
 
 # Let's be honest... I mostly care about the frontends I care about! So, these

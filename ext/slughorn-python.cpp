@@ -389,6 +389,16 @@ PYBIND11_MODULE(slughorn, m) {
 		.def_readwrite("num_bands_y", &slughorn::Atlas::ShapeInfo::numBandsY,
 			"Number of Y bands (0 = auto-pick a sensible default)."
 		)
+		.def_readwrite("splits_y", &slughorn::Atlas::ShapeInfo::splitsY,
+			"Optional list of interior em-space Y split positions. "
+			"When non-empty, overrides num_bands_y and enables adaptive (non-uniform) bands. "
+			"Use Atlas.compute_adaptive_splits() to generate these, or set manually."
+		)
+		.def_readwrite("splits_x", &slughorn::Atlas::ShapeInfo::splitsX,
+			"Optional list of interior em-space X split positions. "
+			"When non-empty, overrides num_bands_x and enables adaptive (non-uniform) bands. "
+			"Use Atlas.compute_adaptive_splits() to generate these, or set manually."
+		)
 	;
 
 	// ============================================================================================
@@ -603,6 +613,27 @@ PYBIND11_MODULE(slughorn, m) {
 			},
 			py::return_value_policy::reference_internal,
 			"TextureData for the RGBA16UI band texture (valid after build())."
+		)
+
+		.def_static("compute_adaptive_splits",
+			[](const slughorn::Atlas::Curves& curves, int num_bands_x, int num_bands_y)
+				-> py::tuple
+			{
+				auto [sx, sy] = slughorn::Atlas::computeAdaptiveSplits(
+					curves, num_bands_x, num_bands_y
+				);
+
+				return py::make_tuple(sx, sy);
+			},
+			py::arg("curves"), py::arg("num_bands_x"), py::arg("num_bands_y"),
+			"Compute adaptive (non-uniform) band split positions using a sweep-line "
+			"density analysis.\n\n"
+			"Returns (splits_x, splits_y): lists of interior em-space split positions "
+			"to assign to ShapeInfo.splits_x / splits_y.\n\n"
+			"Example::\n\n"
+			"    splits_x, splits_y = slughorn.Atlas.compute_adaptive_splits(curves, num_bands_x=8, num_bands_y=8)\n"
+			"    info.splits_x = splits_x\n"
+			"    info.splits_y = splits_y"
 		)
 	;
 
