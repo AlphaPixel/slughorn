@@ -167,7 +167,7 @@ Atlas::Atlas() = default;
 Atlas::~Atlas() = default;
 
 // ================================================================================================
-// Atlas::computeAdaptiveSplits
+// Atlas::computeAdaptiveSplits / computeUniformSplits
 // ================================================================================================
 
 std::pair<std::vector<slug_t>, std::vector<slug_t>> Atlas::computeAdaptiveSplits(
@@ -197,6 +197,25 @@ std::pair<std::vector<slug_t>, std::vector<slug_t>> Atlas::computeAdaptiveSplits
 		computeAxisSplits(curves, /*useY=*/false, minX, maxX, rangeX, nX),
 		computeAxisSplits(curves, /*useY=*/true,  minY, maxY, rangeY, nY),
 	};
+}
+
+std::pair<std::vector<slug_t>, std::vector<slug_t>> Atlas::computeUniformSplits(
+	const Curves& /*curves*/,
+	int numBandsX,
+	int numBandsY
+) {
+	auto make = [](int numBands) -> std::vector<slug_t> {
+		if(numBands <= 1) return {};
+
+		const uint32_t n = static_cast<uint32_t>(numBands);
+		std::vector<slug_t> splits(n - 1);
+
+		for(uint32_t i = 0; i < n - 1; i++) splits[i] = slug_t(i + 1) / slug_t(n);
+
+		return splits;
+	};
+
+	return { make(numBandsX), make(numBandsY) };
 }
 
 // ================================================================================================

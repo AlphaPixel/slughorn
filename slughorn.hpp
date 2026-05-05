@@ -368,12 +368,12 @@ public:
 		int numBandsX = 0;
 		int numBandsY = 0;
 
-		// Interior X split positions in em-space (sorted ascending, within the shape's X range).
-		// If non-empty, overrides numBandsX; resulting numBands = splitsX.size() + 1.
+		// Interior X split positions as normalized [0,1] fractions of the shape's X range
+		// (sorted ascending). If non-empty, overrides numBandsX; resulting numBands = splitsX.size() + 1.
 		std::vector<slug_t> splitsX;
 
-		// Interior Y split positions in em-space (sorted ascending, within the shape's Y range).
-		// If non-empty, overrides numBandsY; resulting numBands = splitsY.size() + 1.
+		// Interior Y split positions as normalized [0,1] fractions of the shape's Y range
+		// (sorted ascending). If non-empty, overrides numBandsY; resulting numBands = splitsY.size() + 1.
 		std::vector<slug_t> splitsY;
 	};
 
@@ -450,18 +450,35 @@ public:
 	};
 
 	// --------------------------------------------------------------------------------------------
-	// Adaptive split placement
+	// Split placement strategies
+	//
+	// All compute*Splits functions share the same contract:
+	//   - Take curves + band counts, return numBands-1 normalized [0,1] fractions sorted ascending.
+	//   - Assign {splitsX, splitsY} directly to ShapeInfo::splitsX / splitsY before addShape().
+	//   - numBands <= 1 for either axis returns an empty vector for that axis.
 	// --------------------------------------------------------------------------------------------
 
-	// Computes adaptive split positions for numBandsY horizontal and numBandsX vertical bands.
-	//
-	// Projects each curve's bounding box onto each axis, sweeps to build a curve-density profile,
-	// then places splits at the lowest-density positions (valleys) so that band boundaries fall
-	// where the fewest curves cross, minimizing per-fragment curve iterations in the shader.
-	//
-	// Returns {splitsX, splitsY}. Assign directly to ShapeInfo::splitsX / splitsY before calling
-	// addShape(). numBands <= 1 for either axis returns an empty vector for that axis.
+	// Sweep-line valley placement: projects each curve's bounding box onto each axis, builds a
+	// curve-density profile, then places splits at lowest-density positions (valleys) so band
+	// boundaries fall where fewest curves cross, minimizing per-fragment shader iterations.
 	static std::pair<std::vector<slug_t>, std::vector<slug_t>> computeAdaptiveSplits(
+		const Curves& curves,
+		int numBandsX,
+		int numBandsY
+	);
+
+	// Uniform placement: evenly-spaced fractions (i+1)/numBands. curves is unused but present
+	// for interface consistency with other compute*Splits strategies.
+	//
+	// NOTE: Do NOT use this to replace leaving splitsX/Y empty. When splitsX/Y are empty,
+	// buildShapeBands sets splitFraction=0 on all band entries, which keeps the B channel zero
+	// in the texture and activates the shader's uniform fast path (direct formula, no scan).
+	// Calling computeUniformSplits and assigning the result produces identical band positions
+	// but routes through the scan path instead — correct but measurably slower.
+	//
+	// Use this function for inspection, the band editor's "Reset to uniform" action, or
+	// deliberate comparison of scan-path vs fast-path behavior via the heatmap.
+	static std::pair<std::vector<slug_t>, std::vector<slug_t>> computeUniformSplits(
 		const Curves& curves,
 		int numBandsX,
 		int numBandsY
