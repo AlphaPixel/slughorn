@@ -1,14 +1,17 @@
 //vimrun! ./slughorn-test-canvas
 
-#include "slughorn-canvas.hpp"
+#include "slughorn/canvas.hpp"
 
 #ifndef SLUGHORN_HAS_SERIAL
 #  error "This test requires SLUGHORN_SERIAL=ON"
 #endif
 
-#include "slughorn-serial.hpp"
+#include "slughorn/serial.hpp"
 
 #include <iostream>
+
+using namespace slughorn::literals;
+using slughorn::slug_t;
 
 int main(int argc, char** argv) {
 	slughorn::Atlas atlas;

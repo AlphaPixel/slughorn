@@ -9,7 +9,7 @@
 // In exactly one .cpp file, before including this header:
 //
 //   #define SLUGHORN_SKIA_IMPLEMENTATION
-//   #include "slughorn-skia.hpp"
+//   #include <slughorn/skia.hpp>
 //
 // All other translation units include it without the define.
 //

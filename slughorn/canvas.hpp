@@ -1,7 +1,7 @@
 #pragma once
 
 // ================================================================================================
-// slughorn-canvas.hpp - HTML Canvas-style drawing context for slughorn
+// canvas.hpp - HTML Canvas-style drawing context for slughorn
 //
 // Provides a stateful 2-D path API (beginPath / moveTo / lineTo / quadTo / bezierTo / closePath)
 // plus arc primitives (arc, arcTo) and convenience shape helpers (rect, roundedRect, circle,
@@ -26,7 +26,7 @@
 // 1. Computes the bounding box of the pending curves.
 // 2. Shifts all curves to local origin (tight atlas bands, zero wasted band space).
 // 3. Stores the canvas-space offset in Layer::transform (dx/dy), matching the convention
-// used by slughorn-cairo.hpp and slughorn-nanosvg.hpp.
+// used by slughorn/cairo.hpp and slughorn/nanosvg.hpp.
 // 4. Registers the geometry in the Atlas under an auto-generated Key.
 // 5. Pushes the resulting Layer onto the in-progress CompositeShape.
 //
@@ -47,7 +47,7 @@
 // USAGE
 // -----
 // No implementation guard needed - this header is pure C++ with no external dependencies.
-// Just #include "slughorn-canvas.hpp" wherever you need it.
+// Just #include <slughorn/canvas.hpp> wherever you need it.
 //
 // Refer to `test/slughorn-test-canvas.cpp` for examples.
 // ================================================================================================

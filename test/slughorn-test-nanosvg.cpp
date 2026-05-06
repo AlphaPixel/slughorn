@@ -21,12 +21,15 @@
 #  error "This test requires SLUGHORN_SERIAL=ON"
 #endif
 
-#include "slughorn-nanosvg.hpp"
-#include "slughorn-serial.hpp"
+#include "slughorn/nanosvg.hpp"
+#include "slughorn/serial.hpp"
 
 #include <cmath>
 #include <iostream>
 #include <string>
+
+using namespace slughorn::literals;
+using slughorn::slug_t;
 
 // =============================================================================
 // Minimal assertion helpers

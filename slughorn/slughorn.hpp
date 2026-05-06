@@ -9,24 +9,28 @@
 
 #include <ostream>
 
-using slug_t = float;
-
-constexpr slug_t operator"" _cv(long double v) {
-	return static_cast<slug_t>(v);
-}
-
-constexpr slug_t operator"" _cv(unsigned long long v) {
-	return static_cast<slug_t>(v);
-}
-
-constexpr slug_t cv(auto x) {
-	return static_cast<slug_t>(x);
-}
-
 // TODO: Something like `slugi_t` for `uint32_t`, since it SEEMS to be the only non-float type
 // we're using (beyond `size_t`).
 
 namespace slughorn {
+
+using slug_t = float;
+
+namespace literals {
+	constexpr slug_t operator"" _cv(long double v) {
+		return static_cast<slug_t>(v);
+	}
+
+	constexpr slug_t operator"" _cv(unsigned long long v) {
+		return static_cast<slug_t>(v);
+	}
+
+	constexpr slug_t cv(auto x) {
+		return static_cast<slug_t>(x);
+	}
+}
+
+using namespace literals;
 
 // ================================================================================================
 // Color
@@ -36,9 +40,9 @@ namespace slughorn {
 // boundary.
 // ================================================================================================
 struct Color {
-	slug_t r = 0_cv;
-	slug_t g = 0_cv;
-	slug_t b = 0_cv;
+	slug_t r = cv(0);
+	slug_t g = cv(0);
+	slug_t b = cv(0);
 	slug_t a = 1_cv;
 };
 
@@ -58,9 +62,9 @@ struct Color {
 // in the same coordinate space as the points being transformed (em-units for glyph work).
 // ================================================================================================
 struct Matrix {
-	slug_t xx = 1_cv, yx = 0_cv; // first column
-	slug_t xy = 0_cv, yy = 1_cv; // second column
-	slug_t dx = 0_cv, dy = 0_cv; // translation
+	slug_t xx = 1_cv, yx = cv(0); // first column
+	slug_t xy = cv(0), yy = 1_cv; // second column
+	slug_t dx = cv(0), dy = cv(0); // translation
 
 	static Matrix identity() { return {}; }
 
@@ -235,15 +239,15 @@ struct Layer {
 
 	Color color{};
 
-	// Per-layer offset in scaled units. dx/dy record where this layer's curves
-	// originated on the source canvas (set by decomposePath / loadShape). The
-	// renderer multiplies dx/dy by scale to recover object-space position.
-	// xx/yx/xy/yy are reserved for future rotation/shear support and should be
-	// left as identity for now.
+	// dx/dy place the shape on the CPU side via Shape::computeQuad().
+	//
+	// xx/yx/xy/yy carry the linear part of the transform for GPU consumers
+	// (rotation/shear/other per-fragment work). The core slughorn atlas builder
+	// stores and forwards them but does not interpret them for geometry layout.
 	Matrix transform = Matrix::identity();
 
 	// TODO: Document WHEN and HOW this "should" be used!
-	slug_t scale = 1.0_cv;
+	slug_t scale = 1_cv;
 
 	// Shader effect to apply when rendering this layer. 0 = standard Slug coverage fill (default,
 	// no overhead). Non-zero values select an effect branch in the fragment shader; the set of
@@ -270,7 +274,7 @@ struct CompositeShape {
 
 	// Usage is obvious in text situations; in "pure shape" modes, can be used to help arrange
 	// groups of `Shape` instances horizontally.
-	slug_t advance = 0_cv;
+	slug_t advance = cv(0);
 };
 
 // ================================================================================================
@@ -324,14 +328,16 @@ public:
 
 		// Compute the world-space bounding quad for this shape.
 		//
-		// transform.dx/dy is the canvas-space origin of the shape (as returned
-		// by decomposePath / loadShape). scale converts from source units to
-		// world units. expand adds a uniform outset in world units (useful for
-		// a 1-pixel AA fringe: pass 1.0f / scale).
+		// transform.dx/dy places the shape in world space. scale converts the
+		// shape's em-space metrics into world units.
+		//
+		// expand is a small extra em-space margin used to enlarge the quad for
+		// AA fringes or rotated content; callers should not derive it from
+		// scale. computeQuad() does not interpret transform.xx/yx/xy/yy.
 		//
 		// The returned quad is relative to (0,0) - scene placement is the
 		// caller's responsibility (e.g. osg::MatrixTransform).
-		Quad computeQuad(const Matrix& transform, slug_t scale = 1.0_cv, slug_t expand = 0.0_cv) const {
+		Quad computeQuad(const Matrix& transform, slug_t scale=1_cv, slug_t expand=0_cv) const {
 			const slug_t ox = transform.dx * scale;
 			const slug_t oy = transform.dy * scale;
 			return {
@@ -462,7 +468,8 @@ public:
 	// [0,1] fraction vectors. Band count and placement algorithm are entirely encapsulated by
 	// the callable — the backend never sees or passes band counts.
 	//
-	// Pass {} or nullptr to skip explicit splits and preserve the uniform fast path instead.
+	// Pass {} or nullptr to skip explicit splits and let addShape() use its
+	// normal band-count path without an explicit placement strategy object.
 	//
 	// Example:
 	//   Atlas::SplitStrategy adaptive = [](const Atlas::Curves& c) {
@@ -549,7 +556,7 @@ public:
 	// See PackingStats for field documentation.
 	const PackingStats& getPackingStats() const { return _packingStats; }
 
-	// Bulk accessors - primarily for serialization (slughorn-serial.hpp) and
+	// Bulk accessors - primarily for serialization (slughorn/serial.hpp) and
 	// diagnostics. Prefer getShape() / getCompositeShape() for normal use.
 	const std::unordered_map<Key, Shape, KeyHash>& getShapes() const {
 		return _shapes;
@@ -564,7 +571,7 @@ public:
 	}
 
 	// --------------------------------------------------------------------------------------------
-	// Serial reconstruction (used by slughorn-serial.hpp - not for general use)
+	// Serial reconstruction (used by slughorn/serial.hpp - not for general use)
 	//
 	// Injects pre-built texture data and shape/composite maps directly, bypassing build().
 	// The Atlas is marked as built on return; calling build() afterwards is a no-op.
@@ -676,10 +683,10 @@ struct CurveDecomposer {
 	// em-normalized [0,1] geometry.
 	slug_t tolerance = TOLERANCE_EXACT;
 
-	slug_t _x = 0_cv;
-	slug_t _y = 0_cv;
-	slug_t _sx = 0_cv;
-	slug_t _sy = 0_cv;
+	slug_t _x = cv(0);
+	slug_t _y = cv(0);
+	slug_t _sx = cv(0);
+	slug_t _sy = cv(0);
 
 	CurveDecomposer(Atlas::Curves& c) : curves(c) {}
 

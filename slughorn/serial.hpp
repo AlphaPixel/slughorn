@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// slughorn-serial.hpp - Atlas serialization (.slug JSON / .slugb binary)
+// serial.hpp - Atlas serialization (.slug JSON / .slugb binary)
 //
 // Stb-style single-header companion to slughorn.hpp.
 // Define SLUGHORN_SERIAL_IMPLEMENTATION in exactly one .cpp before including.

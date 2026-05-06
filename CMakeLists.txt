@@ -44,7 +44,7 @@ option(SLUGHORN_NANOSVG "Include NanoSVG support (requires nanosvg)" OFF)
 option(SLUGHORN_FREETYPE "Include FreeType support (requires freetype2)" OFF)
 # option(SLUGHORN_GLFW "Include GLFW support (requires glfw3)" OFF)
 
-add_library(slughorn STATIC slughorn.cpp)
+add_library(slughorn STATIC "slughorn/slughorn.cpp")
 
 target_include_directories(slughorn
 	PUBLIC
@@ -84,9 +84,7 @@ if(SLUGHORN_NANOSVG)
 	target_compile_definitions(slughorn PUBLIC  SLUGHORN_HAS_NANOSVG)
 	target_include_directories(slughorn
 		PUBLIC
-			$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
 			$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/ext/nanosvg/src>
-			$<INSTALL_INTERFACE:include>
 	)
 endif()
 

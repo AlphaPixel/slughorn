@@ -9,7 +9,7 @@
 // In exactly one .cpp file, before including this header:
 //
 // #define SLUGHORN_FREETYPE_IMPLEMENTATION
-// #include "slughorn-freetype.hpp"
+// #include <slughorn/freetype.hpp>
 //
 // All other translation units include it without the define.
 //

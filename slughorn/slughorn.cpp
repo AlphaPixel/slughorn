@@ -1,24 +1,28 @@
 #include "slughorn.hpp"
 
 #ifdef SLUGHORN_SERIAL_IMPLEMENTATION
-#include "slughorn-serial.hpp"
+#include "serial.hpp"
 #endif
 
 #ifdef SLUGHORN_NANOSVG_IMPLEMENTATION
-#include "slughorn-nanosvg.hpp"
+#include "nanosvg.hpp"
 #endif
 
 #ifdef SLUGHORN_FREETYPE_IMPLEMENTATION
-#include "slughorn-freetype.hpp"
+#include "freetype.hpp"
 #endif
 
 #include <algorithm>
 #include <cstring>
 
+using namespace slughorn::literals;
+
 // ================================================================================================
 // File-local helpers
 // ================================================================================================
 namespace {
+
+using slughorn::slug_t;
 
 // Sweep-line density analysis for one axis. Returns numBands-1 split positions in em-space,
 // placed at curve-density valleys (positions where fewest curves' bounding boxes cross).

@@ -11,7 +11,7 @@
 // In exactly one .cpp file, before including this header:
 //
 //   #define SLUGHORN_CAIRO_IMPLEMENTATION
-//   #include "slughorn-cairo.hpp"
+//   #include <slughorn/cairo.hpp>
 //
 // All other translation units include it without the define.
 //
@@ -29,7 +29,7 @@
 // STROKE LIMITATION
 // -----------------
 // cairo_stroke_to_path() is not part of Cairo's public stable API. For stroke-to-fill
-// expansion use the Skia backend (slughorn-skia.hpp) or author stroked shapes as explicit
+// expansion use the Skia backend (slughorn/skia.hpp) or author stroked shapes as explicit
 // filled paths.
 //
 // CUBIC CURVES

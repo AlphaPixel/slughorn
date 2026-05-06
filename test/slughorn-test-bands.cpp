@@ -1,9 +1,11 @@
 //vimrun! ./slughorn-test-bands
 
-#include "slughorn.hpp"
-#include "slughorn-serial.hpp"
+#include "slughorn/serial.hpp"
 
 #include <iostream>
+
+using namespace slughorn::literals;
+using slughorn::slug_t;
 
 #if 0
   Original uniform path (sentinel fires, direct formula in shader):

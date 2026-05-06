@@ -6,7 +6,7 @@
 // Parses SVG files/strings into slughorn Atlas shapes, producing a CompositeShape with one
 // Layer per filled SVG shape, back-to-front order preserved.
 //
-// API mirrors slughorn-cairo.hpp exactly:
+// API mirrors slughorn/cairo.hpp exactly:
 //
 // decomposePath() - low-level: NSVGshape -> (curves, transform)
 // loadShape() - mid-level: decompose + register in atlas
@@ -23,7 +23,7 @@
 // In exactly one .cpp file, before including this header:
 //
 // #define SLUGHORN_NANOSVG_IMPLEMENTATION
-// #include "slughorn-nanosvg.hpp"
+// #include <slughorn/nanosvg.hpp>
 //
 // All other translation units include it without the define.
 //

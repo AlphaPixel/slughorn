@@ -1,9 +1,12 @@
 //vimrun! ./slughorn-test-cairo
 
 #define SLUGHORN_CAIRO_IMPLEMENTATION
-#include "slughorn-cairo.hpp"
+#include "slughorn/cairo.hpp"
 
 #include <iostream>
+
+using namespace slughorn::literals;
+using slughorn::slug_t;
 
 void test_Shape() {
 	cairo_surface_t* surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 100, 100);

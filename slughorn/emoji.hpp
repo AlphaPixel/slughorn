@@ -12,7 +12,7 @@
 // In exactly one .cpp file, before including this header:
 //
 //   #define SLUGHORN_EMOJI_IMPLEMENTATION
-//   #include "slughorn-emoji.hpp"
+//   #include <slughorn/emoji.hpp>
 //
 // All other translation units include it without the define.
 //

@@ -44,18 +44,17 @@
 // would exist if Python's GC collected the Curves list before the decomposer.
 // ================================================================================================
 
-#include "slughorn.hpp"
-#include "slughorn-canvas.hpp"
+#include "slughorn/canvas.hpp"
 
 #define SLUGHORN_EMOJI_IMPLEMENTATION
-#include "slughorn-emoji.hpp"
+#include "slughorn/emoji.hpp"
 
 #ifdef SLUGHORN_HAS_SERIAL
-#include "slughorn-serial.hpp"
+#include "slughorn/serial.hpp"
 #endif
 
 #ifdef SLUGHORN_HAS_FREETYPE
-#include "slughorn-freetype.hpp"
+#include "slughorn/freetype.hpp"
 #endif
 
 #include <pybind11/pybind11.h>
@@ -63,6 +62,9 @@
 #include <pybind11/functional.h>
 
 #include <sstream>
+
+using namespace slughorn::literals;
+using slughorn::slug_t;
 
 namespace py = pybind11;
 
