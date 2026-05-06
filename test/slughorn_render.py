@@ -37,6 +37,9 @@ EPS = 1.0 / 65536.0 # must match shader
 BAND_TEX_WIDTH = 512
 LOG_BAND_TEX_WIDTH = 9 # 2^9 == 512
 
+# Must match Atlas::INDIRECTION_SIZE in slughorn.hpp and SLUG_INDIRECTION_SIZE in the shader.
+INDIRECTION_SIZE = 32
+
 # =============================================================================
 # Shared transform helpers
 # =============================================================================
@@ -267,25 +270,13 @@ def render_sample(
 # render_sample_banded - band-accelerated renderer
 # ------------------------------------------------------------------------------------------------
 
-def _find_band_scan(coord_scaled: float, splits: List[float], band_max: int) -> int:
+def _lookup_band_indir(coord_scaled: float, indir: List[int]) -> int:
 	"""
-	Python mirror of slug_FindBandY/X: scans adaptive split fractions to find the band index.
-	If splits is empty or sentinel (first entry == 0.0), falls back to the direct formula.
-	coord_scaled = em * band_scale + band_offset  (the raw linear index, possibly fractional).
+	Python mirror of slug_BandY/X: O(1) indirection table lookup.
+	coord_scaled = em * band_scale + band_offset  (already in [0, INDIRECTION_SIZE) space).
 	"""
-	if not splits or splits[0] == 0.0:
-		return int(clamp(coord_scaled, 0, band_max))
-
-	norm = coord_scaled / (band_max + 1)
-
-	if norm < splits[0]:
-		return 0
-
-	for b in range(1, band_max):
-		if norm < splits[b]:
-			return b
-
-	return band_max
+	q = max(0, min(INDIRECTION_SIZE - 1, int(coord_scaled)))
+	return indir[q]
 
 
 def render_sample_banded(
@@ -300,13 +291,13 @@ def render_sample_banded(
 	band_offset_y: float,
 	band_max_x: int,
 	band_max_y: int,
-	hband_splits: List[float] = None,
-	vband_splits: List[float] = None,
+	indir_y: List[int] = None,
+	indir_x: List[int] = None,
 ) -> dict:
 	rx, ry = render_coord
 	ppe_x, ppe_y = pixels_per_em
-	band_x = _find_band_scan(rx * band_scale_x + band_offset_x, vband_splits or [], band_max_x)
-	band_y = _find_band_scan(ry * band_scale_y + band_offset_y, hband_splits or [], band_max_y)
+	band_x = _lookup_band_indir(rx * band_scale_x + band_offset_x, indir_x)
+	band_y = _lookup_band_indir(ry * band_scale_y + band_offset_y, indir_y)
 	xcov = xwgt = ycov = ywgt = 0.0
 	iters = 0
 
@@ -388,7 +379,7 @@ class AtlasView:
 		self.curves = self._decode_curve_texture(atlas.curve_texture)
 		self.curve_list = [Curve(*c) for c in self.curves]
 
-		self.hbands_idx, self.vbands_idx, self.hband_splits, self.vband_splits = \
+		self.hbands_idx, self.vbands_idx, self.indir_y, self.indir_x = \
 			self._decode_band_texture(atlas.band_texture, self.shape)
 
 	def render(
@@ -411,8 +402,8 @@ class AtlasView:
 				self.shape.band_offset_y,
 				self.shape.band_max_x,
 				self.shape.band_max_y,
-				self.hband_splits,
-				self.vband_splits,
+				self.indir_y,
+				self.indir_x,
 			)
 
 		else:
@@ -450,18 +441,15 @@ class AtlasView:
 		return curves
 
 	@staticmethod
-	def _decode_band_texture(tex, shape) -> Tuple[List[List[int]], List[List[int]]]:
+	def _decode_band_texture(tex, shape) -> Tuple[List[List[int]], List[List[int]], List[int], List[int]]:
 		data = np.frombuffer(tex.bytes, dtype=np.uint16).reshape(
 			(tex.height, tex.width, 4)
 		)
 
+		IS    = INDIRECTION_SIZE
 		start = shape.band_tex_y * BAND_TEX_WIDTH + shape.band_tex_x
 		num_h = shape.band_max_y + 1
 		num_v = shape.band_max_x + 1
-		num_headers = num_h + num_v
-
-		def loc_to_index(cx: int, cy: int) -> int:
-			return (cy * BAND_TEX_WIDTH + cx) // 2
 
 		def read_texel(relative_offset: int) -> np.ndarray:
 			abs_idx = start + relative_offset
@@ -470,34 +458,31 @@ class AtlasView:
 
 			return data[ty, tx]
 
-		headers = []
+		# Indirection tables: [0..IS-1] = Y, [IS..2*IS-1] = X. R channel = band index.
+		indir_y = [int(read_texel(q)[0])      for q in range(IS)]
+		indir_x = [int(read_texel(IS + q)[0]) for q in range(IS)]
 
-		for i in range(num_headers):
-			texel = read_texel(i)
-			count = int(texel[0])
-			offset = int(texel[1])
-			split_b = int(texel[2])
+		# Band headers start after the two indirection tables.
+		def read_header(i: int) -> Tuple[int, int]:
+			texel = read_texel(2 * IS + i)
+			return int(texel[0]), int(texel[1])  # (count, offset)
 
-			headers.append((count, offset, split_b))
+		def loc_to_index(cx: int, cy: int) -> int:
+			return (cy * BAND_TEX_WIDTH + cx) // 2
 
-		def decode_band(count: int, offset: int, split_b: int) -> List[int]:
+		def decode_band(count: int, offset: int) -> List[int]:
 			result = []
 
 			for i in range(count):
 				texel = read_texel(offset + i)
-				cx = int(texel[0])
-				cy = int(texel[1])
-
-				result.append(loc_to_index(cx, cy))
+				result.append(loc_to_index(int(texel[0]), int(texel[1])))
 
 			return result
 
-		hbands_idx   = [decode_band(*headers[i])          for i in range(num_h)]
-		vbands_idx   = [decode_band(*headers[num_h + i])  for i in range(num_v)]
-		hband_splits = [headers[i][2] / 65535.0           for i in range(num_h)]
-		vband_splits = [headers[num_h + i][2] / 65535.0   for i in range(num_v)]
+		hbands_idx = [decode_band(*read_header(i))       for i in range(num_h)]
+		vbands_idx = [decode_band(*read_header(num_h + i)) for i in range(num_v)]
 
-		return hbands_idx, vbands_idx, hband_splits, vband_splits
+		return hbands_idx, vbands_idx, indir_y, indir_x
 
 # ================================================================================================
 # Level 3 - Grid samplers + image I/O
@@ -591,10 +576,8 @@ def save_curves(
 	em-space -> pixel-space transform as the samplers.
 	"""
 
-	curves       = view.curves
-	shape        = view.shape
-	hband_splits = view.hband_splits
-	vband_splits = view.vband_splits
+	curves = view.curves
+	shape  = view.shape
 
 	w, h = compute_render_size(shape, scale)
 	xf = EmTransform(shape, w, h, margin)
@@ -648,31 +631,31 @@ def save_curves(
 		draw.ellipse([px - r, py - r, px + r, py + r], outline=(100, 100, 255), width=1)
 
 	# -------------------------------------------------------------------------
-	# Band overlay
+	# Band overlay - draw a line at each slot transition in the indirection tables.
 	# -------------------------------------------------------------------------
 	ox, oy = shape.em_origin
 	sx, sy = shape.em_size
 
-	adaptive_y = hband_splits and hband_splits[0] != 0.0
-	adaptive_x = vband_splits and vband_splits[0] != 0.0
+	indir_y = view.indir_y
+	indir_x = view.indir_x
 
-	# Horizontal band lines (Y splits)
-	if adaptive_y:
-		ys = [oy + f * sy for f in hband_splits]
-	else:
-		ys = [(i - shape.band_offset_y) / shape.band_scale_y for i in range(shape.band_max_y + 1)]
+	ys = [
+		(q + 1 - shape.band_offset_y) / shape.band_scale_y
+		for q in range(INDIRECTION_SIZE - 1)
+		if indir_y[q] != indir_y[q + 1]
+	]
+
+	xs = [
+		(q + 1 - shape.band_offset_x) / shape.band_scale_x
+		for q in range(INDIRECTION_SIZE - 1)
+		if indir_x[q] != indir_x[q + 1]
+	]
 
 	for y in ys:
 		x0, y0 = em_to_px(ox, y)
 		x1, y1 = em_to_px(ox + sx, y)
 
 		draw.line([(x0, y0), (x1, y1)], fill=(255, 0, 0), width=1)
-
-	# Vertical band lines (X splits)
-	if adaptive_x:
-		xs = [ox + f * sx for f in vband_splits]
-	else:
-		xs = [(i - shape.band_offset_x) / shape.band_scale_x for i in range(shape.band_max_x + 1)]
 
 	for x in xs:
 		x0, y0 = em_to_px(x, oy)
@@ -691,10 +674,8 @@ def save_curves_svg(
 	margin: float=0.0,
 	flip_y: bool=True,
 ):
-	curves       = view.curves
-	shape        = view.shape
-	hband_splits = view.hband_splits
-	vband_splits = view.vband_splits
+	curves = view.curves
+	shape  = view.shape
 
 	# --- Size + transform ---
 	w, h = compute_render_size(shape, scale)
@@ -772,16 +753,19 @@ def save_curves_svg(
 		circle(px2, py2, 3, stroke="#6464FF")
 
 	# -------------------------------------------------------------------------
-	# Band overlay
+	# Band overlay - draw a line at each slot transition in the indirection tables.
 	# -------------------------------------------------------------------------
-	adaptive_y = hband_splits and hband_splits[0] != 0.0
-	adaptive_x = vband_splits and vband_splits[0] != 0.0
+	ys = [
+		(q + 1 - shape.band_offset_y) / shape.band_scale_y
+		for q in range(INDIRECTION_SIZE - 1)
+		if view.indir_y[q] != view.indir_y[q + 1]
+	]
 
-	ys = [oy + f * sy for f in hband_splits] if adaptive_y else \
-		[(i - shape.band_offset_y) / shape.band_scale_y for i in range(shape.band_max_y + 1)]
-
-	xs = [ox + f * sx for f in vband_splits] if adaptive_x else \
-		[(i - shape.band_offset_x) / shape.band_scale_x for i in range(shape.band_max_x + 1)]
+	xs = [
+		(q + 1 - shape.band_offset_x) / shape.band_scale_x
+		for q in range(INDIRECTION_SIZE - 1)
+		if view.indir_x[q] != view.indir_x[q + 1]
+	]
 
 	for y in ys:
 		x0, y0 = em_to_px(ox, y)

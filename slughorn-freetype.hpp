@@ -87,7 +87,8 @@ bool decomposeGlyph(
 // Decompose a single Unicode codepoint from @p face and add it to @p atlas. Skips codepoints
 // already present in the atlas. Returns true on success, false if the glyph is missing or
 // decomposition fails.
-bool loadGlyph(FT_Face face, uint32_t codepoint, Atlas& atlas);
+bool loadGlyph(FT_Face face, uint32_t codepoint, Atlas& atlas,
+	const Atlas::SplitStrategy& strategy = {});
 
 // Convenience: load a contiguous range of codepoints [first, last]. Returns the number of glyphs
 // successfully added.
@@ -95,7 +96,8 @@ size_t loadGlyphRange(
 	FT_Face face,
 	uint32_t first,
 	uint32_t last,
-	Atlas& atlas
+	Atlas& atlas,
+	const Atlas::SplitStrategy& strategy = {}
 );
 
 // =============================================================================
@@ -119,7 +121,8 @@ bool loadColorGlyph(
 	uint32_t codepoint,
 	FT_Color* palette,
 	Atlas& atlas,
-	CompositeShape& out
+	CompositeShape& out,
+	const Atlas::SplitStrategy& strategy = {}
 );
 
 // Convenience: load a list of emoji codepoints. Populates colorGlyphs (keyed by codepoint) for
@@ -129,7 +132,8 @@ size_t loadColorGlyphs(
 	const std::vector<uint32_t>& codepoints,
 	FT_Color* palette,
 	Atlas& atlas,
-	std::map<uint32_t, CompositeShape>& colorGlyphs
+	std::map<uint32_t, CompositeShape>& colorGlyphs,
+	const Atlas::SplitStrategy& strategy = {}
 );
 
 // =============================================================================
@@ -138,7 +142,8 @@ size_t loadColorGlyphs(
 
 // Load printable ASCII (codepoints 32-126) from @p fontPath into @p atlas. Creates and destroys an
 // FT_Library / FT_Face internally. Returns false if the font cannot be opened.
-bool loadAsciiFont(const std::string& fontPath, Atlas& atlas);
+bool loadAsciiFont(const std::string& fontPath, Atlas& atlas,
+	const Atlas::SplitStrategy& strategy = {});
 
 // Load COLR emoji from @p fontPath for the given codepoints. Creates and destroys an FT_Library /
 // FT_Face internally. Returns false if the font cannot be opened.
@@ -146,7 +151,8 @@ bool loadEmojiFont(
 	const std::string& fontPath,
 	const std::vector<uint32_t>& codepoints,
 	Atlas& atlas,
-	std::map<uint32_t, CompositeShape>& colorGlyphs
+	std::map<uint32_t, CompositeShape>& colorGlyphs,
+	const Atlas::SplitStrategy& strategy = {}
 );
 
 }
@@ -317,7 +323,8 @@ static void processColorGlyphV0(
 	uint32_t codepoint,
 	FT_Color* palette,
 	Atlas& atlas,
-	CompositeShape& out
+	CompositeShape& out,
+	const Atlas::SplitStrategy& strategy
 ) {
 	const auto glyphIndex = FT_Get_Char_Index(face, codepoint);
 	const slug_t emScale = 1.0_cv / cv(face->units_per_EM);
@@ -353,6 +360,12 @@ static void processColorGlyphV0(
 
 			decomposeOutline(face->glyph->outline, data.curves, emScale);
 
+			if(strategy && !data.curves.empty()) {
+				auto [sx, sy] = strategy(data.curves);
+				data.splitsX = std::move(sx);
+				data.splitsY = std::move(sy);
+			}
+
 			atlas.addShape(layerKey, data);
 			out.layers.push_back({layerKey, color});
 		}
@@ -385,7 +398,8 @@ static Color traversePaint(
 	uint32_t codepoint,
 	uint8_t& layerIdx,
 	Atlas& atlas,
-	CompositeShape& out
+	CompositeShape& out,
+	const Atlas::SplitStrategy& strategy
 );
 
 // -------------------------------------------------------------------------
@@ -408,7 +422,8 @@ static Color traversePaint(
 	uint32_t codepoint,
 	uint8_t& layerIdx,
 	Atlas& atlas,
-	CompositeShape& out
+	CompositeShape& out,
+	const Atlas::SplitStrategy& strategy
 ) {
 	// TODO: Probably safe to just return `{}`, since `Color` defaults to that.
 	const auto white = Color{1_cv, 1_cv, 1_cv, 1_cv};
@@ -432,7 +447,7 @@ static Color traversePaint(
 				traversePaint(
 					face, &childPaint, palette,
 					emScale, advance, parentMatrix,
-					codepoint, layerIdx, atlas, out
+					codepoint, layerIdx, atlas, out, strategy
 				);
 			}
 
@@ -450,7 +465,7 @@ static Color traversePaint(
 			Color color = traversePaint(
 				face, &paint.u.glyph.paint, palette,
 				emScale, advance, parentMatrix,
-				codepoint, layerIdx, atlas, out
+				codepoint, layerIdx, atlas, out, strategy
 			);
 
 			if(FT_Load_Glyph(face, gi, FT_LOAD_NO_SCALE)) break;
@@ -480,6 +495,12 @@ static Color traversePaint(
 			else decomposeOutline(face->glyph->outline, data.curves, emScale);
 
 			if(data.curves.empty()) break;
+
+			if(strategy) {
+				auto [sx, sy] = strategy(data.curves);
+				data.splitsX = std::move(sx);
+				data.splitsY = std::move(sy);
+			}
 
 			atlas.addShape(layerKey, data);
 
@@ -517,7 +538,7 @@ static Color traversePaint(
 				return traversePaint(
 					face, &paint.u.transform.paint, palette,
 					emScale, advance, parentMatrix,
-					codepoint, layerIdx, atlas, out
+					codepoint, layerIdx, atlas, out, strategy
 				);
 			}
 
@@ -536,7 +557,7 @@ static Color traversePaint(
 			return traversePaint(
 				face, &paint.u.transform.paint, palette,
 				emScale, advance, combined,
-				codepoint, layerIdx, atlas, out
+				codepoint, layerIdx, atlas, out, strategy
 			);
 		}
 
@@ -557,7 +578,7 @@ static Color traversePaint(
 			return traversePaint(
 				face, &paint.u.translate.paint, palette,
 				emScale, advance, combined,
-				codepoint, layerIdx, atlas, out
+				codepoint, layerIdx, atlas, out, strategy
 			);
 		}
 
@@ -570,13 +591,13 @@ static Color traversePaint(
 			traversePaint(
 				face, &paint.u.composite.backdrop_paint, palette,
 				emScale, advance, parentMatrix,
-				codepoint, layerIdx, atlas, out
+				codepoint, layerIdx, atlas, out, strategy
 			);
 
 			return traversePaint(
 				face, &paint.u.composite.source_paint, palette,
 				emScale, advance, parentMatrix,
-				codepoint, layerIdx, atlas, out
+				codepoint, layerIdx, atlas, out, strategy
 			);
 		}
 
@@ -631,7 +652,8 @@ static void processColorGlyphV1(
 	uint32_t codepoint,
 	FT_Color* palette,
 	Atlas& atlas,
-	CompositeShape& out
+	CompositeShape& out,
+	const Atlas::SplitStrategy& strategy
 ) {
 	const FT_UInt glyphIndex = FT_Get_Char_Index(face, codepoint);
 	const slug_t emScale = 1.0_cv / cv(face->units_per_EM);
@@ -649,7 +671,7 @@ static void processColorGlyphV1(
 	traversePaint(
 		face, &rootPaint, palette,
 		emScale, out.advance, Matrix::identity(),
-		codepoint, layerIdx, atlas, out
+		codepoint, layerIdx, atlas, out, strategy
 	);
 }
 
@@ -689,7 +711,9 @@ bool decomposeGlyph(
 	return !out.curves.empty();
 }
 
-bool loadGlyph(FT_Face face, uint32_t codepoint, Atlas& atlas) {
+bool loadGlyph(FT_Face face, uint32_t codepoint, Atlas& atlas,
+	const Atlas::SplitStrategy& strategy
+) {
 	if(atlas.hasKey(codepoint)) return true; // already present - not an error
 
 	const FT_UInt glyphIndex = FT_Get_Char_Index(face, codepoint);
@@ -710,6 +734,12 @@ bool loadGlyph(FT_Face face, uint32_t codepoint, Atlas& atlas) {
 
 	detail::decomposeOutline(face->glyph->outline, data.curves, emScale);
 
+	if(strategy && !data.curves.empty()) {
+		auto [sx, sy] = strategy(data.curves);
+		data.splitsX = std::move(sx);
+		data.splitsY = std::move(sy);
+	}
+
 	atlas.addShape(codepoint, data);
 
 	return true;
@@ -719,13 +749,14 @@ size_t loadGlyphRange(
 	FT_Face face,
 	uint32_t first,
 	uint32_t last,
-	Atlas& atlas
+	Atlas& atlas,
+	const Atlas::SplitStrategy& strategy
 ) {
 	size_t count = 0;
 
 	for(uint32_t cp = first; cp <= last; cp++) {
 		// TODO: Add log() calls here? Probably...
-		if(loadGlyph(face, cp, atlas)) count++;
+		if(loadGlyph(face, cp, atlas, strategy)) count++;
 	}
 
 	return count;
@@ -736,7 +767,8 @@ bool loadColorGlyph(
 	uint32_t codepoint,
 	FT_Color* palette,
 	Atlas& atlas,
-	CompositeShape& out
+	CompositeShape& out,
+	const Atlas::SplitStrategy& strategy
 ) {
 	const FT_UInt glyphIndex = FT_Get_Char_Index(face, codepoint);
 
@@ -759,7 +791,7 @@ bool loadColorGlyph(
 #if FREETYPE_MAJOR > 2 || (FREETYPE_MAJOR == 2 && FREETYPE_MINOR >= 11)
 
 	{
-		detail::processColorGlyphV1(face, codepoint, palette, atlas, out);
+		detail::processColorGlyphV1(face, codepoint, palette, atlas, out, strategy);
 
 		if(!out.layers.empty()) {
 			log(LOG_NOTICE,
@@ -777,7 +809,7 @@ bool loadColorGlyph(
 	// -------------------------------------------------------------------------
 	// Fall back to COLRv0
 	// -------------------------------------------------------------------------
-	detail::processColorGlyphV0(face, codepoint, palette, atlas, out);
+	detail::processColorGlyphV0(face, codepoint, palette, atlas, out, strategy);
 
 	if(!out.layers.empty()) {
 		log(LOG_NOTICE,
@@ -797,14 +829,15 @@ size_t loadColorGlyphs(
 	const std::vector<uint32_t>& codepoints,
 	FT_Color* palette,
 	Atlas& atlas,
-	std::map<uint32_t, CompositeShape>& colorGlyphs
+	std::map<uint32_t, CompositeShape>& colorGlyphs,
+	const Atlas::SplitStrategy& strategy
 ) {
 	size_t count = 0;
 
 	for(uint32_t cp : codepoints) {
 		CompositeShape glyph;
 
-		if(loadColorGlyph(face, cp, palette, atlas, glyph)) {
+		if(loadColorGlyph(face, cp, palette, atlas, glyph, strategy)) {
 			colorGlyphs[cp] = std::move(glyph);
 
 			count++;
@@ -814,7 +847,9 @@ size_t loadColorGlyphs(
 	return count;
 }
 
-bool loadAsciiFont(const std::string& fontPath, Atlas& atlas) {
+bool loadAsciiFont(const std::string& fontPath, Atlas& atlas,
+	const Atlas::SplitStrategy& strategy
+) {
 	FT_Library library;
 
 	if(FT_Init_FreeType(&library)) {
@@ -833,7 +868,7 @@ bool loadAsciiFont(const std::string& fontPath, Atlas& atlas) {
 		return false;
 	}
 
-	loadGlyphRange(face, 32, 126, atlas);
+	loadGlyphRange(face, 32, 126, atlas, strategy);
 
 	FT_Done_Face(face);
 	FT_Done_FreeType(library);
@@ -845,7 +880,8 @@ bool loadEmojiFont(
 	const std::string& fontPath,
 	const std::vector<uint32_t>& codepoints,
 	Atlas& atlas,
-	std::map<uint32_t, CompositeShape>& colorGlyphs
+	std::map<uint32_t, CompositeShape>& colorGlyphs,
+	const Atlas::SplitStrategy& strategy
 ) {
 	FT_Library library;
 
@@ -872,7 +908,7 @@ bool loadEmojiFont(
 		FT_Palette_Select(face, 0, &palette);
 	}
 
-	loadColorGlyphs(face, codepoints, palette, atlas, colorGlyphs);
+	loadColorGlyphs(face, codepoints, palette, atlas, colorGlyphs, strategy);
 
 	FT_Done_Face(face);
 	FT_Done_FreeType(library);

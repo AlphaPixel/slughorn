@@ -377,6 +377,12 @@ public:
 		std::vector<slug_t> splitsY;
 	};
 
+	// Size of the per-shape indirection table (both axes). Each shape's band block begins with two
+	// consecutive blocks of this many texels: first Y, then X. Each texel's R channel holds the
+	// band index for that quantized em-coordinate slot, giving O(1) lookup in the fragment shader.
+	// Must match SLUG_INDIRECTION_SIZE in the fragment shader.
+	static constexpr uint32_t INDIRECTION_SIZE = 32;
+
 	// --------------------------------------------------------------------------------------------
 	// Raw texture descriptor returned after build() is called.
 	//
@@ -450,6 +456,23 @@ public:
 	};
 
 	// --------------------------------------------------------------------------------------------
+	// SplitStrategy
+	//
+	// A callable that accepts the shape's curves and returns {splitsX, splitsY} as normalized
+	// [0,1] fraction vectors. Band count and placement algorithm are entirely encapsulated by
+	// the callable — the backend never sees or passes band counts.
+	//
+	// Pass {} or nullptr to skip explicit splits and preserve the uniform fast path instead.
+	//
+	// Example:
+	//   Atlas::SplitStrategy adaptive = [](const Atlas::Curves& c) {
+	//       return Atlas::computeAdaptiveSplits(c, 8, 8);
+	//   };
+	using SplitStrategy = std::function<
+		std::pair<std::vector<slug_t>, std::vector<slug_t>>(const Curves&)
+	>;
+
+	// --------------------------------------------------------------------------------------------
 	// Split placement strategies
 	//
 	// All compute*Splits functions share the same contract:
@@ -470,14 +493,9 @@ public:
 	// Uniform placement: evenly-spaced fractions (i+1)/numBands. curves is unused but present
 	// for interface consistency with other compute*Splits strategies.
 	//
-	// NOTE: Do NOT use this to replace leaving splitsX/Y empty. When splitsX/Y are empty,
-	// buildShapeBands sets splitFraction=0 on all band entries, which keeps the B channel zero
-	// in the texture and activates the shader's uniform fast path (direct formula, no scan).
-	// Calling computeUniformSplits and assigning the result produces identical band positions
-	// but routes through the scan path instead — correct but measurably slower.
-	//
-	// Use this function for inspection, the band editor's "Reset to uniform" action, or
-	// deliberate comparison of scan-path vs fast-path behavior via the heatmap.
+	// All paths (uniform and adaptive) route through the indirection table; there is no separate
+	// fast path. Use this for inspection, the band editor's "Reset to uniform" action, or
+	// benchmarking uniform vs adaptive placement quality.
 	static std::pair<std::vector<slug_t>, std::vector<slug_t>> computeUniformSplits(
 		const Curves& curves,
 		int numBandsX,
@@ -571,14 +589,8 @@ private:
 	// Internal build structures (discarded after build())
 	// --------------------------------------------------------------------------------------------
 	struct BandEntry {
-		// mirrors the uint16_t written to the band texture
 		uint16_t curveCount = 0;
-
 		std::vector<size_t> curveIndices;
-
-		// Normalized [0..1] upper boundary of this band over the shape's Y (hband) or X (vband)
-		// range. Encoded into the .b channel of the band header texel by packTextures().
-		float splitFraction = 0.f;
 	};
 
 	struct ShapeBuild {
@@ -589,6 +601,10 @@ private:
 		// Input splits forwarded from ShapeInfo; consumed by buildShapeBands().
 		std::vector<slug_t> splitsY;
 		std::vector<slug_t> splitsX;
+		// Indirection tables built by buildShapeBands(). Each has INDIRECTION_SIZE entries;
+		// entry q holds the band index for em-coordinate fraction q/INDIRECTION_SIZE.
+		std::vector<uint8_t> indirY;
+		std::vector<uint8_t> indirX;
 	};
 
 	// --------------------------------------------------------------------------------------------
