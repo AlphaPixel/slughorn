@@ -11,8 +11,8 @@
 # - render_sample_banded: band-accelerated, mirrors GPU shader exactly
 #
 # Level 2 - Atlas bridge (requires compiled slughorn module)
-# AtlasView: decodes a built Atlas into Python-native structures that render_sample_banded can
-# consume. Constructed once per (atlas, key) pair.
+# AtlasView: thin wrapper around the native decoded-shape path. Constructed once per (atlas, key)
+# pair.
 #
 # Level 3 - Grid samplers + image output
 # - sample_grid: reference path (pure Python Curve list)
@@ -21,8 +21,6 @@
 
 import math
 import struct
-import numpy as np
-
 from dataclasses import dataclass
 from typing import List, Tuple
 from PIL import Image, ImageDraw
@@ -366,21 +364,46 @@ def render_sample_banded(
 
 class AtlasView:
 	"""
-	Decodes a built slughorn.Atlas for a single shape key into Python-native
-	structures that render_sample_banded can consume directly.
+	Thin compatibility wrapper around atlas.decode(key).
+
+	Keeps the old Python-facing conveniences (`curves`, `indir_x`, `indir_y`,
+	`render(...)`) while delegating atlas decoding and the hot render path to
+	the native pybind implementation.
 	"""
 
 	def __init__(self, atlas, key):
-		self.shape = atlas.get_shape(key)
+		self.decoded = atlas.decode(key)
+		self.shape = self.decoded.shape
 
 		if self.shape is None:
 			raise KeyError(f"Key {key!r} not found in atlas (or atlas not built yet)")
 
-		self.curves = self._decode_curve_texture(atlas.curve_texture)
+		self.curves = [
+			(c.x1, c.y1, c.x2, c.y2, c.x3, c.y3)
+			for c in self.decoded.curves
+		]
 		self.curve_list = [Curve(*c) for c in self.curves]
+		self.indir_y = list(self.decoded.indir_y)
+		self.indir_x = list(self.decoded.indir_x)
+		self.hbands_idx = [
+			self.decoded.get_hband(i)
+			for i in range(len(self.decoded.hband_offsets) - 1)
+		]
+		self.vbands_idx = [
+			self.decoded.get_vband(i)
+			for i in range(len(self.decoded.vband_offsets) - 1)
+		]
 
-		self.hbands_idx, self.vbands_idx, self.indir_y, self.indir_x = \
-			self._decode_band_texture(atlas.band_texture, self.shape)
+	@staticmethod
+	def _result_to_dict(result) -> dict:
+		return {
+			"fill": result.fill,
+			"xcov": result.xcov,
+			"ycov": result.ycov,
+			"xwgt": result.xwgt,
+			"ywgt": result.ywgt,
+			"iters": result.iters,
+		}
 
 	def render(
 		self,
@@ -389,100 +412,24 @@ class AtlasView:
 		pixels_per_em: Tuple[float, float],
 		banded: bool = True,
 	) -> dict:
+		ppe_x, ppe_y = pixels_per_em
+
 		if banded:
-			return render_sample_banded(
-				self.curves,
-				self.hbands_idx,
-				self.vbands_idx,
-				(em_x, em_y),
-				pixels_per_em,
-				self.shape.band_scale_x,
-				self.shape.band_scale_y,
-				self.shape.band_offset_x,
-				self.shape.band_offset_y,
-				self.shape.band_max_x,
-				self.shape.band_max_y,
-				self.indir_y,
-				self.indir_x,
+			return self._result_to_dict(
+				self.decoded.render_sample_banded(em_x, em_y, ppe_x, ppe_y)
 			)
 
-		else:
-			return render_sample(self.curve_list, (em_x, em_y), pixels_per_em)
-
-	@staticmethod
-	def _decode_curve_texture(tex) -> List[Tuple[float, float, float, float, float, float]]:
-		data = np.frombuffer(tex.bytes, dtype=np.float32).reshape(
-			(tex.height, tex.width, 4)
+		return self._result_to_dict(
+			self.decoded.render_sample(em_x, em_y, ppe_x, ppe_y)
 		)
 
-		curves = []
-
-		for y in range(tex.height):
-			for x in range(0, tex.width, 2):
-				t0 = data[y, x]
-
-				if x + 1 >= tex.width:
-					continue
-
-				t1 = data[y, x + 1]
-
-				if np.allclose(t0, 0.0) and np.allclose(t1, 0.0):
-					continue
-
-				x1, y1, x2, y2 = t0
-				x3, y3, _, _ = t1
-
-				curves.append((
-					float(x1), float(y1),
-					float(x2), float(y2),
-					float(x3), float(y3),
-				))
-
-		return curves
-
-	@staticmethod
-	def _decode_band_texture(tex, shape) -> Tuple[List[List[int]], List[List[int]], List[int], List[int]]:
-		data = np.frombuffer(tex.bytes, dtype=np.uint16).reshape(
-			(tex.height, tex.width, 4)
-		)
-
-		IS    = INDIRECTION_SIZE
-		start = shape.band_tex_y * BAND_TEX_WIDTH + shape.band_tex_x
-		num_h = shape.band_max_y + 1
-		num_v = shape.band_max_x + 1
-
-		def read_texel(relative_offset: int) -> np.ndarray:
-			abs_idx = start + relative_offset
-			ty = abs_idx >> LOG_BAND_TEX_WIDTH
-			tx = abs_idx & (BAND_TEX_WIDTH - 1)
-
-			return data[ty, tx]
-
-		# Indirection tables: [0..IS-1] = Y, [IS..2*IS-1] = X. R channel = band index.
-		indir_y = [int(read_texel(q)[0])      for q in range(IS)]
-		indir_x = [int(read_texel(IS + q)[0]) for q in range(IS)]
-
-		# Band headers start after the two indirection tables.
-		def read_header(i: int) -> Tuple[int, int]:
-			texel = read_texel(2 * IS + i)
-			return int(texel[0]), int(texel[1])  # (count, offset)
-
-		def loc_to_index(cx: int, cy: int) -> int:
-			return (cy * BAND_TEX_WIDTH + cx) // 2
-
-		def decode_band(count: int, offset: int) -> List[int]:
-			result = []
-
-			for i in range(count):
-				texel = read_texel(offset + i)
-				result.append(loc_to_index(int(texel[0]), int(texel[1])))
-
-			return result
-
-		hbands_idx = [decode_band(*read_header(i))       for i in range(num_h)]
-		vbands_idx = [decode_band(*read_header(num_h + i)) for i in range(num_v)]
-
-		return hbands_idx, vbands_idx, indir_y, indir_x
+	def render_grid(
+		self,
+		size: int=128,
+		margin: float=0.0,
+		banded: bool=True,
+	):
+		return self.decoded.render_grid(size=size, margin=margin, banded=banded)
 
 # ================================================================================================
 # Level 3 - Grid samplers + image I/O
@@ -525,18 +472,7 @@ def sample_grid_from_atlas(
 	"""
 
 	view = AtlasView(atlas, key)
-	shape = view.shape
-	width, height = compute_render_size(shape, size)
-	xf = EmTransform(shape, width, height, margin)
-	ppe = (float(width), float(height))
-	grid = [[0.0] * width for _ in range(height)]
-
-	for j in range(height):
-		for i in range(width):
-			ex, ey = xf.px_to_em(i, j)
-			grid[j][i] = view.render(ex, ey, ppe, banded=banded)["fill"]
-
-	return grid
+	return view.render_grid(size=size, margin=margin, banded=banded)
 
 # ------------------------------------------------------------------------------------------------
 # Debug output, file writing
