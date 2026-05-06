@@ -90,6 +90,9 @@ out vec4 fragColor;
 // Must match slughorn::Atlas::TEX_WIDTH == 512 == 1<<9
 #define TEX_WIDTH 9
 
+// Must match slughorn::Atlas::INDIRECTION_SIZE
+#define SLUG_INDIRECTION_SIZE 32
+
 // ---------------------------------------------------------------------------
 // Slug core (Lengyel 2017); identical to osgSlug's implementation.
 // ---------------------------------------------------------------------------
@@ -154,15 +157,15 @@ float slug_Render(vec2 renderCoord, vec4 bandTransform, ivec2 glyphLoc, ivec2 ba
 	vec2 emsPerPixel = fwidth(renderCoord);
 	vec2 pixelsPerEm = 1.0 / emsPerPixel;
 
-	ivec2 bandIndex = clamp(
-		ivec2(renderCoord * bandTransform.xy + bandTransform.zw),
-		ivec2(0, 0),
-		ivec2(bandMax.x, bandMax.y)
-	);
+	// O(1) band index via indirection tables (2 fetches per axis).
+	int qY = clamp(int(renderCoord.y * bandTransform.y + bandTransform.w), 0, SLUG_INDIRECTION_SIZE - 1);
+	int qX = clamp(int(renderCoord.x * bandTransform.x + bandTransform.z), 0, SLUG_INDIRECTION_SIZE - 1);
+	int bandY = int(texelFetch(u_bandTexture, ivec2(glyphLoc.x + qY, glyphLoc.y), 0).r);
+	int bandX = int(texelFetch(u_bandTexture, ivec2(glyphLoc.x + SLUG_INDIRECTION_SIZE + qX, glyphLoc.y), 0).r);
 
-	// Horizontal bands
+	// Horizontal bands — headers at glyphLoc + 2*IS + bandY
 	float xcov = 0.0, xwgt = 0.0;
-	uvec2 hbandData = texelFetch(u_bandTexture, ivec2(glyphLoc.x + bandIndex.y, glyphLoc.y), 0).xy;
+	uvec2 hbandData = texelFetch(u_bandTexture, ivec2(glyphLoc.x + 2 * SLUG_INDIRECTION_SIZE + bandY, glyphLoc.y), 0).xy;
 	ivec2 hbandLoc = slug_CalcBandLoc(glyphLoc, hbandData.y);
 
 	for(int ci = 0; ci < int(hbandData.x); ci++) {
@@ -180,9 +183,9 @@ float slug_Render(vec2 renderCoord, vec4 bandTransform, ivec2 glyphLoc, ivec2 ba
 		}
 	}
 
-	// Vertical bands
+	// Vertical bands — headers at glyphLoc + 2*IS + numHBands + bandX
 	float ycov = 0.0, ywgt = 0.0;
-	uvec2 vbandData = texelFetch(u_bandTexture, ivec2(glyphLoc.x + bandMax.y + 1 + bandIndex.x, glyphLoc.y), 0).xy;
+	uvec2 vbandData = texelFetch(u_bandTexture, ivec2(glyphLoc.x + 2 * SLUG_INDIRECTION_SIZE + bandMax.y + 1 + bandX, glyphLoc.y), 0).xy;
 	ivec2 vbandLoc = slug_CalcBandLoc(glyphLoc, vbandData.y);
 
 	for(int ci = 0; ci < int(vbandData.x); ci++) {
@@ -449,7 +452,8 @@ int main(int /*argc*/, char** /*argv*/) {
 	canvas.beginPath();
 	canvas.moveTo(0.0_cv, 0.0_cv);
 	canvas.lineTo(1.0_cv, 0.0_cv);
-	canvas.lineTo(0.5_cv, 1.0_cv);
+	// canvas.lineTo(0.5_cv, 1.0_cv);
+	canvas.quadTo(0.25_cv, 0.5_cv, 0.5_cv, 1.0_cv);
 	canvas.closePath();
 
 	slughorn::Key shapeKey = canvas.fill({1_cv, 0_cv, 0_cv, 1_cv});

@@ -438,9 +438,9 @@ PYBIND11_MODULE(slughorn, m) {
 			"Mirrors slug_EmToUV's emOrigin computation."
 		)
 		.def_property_readonly("em_size", [](const slughorn::Atlas::Shape& s) {
-			// emSize = (bandMax + 1) / bandScale
-			float sx = (s.bandScaleX != 0.f) ? float(s.bandMaxX + 1) / s.bandScaleX : 0.f;
-			float sy = (s.bandScaleY != 0.f) ? float(s.bandMaxY + 1) / s.bandScaleY : 0.f;
+			// emSize = INDIRECTION_SIZE / bandScale  (mirrors slug_EmToUV's emSize)
+			float sx = (s.bandScaleX != 0.f) ? float(slughorn::Atlas::INDIRECTION_SIZE) / s.bandScaleX : 0.f;
+			float sy = (s.bandScaleY != 0.f) ? float(slughorn::Atlas::INDIRECTION_SIZE) / s.bandScaleY : 0.f;
 			return py::make_tuple(sx, sy);
 		}, "Em-space (width, height) of the shape's bounding box. "
 			"Mirrors slug_EmToUV's emSize computation."
@@ -449,8 +449,8 @@ PYBIND11_MODULE(slughorn, m) {
 			// Direct Python port of slug_EmToUV()
 			float ox = (s.bandScaleX != 0.f) ? -s.bandOffsetX / s.bandScaleX : 0.f;
 			float oy = (s.bandScaleY != 0.f) ? -s.bandOffsetY / s.bandScaleY : 0.f;
-			float sx = (s.bandScaleX != 0.f) ? float(s.bandMaxX + 1) / s.bandScaleX : 1.f;
-			float sy = (s.bandScaleY != 0.f) ? float(s.bandMaxY + 1) / s.bandScaleY : 1.f;
+			float sx = (s.bandScaleX != 0.f) ? float(slughorn::Atlas::INDIRECTION_SIZE) / s.bandScaleX : 1.f;
+			float sy = (s.bandScaleY != 0.f) ? float(slughorn::Atlas::INDIRECTION_SIZE) / s.bandScaleY : 1.f;
 
 			return py::make_tuple((ex - ox) / sx, (ey - oy) / sy);
 		}, py::arg("em_x"), py::arg("em_y"),
@@ -914,22 +914,38 @@ PYBIND11_MODULE(slughorn, m) {
 		"no FreeType handles are exposed to Python."
 	);
 
-	freetype.def("load_ascii_font", &slughorn::freetype::loadAsciiFont,
+	freetype.def("load_ascii_font",
+		[](const std::string& fontPath, slughorn::Atlas& atlas,
+		   std::optional<slughorn::Atlas::SplitStrategy> strategy)
+		{
+			return slughorn::freetype::loadAsciiFont(
+				fontPath, atlas,
+				strategy ? *strategy : slughorn::Atlas::SplitStrategy{}
+			);
+		},
 		py::arg("font_path"),
 		py::arg("atlas"),
+		py::arg("strategy") = py::none(),
 		"Load printable ASCII (codepoints 32-126) from font_path into atlas.\n"
 		"Creates and destroys an FT_Library/FT_Face internally.\n"
+		"strategy: optional callable(curves) -> (splits_x, splits_y), e.g.:\n"
+		"    lambda c: slughorn.Atlas.compute_adaptive_splits(c, 8, 8)\n"
+		"Pass None (default) to use the uniform fast path.\n"
 		"Returns True on success, False if the font cannot be opened."
 	);
 
 	freetype.def("load_emoji_font", [](
 		const std::string& fontPath,
 		const std::vector<uint32_t>& codepoints,
-		slughorn::Atlas& atlas
+		slughorn::Atlas& atlas,
+		std::optional<slughorn::Atlas::SplitStrategy> strategy
 	) -> py::dict {
 		std::map<uint32_t, slughorn::CompositeShape> colorGlyphs;
 
-		slughorn::freetype::loadEmojiFont(fontPath, codepoints, atlas, colorGlyphs);
+		slughorn::freetype::loadEmojiFont(
+			fontPath, codepoints, atlas, colorGlyphs,
+			strategy ? *strategy : slughorn::Atlas::SplitStrategy{}
+		);
 
 		py::dict result;
 
@@ -940,9 +956,12 @@ PYBIND11_MODULE(slughorn, m) {
 		py::arg("font_path"),
 		py::arg("codepoints"),
 		py::arg("atlas"),
+		py::arg("strategy") = py::none(),
 		"Load COLR emoji from font_path for the given codepoints into atlas.\n"
 		"codepoints is a list of uint32_t Unicode codepoints.\n"
 		"Creates and destroys an FT_Library/FT_Face internally.\n"
+		"strategy: optional callable(curves) -> (splits_x, splits_y).\n"
+		"Pass None (default) to use the uniform fast path.\n"
 		"Returns a dict mapping codepoint (int) -> CompositeShape "
 		"for each successfully loaded glyph."
 	);

@@ -357,8 +357,10 @@ void Atlas::buildShapeBands(
 	// --------------------------------------------------------------------------------------------
 	// Band transform
 	// --------------------------------------------------------------------------------------------
-	build.metrics.bandScaleX = cv(numBandsX) / rangeX;
-	build.metrics.bandScaleY = cv(numBandsY) / rangeY;
+	// bandScale maps em-coords to [0, INDIRECTION_SIZE) space. The shader indexes the indirection
+	// table with clamp(int(emPos * bandScale + bandOffset), 0, INDIRECTION_SIZE-1).
+	build.metrics.bandScaleX = cv(INDIRECTION_SIZE) / rangeX;
+	build.metrics.bandScaleY = cv(INDIRECTION_SIZE) / rangeY;
 	build.metrics.bandOffsetX = -minX * build.metrics.bandScaleX;
 	build.metrics.bandOffsetY = -minY * build.metrics.bandScaleY;
 	build.metrics.bandMaxX = numBandsX - 1;
@@ -373,12 +375,15 @@ void Atlas::buildShapeBands(
 		hboundaries[numBandsY] = maxY;
 
 		if(!splitsY.empty()) {
-			for(uint32_t i = 0; i < static_cast<uint32_t>(splitsY.size()); i++)
-				hboundaries[i + 1] = minY + splitsY[i] * rangeY;
+			for(uint32_t i = 0; i < static_cast<uint32_t>(splitsY.size()); i++) {
+				const float snapped = std::round(float(splitsY[i]) * float(INDIRECTION_SIZE)) / float(INDIRECTION_SIZE);
+				hboundaries[i + 1] = minY + cv(snapped) * rangeY;
+			}
 		} else {
-			const slug_t bandHeightY = rangeY / cv(numBandsY);
-			for(uint32_t i = 1; i < numBandsY; i++)
-				hboundaries[i] = minY + cv(i) * bandHeightY;
+			for(uint32_t i = 1; i < numBandsY; i++) {
+				const float snapped = std::round(float(i) / float(numBandsY) * float(INDIRECTION_SIZE)) / float(INDIRECTION_SIZE);
+				hboundaries[i] = minY + cv(snapped) * rangeY;
+			}
 		}
 
 		build.hbands.resize(numBandsY);
@@ -405,7 +410,21 @@ void Atlas::buildShapeBands(
 			});
 
 			band.curveCount = static_cast<uint16_t>(band.curveIndices.size());
-			if(!splitsY.empty()) band.splitFraction = (hi - minY) / rangeY;
+		}
+
+		// Build Y indirection table: slot q → band index for em-fraction q/INDIRECTION_SIZE.
+		build.indirY.resize(INDIRECTION_SIZE);
+
+		for(uint32_t q = 0; q < INDIRECTION_SIZE; q++) {
+			const float frac = (q + 0.5f) / float(INDIRECTION_SIZE);
+			const slug_t emY = minY + frac * rangeY;
+			uint32_t band = numBandsY - 1;
+
+			for(uint32_t b = 0; b + 1 < numBandsY; b++) {
+				if(emY < hboundaries[b + 1]) { band = b; break; }
+			}
+
+			build.indirY[q] = static_cast<uint8_t>(band);
 		}
 	}
 
@@ -418,12 +437,15 @@ void Atlas::buildShapeBands(
 		vboundaries[numBandsX] = maxX;
 
 		if(!splitsX.empty()) {
-			for(uint32_t i = 0; i < static_cast<uint32_t>(splitsX.size()); i++)
-				vboundaries[i + 1] = minX + splitsX[i] * rangeX;
+			for(uint32_t i = 0; i < static_cast<uint32_t>(splitsX.size()); i++) {
+				const float snapped = std::round(float(splitsX[i]) * float(INDIRECTION_SIZE)) / float(INDIRECTION_SIZE);
+				vboundaries[i + 1] = minX + cv(snapped) * rangeX;
+			}
 		} else {
-			const slug_t bandWidthX = rangeX / cv(numBandsX);
-			for(uint32_t i = 1; i < numBandsX; i++)
-				vboundaries[i] = minX + cv(i) * bandWidthX;
+			for(uint32_t i = 1; i < numBandsX; i++) {
+				const float snapped = std::round(float(i) / float(numBandsX) * float(INDIRECTION_SIZE)) / float(INDIRECTION_SIZE);
+				vboundaries[i] = minX + cv(snapped) * rangeX;
+			}
 		}
 
 		build.vbands.resize(numBandsX);
@@ -450,7 +472,21 @@ void Atlas::buildShapeBands(
 			});
 
 			band.curveCount = static_cast<uint16_t>(band.curveIndices.size());
-			if(!splitsX.empty()) band.splitFraction = (hi - minX) / rangeX;
+		}
+
+		// Build X indirection table: slot q → band index for em-fraction q/INDIRECTION_SIZE.
+		build.indirX.resize(INDIRECTION_SIZE);
+
+		for(uint32_t q = 0; q < INDIRECTION_SIZE; q++) {
+			const float frac = (q + 0.5f) / float(INDIRECTION_SIZE);
+			const slug_t emX = minX + frac * rangeX;
+			uint32_t band = numBandsX - 1;
+
+			for(uint32_t b = 0; b + 1 < numBandsX; b++) {
+				if(emX < vboundaries[b + 1]) { band = b; break; }
+			}
+
+			build.indirX[q] = static_cast<uint8_t>(band);
 		}
 	}
 
@@ -493,11 +529,16 @@ void Atlas::packTextures() {
 
 	for(const auto& kv : _build) {
 		const auto& g = kv.second;
-		const auto numHeaders = static_cast<uint32_t>(g.hbands.size() + g.vbands.size());
+		const auto numBandHeaders = static_cast<uint32_t>(g.hbands.size() + g.vbands.size());
 
-		totalBandTexels = alignCursorForSpan(totalBandTexels, TEX_WIDTH, numHeaders);
+		// Each shape's block: [indirY x INDIRECTION_SIZE][indirX x INDIRECTION_SIZE][band headers]
+		// Empty-curve shapes have no indirection tables, same as before.
+		const uint32_t indirSize = numBandHeaders > 0 ? 2 * INDIRECTION_SIZE : 0;
+		const uint32_t blockSize = indirSize + numBandHeaders;
 
-		uint32_t cursor = totalBandTexels + numHeaders;
+		totalBandTexels = alignCursorForSpan(totalBandTexels, TEX_WIDTH, blockSize);
+
+		uint32_t cursor = totalBandTexels + blockSize;
 
 		auto measureList = [&](const std::vector<BandEntry>& bands) {
 			for(const auto& band : bands) {
@@ -600,28 +641,42 @@ void Atlas::packTextures() {
 			_packingStats.curveTexelsUsed += 2;
 		}
 
-		// Band headers + lists
+		// Band texture block layout per shape:
+		//   [indirY x INDIRECTION_SIZE][indirX x INDIRECTION_SIZE][hband headers][vband headers]
+		//   followed by curve index lists (aligned, possibly wrapping rows via slug_CalcBandLoc)
+		// Empty-curve shapes (numBandHeaders == 0) get no indirection block, same as before.
 		Shape sd = g.metrics;
 
 		const auto numHBands = static_cast<uint32_t>(g.hbands.size());
 		const auto numVBands = static_cast<uint32_t>(g.vbands.size());
-		const uint32_t numHeaders = numHBands + numVBands;
+		const uint32_t numBandHeaders = numHBands + numVBands;
+		const uint32_t indirSize = numBandHeaders > 0 ? 2 * INDIRECTION_SIZE : 0;
+		const uint32_t blockSize = indirSize + numBandHeaders;
 
-		// Skip this shape; header block would exceed a full texture row.
-		if(numHeaders > TEX_WIDTH) continue;
+		if(blockSize > TEX_WIDTH) continue;
 
-		bandTexelOffset = alignBand(bandTexelOffset, numHeaders);
+		bandTexelOffset = alignBand(bandTexelOffset, blockSize);
 
 		const uint32_t shapeStart = bandTexelOffset;
 
 		sd.bandTexX = shapeStart % TEX_WIDTH;
 		sd.bandTexY = shapeStart / TEX_WIDTH;
 
+		// Write indirection tables (only when shape has geometry).
+		if(indirSize > 0 && g.indirY.size() == INDIRECTION_SIZE && g.indirX.size() == INDIRECTION_SIZE) {
+			for(uint32_t q = 0; q < INDIRECTION_SIZE; q++) {
+				writeBandTexel(shapeStart + q,                    g.indirY[q], 0, 0, 0);
+				writeBandTexel(shapeStart + INDIRECTION_SIZE + q, g.indirX[q], 0, 0, 0);
+			}
+
+			_packingStats.bandTexelsUsed += 2 * INDIRECTION_SIZE;
+		}
+
 		struct HeaderTemp { uint16_t count = 0, offset = 0; };
 
-		std::vector<HeaderTemp> headers(numHeaders);
+		std::vector<HeaderTemp> headers(numBandHeaders);
 
-		uint32_t cursor = shapeStart + numHeaders;
+		uint32_t cursor = shapeStart + blockSize;
 
 		auto packBandList = [&](const std::vector<BandEntry>& bands, uint32_t headerBase) {
 			for(uint32_t b = 0; b < static_cast<uint32_t>(bands.size()); b++) {
@@ -658,19 +713,16 @@ void Atlas::packTextures() {
 		packBandList(g.hbands, 0);
 		packBandList(g.vbands, numHBands);
 
+		// Write band headers at shapeStart + indirSize (after the indirection blocks).
 		for(uint32_t i = 0; i < numHBands; i++) {
-			const uint16_t splitB = static_cast<uint16_t>(g.hbands[i].splitFraction * 65535.0f + 0.5f);
-
-			writeBandTexel(shapeStart + i, headers[i].count, headers[i].offset, splitB, 0);
+			writeBandTexel(shapeStart + indirSize + i, headers[i].count, headers[i].offset, 0, 0);
 		}
 
 		for(uint32_t i = 0; i < numVBands; i++) {
-			const uint16_t splitB = static_cast<uint16_t>(g.vbands[i].splitFraction * 65535.0f + 0.5f);
-
-			writeBandTexel(shapeStart + numHBands + i, headers[numHBands + i].count, headers[numHBands + i].offset, splitB, 0);
+			writeBandTexel(shapeStart + indirSize + numHBands + i, headers[numHBands + i].count, headers[numHBands + i].offset, 0, 0);
 		}
 
-		_packingStats.bandTexelsUsed += numHeaders;
+		_packingStats.bandTexelsUsed += numBandHeaders;
 
 		bandTexelOffset = cursor;
 		_shapes[key] = sd;
