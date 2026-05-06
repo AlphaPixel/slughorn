@@ -6,7 +6,15 @@
 // uploads the two Slug textures, assembles a VAO from Layer data, and renders
 // with a stripped-down Slug fragment shader.
 //
-// No OSG, no GLM, no external math. Orthographic MVP computed inline.
+// Interaction:
+// - Left drag: orbit camera
+// - Right drag: pan
+// - Mouse wheel: zoom
+// - P: toggle perspective / orthographic projection
+// - R: reset view
+// - Esc: quit
+//
+// No OSG, no GLM, no external math. View/projection math is computed inline.
 //
 // Build requirements:
 //
@@ -19,13 +27,12 @@
 //
 // Shader uniforms (intentionally renamed away from osgSlug names):
 //
-// u_mvp          mat4       orthographic projection
+// u_mvp          mat4       view-projection transform
 // u_time         float      seconds since start
 // u_curveTexture sampler2D  (unit 0) RGBA32F curve data
 // u_bandTexture  usampler2D (unit 1) RGBA16UI band data
 
-#include "slughorn.hpp"
-#include "slughorn-canvas.hpp"
+#include "slughorn/canvas.hpp"
 
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
@@ -33,9 +40,13 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <algorithm>
 #include <cmath>
 #include <vector>
 #include <string>
+
+using namespace slughorn::literals;
+using slughorn::slug_t;
 
 // ============================================================================
 // Inline shaders
@@ -323,6 +334,133 @@ static void orthoMatrix(
 	out[15] = 1.0f;
 }
 
+struct Vec3 {
+	float x, y, z;
+};
+
+static Vec3 operator+(const Vec3& a, const Vec3& b) {
+	return {a.x + b.x, a.y + b.y, a.z + b.z};
+}
+
+static Vec3 operator-(const Vec3& a, const Vec3& b) {
+	return {a.x - b.x, a.y - b.y, a.z - b.z};
+}
+
+static Vec3 operator*(const Vec3& v, float s) {
+	return {v.x * s, v.y * s, v.z * s};
+}
+
+static float dot(const Vec3& a, const Vec3& b) {
+	return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+static Vec3 cross(const Vec3& a, const Vec3& b) {
+	return {
+		a.y * b.z - a.z * b.y,
+		a.z * b.x - a.x * b.z,
+		a.x * b.y - a.y * b.x
+	};
+}
+
+static Vec3 normalize(const Vec3& v) {
+	const float len = std::sqrt(dot(v, v));
+
+	if(len <= 1e-6f) return {0.0f, 0.0f, 0.0f};
+
+	return {v.x / len, v.y / len, v.z / len};
+}
+
+static void perspectiveMatrix(float fovyRadians, float aspect, float near_, float far_, float out[16]) {
+	std::memset(out, 0, 64);
+
+	const float f = 1.0f / std::tan(fovyRadians * 0.5f);
+
+	out[0] = f / aspect;
+	out[5] = f;
+	out[10] = (far_ + near_) / (near_ - far_);
+	out[11] = -1.0f;
+	out[14] = (2.0f * far_ * near_) / (near_ - far_);
+}
+
+static void lookAtMatrix(const Vec3& eye, const Vec3& center, const Vec3& up, float out[16]) {
+	const Vec3 f = normalize(center - eye);
+	const Vec3 s = normalize(cross(f, up));
+	const Vec3 u = cross(s, f);
+
+	std::memset(out, 0, 64);
+
+	out[0] = s.x;
+	out[1] = u.x;
+	out[2] = -f.x;
+
+	out[4] = s.y;
+	out[5] = u.y;
+	out[6] = -f.y;
+
+	out[8] = s.z;
+	out[9] = u.z;
+	out[10] = -f.z;
+
+	out[12] = -dot(s, eye);
+	out[13] = -dot(u, eye);
+	out[14] = dot(f, eye);
+	out[15] = 1.0f;
+}
+
+static void multiplyMatrix4(const float a[16], const float b[16], float out[16]) {
+	float tmp[16];
+
+	for(int c = 0; c < 4; c++) {
+		for(int r = 0; r < 4; r++) {
+			tmp[c * 4 + r] =
+				a[0 * 4 + r] * b[c * 4 + 0] +
+				a[1 * 4 + r] * b[c * 4 + 1] +
+				a[2 * 4 + r] * b[c * 4 + 2] +
+				a[3 * 4 + r] * b[c * 4 + 3];
+		}
+	}
+
+	std::memcpy(out, tmp, sizeof(tmp));
+}
+
+struct ViewState {
+	Vec3 target = {0.5f, 0.5f, 0.0f};
+	float yaw = 0.55f;
+	float pitch = 0.45f;
+	float distance = 2.4f;
+	bool usePerspective = true;
+
+	bool leftDragging = false;
+	bool rightDragging = false;
+	double lastCursorX = 0.0;
+	double lastCursorY = 0.0;
+
+	void reset() {
+		target = {0.5f, 0.5f, 0.0f};
+		yaw = 0.55f;
+		pitch = 0.45f;
+		distance = 2.4f;
+		usePerspective = true;
+		leftDragging = false;
+		rightDragging = false;
+		lastCursorX = 0.0;
+		lastCursorY = 0.0;
+	}
+};
+
+static Vec3 orbitCameraPosition(const ViewState& view) {
+	const float cp = std::cos(view.pitch);
+	const float sp = std::sin(view.pitch);
+	const float sy = std::sin(view.yaw);
+	const float cy = std::cos(view.yaw);
+
+	return {
+		view.target.x + view.distance * cp * sy,
+		view.target.y + view.distance * sp,
+		view.target.z + view.distance * cp * cy
+	};
+}
+
 // ============================================================================
 // Vertex layout (mirrors ShapeDrawable::compile() exactly)
 //
@@ -431,8 +569,85 @@ static void onGlfwError(int code, const char* msg) {
 }
 
 static void onKey(GLFWwindow* win, int key, int /*scancode*/, int action, int /*mods*/) {
+	ViewState* view = static_cast<ViewState*>(glfwGetWindowUserPointer(win));
+
 	if(key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
 		glfwSetWindowShouldClose(win, GLFW_TRUE);
+
+	if(!view || action != GLFW_PRESS) return;
+
+	if(key == GLFW_KEY_P) view->usePerspective = !view->usePerspective;
+	if(key == GLFW_KEY_R) view->reset();
+}
+
+static void onMouseButton(GLFWwindow* win, int button, int action, int /*mods*/) {
+	ViewState* view = static_cast<ViewState*>(glfwGetWindowUserPointer(win));
+
+	if(!view) return;
+
+	if(button == GLFW_MOUSE_BUTTON_LEFT) view->leftDragging = (action == GLFW_PRESS);
+	if(button == GLFW_MOUSE_BUTTON_RIGHT) view->rightDragging = (action == GLFW_PRESS);
+
+	double x = 0.0, y = 0.0;
+	glfwGetCursorPos(win, &x, &y);
+	view->lastCursorX = x;
+	view->lastCursorY = y;
+}
+
+static void onCursorPos(GLFWwindow* win, double x, double y) {
+	ViewState* view = static_cast<ViewState*>(glfwGetWindowUserPointer(win));
+
+	if(!view) return;
+
+	const float dx = static_cast<float>(x - view->lastCursorX);
+	const float dy = static_cast<float>(y - view->lastCursorY);
+
+	view->lastCursorX = x;
+	view->lastCursorY = y;
+
+	if(view->leftDragging) {
+		view->yaw -= dx * 0.01f;
+		view->pitch -= dy * 0.01f;
+
+		const float limit = 1.45f;
+		if(view->pitch > limit) view->pitch = limit;
+		if(view->pitch < -limit) view->pitch = -limit;
+	}
+
+	if(view->rightDragging) {
+		int fbW = 1, fbH = 1;
+		glfwGetFramebufferSize(win, &fbW, &fbH);
+
+		const Vec3 eye = orbitCameraPosition(*view);
+		const Vec3 forward = normalize(view->target - eye);
+		Vec3 right = normalize(cross(forward, {0.0f, 1.0f, 0.0f}));
+		Vec3 up = normalize(cross(right, forward));
+
+		if(dot(right, right) <= 1e-6f) right = {1.0f, 0.0f, 0.0f};
+		if(dot(up, up) <= 1e-6f) up = {0.0f, 1.0f, 0.0f};
+
+		float worldPerPixel = 0.0f;
+		if(view->usePerspective) {
+			const float fovy = 45.0f * 3.14159265f / 180.0f;
+			worldPerPixel = 2.0f * view->distance * std::tan(fovy * 0.5f) / float(std::max(fbH, 1));
+		} else {
+			worldPerPixel = 2.0f * (0.5f / view->distance + 0.15f) / float(std::max(fbH, 1));
+		}
+
+		view->target = view->target - right * (dx * worldPerPixel) + up * (dy * worldPerPixel);
+	}
+}
+
+static void onScroll(GLFWwindow* win, double /*xoffset*/, double yoffset) {
+	ViewState* view = static_cast<ViewState*>(glfwGetWindowUserPointer(win));
+
+	if(!view) return;
+
+	const float zoom = std::exp(-static_cast<float>(yoffset) * 0.12f);
+	view->distance *= zoom;
+
+	if(view->distance < 0.35f) view->distance = 0.35f;
+	if(view->distance > 20.0f) view->distance = 20.0f;
 }
 
 // ============================================================================
@@ -514,7 +729,21 @@ int main(int /*argc*/, char** /*argv*/) {
 		return 1;
 	}
 
+	ViewState view;
+
+	std::printf("Controls:\n");
+	std::printf("  Left drag   orbit\n");
+	std::printf("  Right drag  pan\n");
+	std::printf("  Wheel       zoom\n");
+	std::printf("  P           toggle perspective/ortho\n");
+	std::printf("  R           reset view\n");
+	std::printf("  Esc         quit\n");
+
+	glfwSetWindowUserPointer(window, &view);
 	glfwSetKeyCallback(window, onKey);
+	glfwSetMouseButtonCallback(window, onMouseButton);
+	glfwSetCursorPosCallback(window, onCursorPos);
+	glfwSetScrollCallback(window, onScroll);
 	glfwMakeContextCurrent(window);
 	glfwSwapInterval(1); // vsync
 
@@ -627,24 +856,27 @@ int main(int /*argc*/, char** /*argv*/) {
 		glViewport(0, 0, fbW, fbH);
 		glClear(GL_COLOR_BUFFER_BIT);
 
-		// Orthographic projection: show em-space coordinates directly.
-		// The triangle lives in [0,1] x [0,1] em-space; we add a small
-		// margin and correct for aspect ratio so it's centred and fills
-		// most of the window without distortion.
 		const float aspect = (fbH > 0) ? (float)fbW / (float)fbH : 1.0f;
-		const float margin = 0.15f;
-		const float halfW = (0.5f + margin) * aspect;
-		const float halfH = 0.5f + margin;
-		const float cx = 0.5f; // centre of the [0,1] em square
-		const float cy = 0.5f;
+		const Vec3 eye = orbitCameraPosition(view);
+		const Vec3 up = std::abs(std::cos(view.pitch)) < 0.05f
+			? Vec3{0.0f, 0.0f, 1.0f}
+			: Vec3{0.0f, 1.0f, 0.0f};
+
+		float proj[16];
+		if(view.usePerspective) {
+			perspectiveMatrix(45.0f * 3.14159265f / 180.0f, aspect, 0.01f, 100.0f, proj);
+		} else {
+			const float margin = 0.15f;
+			const float halfH = 0.5f / view.distance + margin;
+			const float halfW = halfH * aspect;
+			orthoMatrix(-halfW, halfW, -halfH, halfH, -100.0f, 100.0f, proj);
+		}
+
+		float viewMatrix[16];
+		lookAtMatrix(eye, view.target, up, viewMatrix);
 
 		float mvp[16];
-		orthoMatrix(
-			cx - halfW, cx + halfW,
-			cy - halfH, cy + halfH,
-			-1.0f, 1.0f,
-			mvp
-		);
+		multiplyMatrix4(proj, viewMatrix, mvp);
 
 		const float t = (float)glfwGetTime();
 
