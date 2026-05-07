@@ -91,7 +91,7 @@ std::vector<slug_t> computeAxisSplits(
 	if(regions.empty()) {
 		std::vector<slug_t> splits(numSplits);
 		for(uint32_t i = 0; i < numSplits; i++)
-			splits[i] = axisMin + axisRange * float(i + 1) / float(numBands);
+			splits[i] = axisMin + axisRange * cv(i + 1) / cv(numBands);
 		return splits;
 	}
 
@@ -120,7 +120,7 @@ std::vector<slug_t> computeAxisSplits(
 
 	// Fallback: fill any remaining slots with uniform positions.
 	for(uint32_t i = 1; i <= numSplits && splits.size() < numSplits; i++) {
-		const slug_t pos = axisMin + axisRange * float(i) / float(numBands);
+		const slug_t pos = axisMin + axisRange * cv(i) / cv(numBands);
 		bool tooClose = false;
 
 		for(slug_t s : splits) {
@@ -380,13 +380,13 @@ void Atlas::buildShapeBands(
 
 		if(!splitsY.empty()) {
 			for(uint32_t i = 0; i < static_cast<uint32_t>(splitsY.size()); i++) {
-				const float snapped = std::round(float(splitsY[i]) * float(INDIRECTION_SIZE)) / float(INDIRECTION_SIZE);
-				hboundaries[i + 1] = minY + cv(snapped) * rangeY;
+				const slug_t snapped = std::round(splitsY[i] * cv(INDIRECTION_SIZE)) / cv(INDIRECTION_SIZE);
+				hboundaries[i + 1] = minY + snapped * rangeY;
 			}
 		} else {
 			for(uint32_t i = 1; i < numBandsY; i++) {
-				const float snapped = std::round(float(i) / float(numBandsY) * float(INDIRECTION_SIZE)) / float(INDIRECTION_SIZE);
-				hboundaries[i] = minY + cv(snapped) * rangeY;
+				const slug_t snapped = std::round(cv(i) / cv(numBandsY) * cv(INDIRECTION_SIZE)) / cv(INDIRECTION_SIZE);
+				hboundaries[i] = minY + snapped * rangeY;
 			}
 		}
 
@@ -420,7 +420,7 @@ void Atlas::buildShapeBands(
 		build.indirY.resize(INDIRECTION_SIZE);
 
 		for(uint32_t q = 0; q < INDIRECTION_SIZE; q++) {
-			const float frac = (q + 0.5f) / float(INDIRECTION_SIZE);
+			const slug_t frac = (cv(q) + 0.5_cv) / cv(INDIRECTION_SIZE);
 			const slug_t emY = minY + frac * rangeY;
 			uint32_t band = numBandsY - 1;
 
@@ -442,13 +442,13 @@ void Atlas::buildShapeBands(
 
 		if(!splitsX.empty()) {
 			for(uint32_t i = 0; i < static_cast<uint32_t>(splitsX.size()); i++) {
-				const float snapped = std::round(float(splitsX[i]) * float(INDIRECTION_SIZE)) / float(INDIRECTION_SIZE);
-				vboundaries[i + 1] = minX + cv(snapped) * rangeX;
+				const slug_t snapped = std::round(splitsX[i] * cv(INDIRECTION_SIZE)) / cv(INDIRECTION_SIZE);
+				vboundaries[i + 1] = minX + snapped * rangeX;
 			}
 		} else {
 			for(uint32_t i = 1; i < numBandsX; i++) {
-				const float snapped = std::round(float(i) / float(numBandsX) * float(INDIRECTION_SIZE)) / float(INDIRECTION_SIZE);
-				vboundaries[i] = minX + cv(snapped) * rangeX;
+				const slug_t snapped = std::round(cv(i) / cv(numBandsX) * cv(INDIRECTION_SIZE)) / cv(INDIRECTION_SIZE);
+				vboundaries[i] = minX + snapped * rangeX;
 			}
 		}
 
@@ -482,7 +482,7 @@ void Atlas::buildShapeBands(
 		build.indirX.resize(INDIRECTION_SIZE);
 
 		for(uint32_t q = 0; q < INDIRECTION_SIZE; q++) {
-			const float frac = (q + 0.5f) / float(INDIRECTION_SIZE);
+			const slug_t frac = (cv(q) + 0.5_cv) / cv(INDIRECTION_SIZE);
 			const slug_t emX = minX + frac * rangeX;
 			uint32_t band = numBandsX - 1;
 

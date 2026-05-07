@@ -432,9 +432,12 @@ public:
 	//
 	// @p width - full stroke width in authoring-space units (half applied each side).
 	//
-	// Subdivision is driven by the same tolerance as _decomposer: lower tolerance
-	// = more splits = more uniform width around curves. The default (TOLERANCE_EXACT)
-	// emits one offset quad per centerline quad with no subdivision.
+	// Three-pass approach:
+	//   1. Flatten all centerline curves to a polyline (same De Casteljau tolerance).
+	//   2. Compute per-point miter-corrected normals so adjacent segments share an
+	//      exact wall intersection — no gaps or overlaps at joins. Miter limit 4x
+	//      (SVG default) falls back to a bevel at very sharp angles.
+	//   3. Build lwall/rwall from per-point normals, then close the outline.
 	//
 	// Returns false if the pending path is empty.
 	bool stroke(slug_t width) {
@@ -445,37 +448,101 @@ public:
 		const slug_t h   = width * 0.5_cv;
 		const slug_t tol = _decomposer.tolerance;
 
-		Atlas::Curves lwall, rwall;
+		// Pass 1: flatten all centerline curves to a polyline.
+		std::vector<std::pair<slug_t, slug_t>> pts;
+		pts.push_back({centerline.front().x1, centerline.front().y1});
 
 		for(const auto& c : centerline)
-			_strokeSubdivide(c.x1, c.y1, c.x2, c.y2, c.x3, c.y3, h, tol, 0, lwall, rwall);
+			_flattenCurve(c.x1, c.y1, c.x2, c.y2, c.x3, c.y3, tol, 0, pts);
+
+		if(pts.size() < 2) return false;
+
+		const size_t numSegs = pts.size() - 1;
+
+		// Pass 2a: per-segment perpendicular normals (rotated 90 CCW from direction).
+		std::vector<std::pair<slug_t, slug_t>> segN(numSegs);
+
+		for(size_t i = 0; i < numSegs; ++i) {
+			const slug_t dx  = pts[i+1].first  - pts[i].first;
+			const slug_t dy  = pts[i+1].second - pts[i].second;
+			const slug_t len = std::sqrt(dx * dx + dy * dy);
+
+			segN[i] = len > 1e-9_cv ? std::pair{-dy / len, dx / len} : std::pair{0.0_cv, 1.0_cv};
+		}
+
+		// Pass 2b: per-point miter-corrected normals.
+		static constexpr slug_t MITER_LIMIT = 4.0_cv;
+
+		struct PN { slug_t nx, ny; };
+		std::vector<PN> pn(pts.size());
+
+		for(size_t i = 0; i < pts.size(); ++i) {
+			if(i == 0) {
+				pn[i] = {segN[0].first, segN[0].second};
+			} else if(i == numSegs) {
+				pn[i] = {segN[numSegs-1].first, segN[numSegs-1].second};
+			} else {
+				slug_t nx = segN[i-1].first  + segN[i].first;
+				slug_t ny = segN[i-1].second + segN[i].second;
+				const slug_t len = std::sqrt(nx * nx + ny * ny);
+
+				if(len > 1e-6_cv) {
+					nx /= len; ny /= len;
+					const slug_t d = nx * segN[i].first + ny * segN[i].second;
+
+					if(d > 1e-3_cv) {
+						const slug_t m = 1.0_cv / d;
+						if(m <= MITER_LIMIT) { nx *= m; ny *= m; }
+					}
+				} else {
+					// Nearly opposite directions (hairpin): use incoming segment normal.
+					nx = segN[i].first;
+					ny = segN[i].second;
+				}
+
+				pn[i] = {nx, ny};
+			}
+		}
+
+		// Pass 3: build lwall / rwall using per-point normals.
+		Atlas::Curves lwall, rwall;
+
+		for(size_t i = 0; i < numSegs; ++i) {
+			const slug_t p0x = pts[i].first,   p0y = pts[i].second;
+			const slug_t p2x = pts[i+1].first, p2y = pts[i+1].second;
+
+			const slug_t l0x = p0x + h * pn[i].nx,   l0y = p0y + h * pn[i].ny;
+			const slug_t l2x = p2x + h * pn[i+1].nx, l2y = p2y + h * pn[i+1].ny;
+			const slug_t r0x = p0x - h * pn[i].nx,   r0y = p0y - h * pn[i].ny;
+			const slug_t r2x = p2x - h * pn[i+1].nx, r2y = p2y - h * pn[i+1].ny;
+
+			lwall.push_back({l0x, l0y, (l0x+l2x)*0.5_cv, (l0y+l2y)*0.5_cv, l2x, l2y});
+			rwall.push_back({r0x, r0y, (r0x+r2x)*0.5_cv, (r0y+r2y)*0.5_cv, r2x, r2y});
+		}
 
 		if(lwall.empty()) return false;
 
-		// Rebuild _pendingCurves as the closed stroke outline (CCW winding, Y-up):
-		//   R wall forward -> end cap -> L wall reversed -> start cap (implicit close)
+		// Reassemble closed outline (CCW winding, Y-up):
+		//   R wall forward -> end cap -> L wall reversed -> start cap
 		_pendingCurves.clear();
 
 		for(const auto& r : rwall)
 			_pendingCurves.push_back(r);
 
-		// End cap: straight line from R-wall end to L-wall end
 		{
-			const slug_t ax=rwall.back().x3, ay=rwall.back().y3;
-			const slug_t bx=lwall.back().x3, by=lwall.back().y3;
+			const slug_t ax = rwall.back().x3,  ay = rwall.back().y3;
+			const slug_t bx = lwall.back().x3,  by = lwall.back().y3;
 			_pendingCurves.push_back({ax, ay, (ax+bx)*0.5_cv, (ay+by)*0.5_cv, bx, by});
 		}
 
-		// L wall reversed: swap start/end of each quad, keep control point
 		for(size_t i = lwall.size(); i-- > 0;) {
 			const auto& l = lwall[i];
 			_pendingCurves.push_back({l.x3, l.y3, l.x2, l.y2, l.x1, l.y1});
 		}
 
-		// Start cap: straight line from L-wall start back to R-wall start
 		{
-			const slug_t ax=lwall.front().x1, ay=lwall.front().y1;
-			const slug_t bx=rwall.front().x1, by=rwall.front().y1;
+			const slug_t ax = lwall.front().x1, ay = lwall.front().y1;
+			const slug_t bx = rwall.front().x1, by = rwall.front().y1;
 			_pendingCurves.push_back({ax, ay, (ax+bx)*0.5_cv, (ay+by)*0.5_cv, bx, by});
 		}
 
@@ -535,53 +602,33 @@ private:
 	// Internal helpers
 	// -------------------------------------------------------------------------
 
-	// Recursively subdivide one quadratic Bézier centerline segment and offset it
-	// by ±h to produce left-wall (+h) and right-wall (-h) curve segments. Appends
-	// to lwall/rwall in traversal order (start -> end).
+	// Flatten a quadratic Bézier to a polyline, appending only the endpoint of each
+	// flat piece. The caller must push the path start before the first call, and
+	// must NOT push it for subsequent curves in a chain (they share the prior endpoint).
 	//
-	// Flatness test: squared distance from P1 to chord P0->P2 vs tol². Matches
-	// the CurveDecomposer convention so the same tolerance value drives both cubic
-	// decomposition and stroke subdivision quality.
-	//
-	// De Casteljau split at t=0.5 keeps the on-curve midpoint exact.
-	static void _strokeSubdivide(
+	// Same flatness test and De Casteljau split convention as the former _strokeSubdivide.
+	static void _flattenCurve(
 		slug_t p0x, slug_t p0y,
 		slug_t p1x, slug_t p1y,
 		slug_t p2x, slug_t p2y,
-		slug_t h, slug_t tol, int depth,
-		Atlas::Curves& lwall, Atlas::Curves& rwall
+		slug_t tol, int depth,
+		std::vector<std::pair<slug_t, slug_t>>& pts
 	) {
-		const slug_t dx = p2x-p0x, dy = p2y-p0y;
-		const slug_t lenSq = dx*dx + dy*dy;
-		const slug_t cross = (p1x-p0x)*dy - (p1y-p0y)*dx;
-		const bool flat = lenSq < 1e-12_cv || (cross*cross) <= (tol*tol*lenSq);
+		const slug_t dx    = p2x - p0x, dy = p2y - p0y;
+		const slug_t lenSq = dx * dx + dy * dy;
+		const slug_t cross = (p1x - p0x) * dy - (p1y - p0y) * dx;
 
-		if(flat || depth >= 8) {
-			auto nor = [](slug_t tx, slug_t ty) -> std::pair<slug_t, slug_t> {
-				const slug_t len = std::sqrt(tx*tx + ty*ty);
-				return len > 1e-9_cv ? std::pair{tx/len, ty/len} : std::pair{1.0_cv, 0.0_cv};
-			};
-
-			const auto [t0x, t0y] = nor(p1x-p0x, p1y-p0y);
-			const auto [t1x, t1y] = nor(p2x-p0x, p2y-p0y);  // chord approx at P1
-			const auto [t2x, t2y] = nor(p2x-p1x, p2y-p1y);
-
-			const slug_t n0x=-t0y, n0y=t0x;
-			const slug_t n1x=-t1y, n1y=t1x;
-			const slug_t n2x=-t2y, n2y=t2x;
-
-			lwall.push_back({p0x+h*n0x, p0y+h*n0y, p1x+h*n1x, p1y+h*n1y, p2x+h*n2x, p2y+h*n2y});
-			rwall.push_back({p0x-h*n0x, p0y-h*n0y, p1x-h*n1x, p1y-h*n1y, p2x-h*n2x, p2y-h*n2y});
+		if(lenSq < 1e-12_cv || (cross * cross) <= (tol * tol * lenSq) || depth >= 8) {
+			pts.push_back({p2x, p2y});
 			return;
 		}
 
-		// De Casteljau split at t=0.5
-		const slug_t m01x=(p0x+p1x)*0.5_cv, m01y=(p0y+p1y)*0.5_cv;
-		const slug_t m12x=(p1x+p2x)*0.5_cv, m12y=(p1y+p2y)*0.5_cv;
-		const slug_t mx  =(m01x+m12x)*0.5_cv, my=(m01y+m12y)*0.5_cv;
+		const slug_t m01x = (p0x+p1x)*0.5_cv, m01y = (p0y+p1y)*0.5_cv;
+		const slug_t m12x = (p1x+p2x)*0.5_cv, m12y = (p1y+p2y)*0.5_cv;
+		const slug_t mx   = (m01x+m12x)*0.5_cv, my  = (m01y+m12y)*0.5_cv;
 
-		_strokeSubdivide(p0x, p0y, m01x, m01y, mx,  my,  h, tol, depth+1, lwall, rwall);
-		_strokeSubdivide(mx,  my,  m12x, m12y, p2x, p2y, h, tol, depth+1, lwall, rwall);
+		_flattenCurve(p0x, p0y, m01x, m01y, mx,  my,  tol, depth+1, pts);
+		_flattenCurve(mx,  my,  m12x, m12y, p2x, p2y, tol, depth+1, pts);
 	}
 
 	// Decompose a circular arc into cubic Bezier segments and emit via bezierTo().
