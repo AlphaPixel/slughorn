@@ -100,6 +100,23 @@ size_t loadGlyphRange(
 	const Atlas::SplitStrategy& strategy = {}
 );
 
+// Convenience: load an explicit list of Unicode codepoints. Returns the number of glyphs
+// successfully added.
+size_t loadGlyphs(
+	FT_Face face,
+	const std::vector<uint32_t>& codepoints,
+	Atlas& atlas,
+	const Atlas::SplitStrategy& strategy = {}
+);
+
+// Convenience: iterate the face's full charmap and load every mapped codepoint. Returns the number
+// of glyphs successfully added.
+size_t loadAllGlyphs(
+	FT_Face face,
+	Atlas& atlas,
+	const Atlas::SplitStrategy& strategy = {}
+);
+
 // =============================================================================
 // COLR emoji loading
 // =============================================================================
@@ -144,6 +161,23 @@ size_t loadColorGlyphs(
 // FT_Library / FT_Face internally. Returns false if the font cannot be opened.
 bool loadAsciiFont(const std::string& fontPath, Atlas& atlas,
 	const Atlas::SplitStrategy& strategy = {});
+
+// Load an explicit list of codepoints from @p fontPath into @p atlas. Creates and destroys an
+// FT_Library / FT_Face internally. Returns the number of glyphs successfully added.
+size_t loadFontGlyphs(
+	const std::string& fontPath,
+	const std::vector<uint32_t>& codepoints,
+	Atlas& atlas,
+	const Atlas::SplitStrategy& strategy = {}
+);
+
+// Load every mapped codepoint from @p fontPath into @p atlas. Creates and destroys an
+// FT_Library / FT_Face internally. Returns the number of glyphs successfully added.
+size_t loadAllFontGlyphs(
+	const std::string& fontPath,
+	Atlas& atlas,
+	const Atlas::SplitStrategy& strategy = {}
+);
 
 // Load COLR emoji from @p fontPath for the given codepoints. Creates and destroys an FT_Library /
 // FT_Face internally. Returns false if the font cannot be opened.
@@ -762,6 +796,39 @@ size_t loadGlyphRange(
 	return count;
 }
 
+size_t loadGlyphs(
+	FT_Face face,
+	const std::vector<uint32_t>& codepoints,
+	Atlas& atlas,
+	const Atlas::SplitStrategy& strategy
+) {
+	size_t count = 0;
+
+	for(uint32_t cp : codepoints) {
+		if(loadGlyph(face, cp, atlas, strategy)) count++;
+	}
+
+	return count;
+}
+
+size_t loadAllGlyphs(
+	FT_Face face,
+	Atlas& atlas,
+	const Atlas::SplitStrategy& strategy
+) {
+	size_t count = 0;
+	FT_UInt glyphIndex = 0;
+	FT_ULong charCode = FT_Get_First_Char(face, &glyphIndex);
+
+	while(glyphIndex != 0) {
+		if(loadGlyph(face, static_cast<uint32_t>(charCode), atlas, strategy)) count++;
+
+		charCode = FT_Get_Next_Char(face, charCode, &glyphIndex);
+	}
+
+	return count;
+}
+
 bool loadColorGlyph(
 	FT_Face face,
 	uint32_t codepoint,
@@ -874,6 +941,69 @@ bool loadAsciiFont(const std::string& fontPath, Atlas& atlas,
 	FT_Done_FreeType(library);
 
 	return true;
+}
+
+size_t loadFontGlyphs(
+	const std::string& fontPath,
+	const std::vector<uint32_t>& codepoints,
+	Atlas& atlas,
+	const Atlas::SplitStrategy& strategy
+) {
+	FT_Library library;
+
+	if(FT_Init_FreeType(&library)) {
+		log(LOG_WARN, "loadFontGlyphs: failed to initialise FreeType");
+
+		return 0;
+	}
+
+	FT_Face face;
+
+	if(FT_New_Face(library, fontPath.c_str(), 0, &face)) {
+		log(LOG_WARN, "loadFontGlyphs: failed to open font: ", fontPath);
+
+		FT_Done_FreeType(library);
+
+		return 0;
+	}
+
+	const size_t count = loadGlyphs(face, codepoints, atlas, strategy);
+
+	FT_Done_Face(face);
+	FT_Done_FreeType(library);
+
+	return count;
+}
+
+size_t loadAllFontGlyphs(
+	const std::string& fontPath,
+	Atlas& atlas,
+	const Atlas::SplitStrategy& strategy
+) {
+	FT_Library library;
+
+	if(FT_Init_FreeType(&library)) {
+		log(LOG_WARN, "loadAllFontGlyphs: failed to initialise FreeType");
+
+		return 0;
+	}
+
+	FT_Face face;
+
+	if(FT_New_Face(library, fontPath.c_str(), 0, &face)) {
+		log(LOG_WARN, "loadAllFontGlyphs: failed to open font: ", fontPath);
+
+		FT_Done_FreeType(library);
+
+		return 0;
+	}
+
+	const size_t count = loadAllGlyphs(face, atlas, strategy);
+
+	FT_Done_Face(face);
+	FT_Done_FreeType(library);
+
+	return count;
 }
 
 bool loadEmojiFont(

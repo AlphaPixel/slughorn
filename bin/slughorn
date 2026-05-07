@@ -88,6 +88,16 @@ def load_atlas(path: str):
 		fail(f"failed to load atlas from {path}: {exc}")
 
 
+def ensure_serial_support() -> None:
+	if not hasattr(slughorn, "write"):
+		fail("slughorn.write() is not available; build with SERIAL enabled", 2)
+
+
+def ensure_freetype_support() -> None:
+	if not hasattr(slughorn, "freetype"):
+		fail("slughorn.freetype is not available; build with FREETYPE enabled", 2)
+
+
 def clamp(x: float, lo: float, hi: float) -> float:
 	return lo if x < lo else hi if x > hi else x
 
@@ -272,6 +282,75 @@ def default_output_path(raw_key: str, suffix: str) -> str:
 	return str(Path(safe).with_suffix(suffix))
 
 
+def parse_codepoint(raw: str) -> int:
+	text = raw.strip()
+	if not text:
+		raise ValueError("empty codepoint")
+
+	upper = text.upper()
+	if upper.startswith("U+"):
+		return int(upper[2:], 16)
+
+	return int(text, 0)
+
+
+def parse_codepoint_range(raw: str) -> tuple[int, int]:
+	text = raw.strip()
+	if "-" not in text:
+		raise ValueError(f"range must use START-END syntax: {raw!r}")
+
+	start_text, end_text = text.split("-", 1)
+	start = validate_codepoint(parse_codepoint(start_text))
+	end = validate_codepoint(parse_codepoint(end_text))
+
+	if end < start:
+		raise ValueError(f"range end precedes start: {raw!r}")
+
+	return start, end
+
+
+def validate_codepoint(cp: int) -> int:
+	if not (0 <= cp <= 0x10FFFF):
+		raise ValueError(f"codepoint out of Unicode range: U+{cp:X}")
+	return cp
+
+
+def dedupe_codepoints(codepoints: list[int]) -> list[int]:
+	seen: set[int] = set()
+	ordered: list[int] = []
+
+	for cp in codepoints:
+		cp = validate_codepoint(cp)
+		if cp in seen:
+			continue
+		seen.add(cp)
+		ordered.append(cp)
+
+	return ordered
+
+
+def build_font_codepoint_selection(args) -> tuple[str, list[int] | None]:
+	selections = sum(bool(x) for x in (args.ascii, args.range, args.chars))
+	if selections > 1:
+		fail("choose at most one of --ascii, --range, or --chars", 2)
+
+	if args.ascii:
+		return "ascii", list(range(32, 127))
+
+	if args.range is not None:
+		try:
+			start, end = parse_codepoint_range(args.range)
+		except ValueError as exc:
+			fail(str(exc), 2)
+
+		return "range", list(range(start, end + 1))
+
+	if args.chars is not None:
+		return "chars", dedupe_codepoints([ord(ch) for ch in args.chars])
+
+	return "all", None
+
+
 def get_shape_or_fail(atlas, key):
 	shape = atlas.get_shape(key)
 	if shape is None:
@@ -415,6 +494,52 @@ def command_shell(args) -> int:
 	return 0
 
 
+def command_font(args) -> int:
+	ensure_serial_support()
+	ensure_freetype_support()
+
+	if not hasattr(slughorn.freetype, "load_font_glyphs") or not hasattr(slughorn.freetype, "load_all_font_glyphs"):
+		fail("slughorn.freetype is missing glyph-loading helpers; rebuild the extension", 2)
+
+	mode, codepoints = build_font_codepoint_selection(args)
+	atlas = slughorn.Atlas()
+
+	with timer(args.time, "load"):
+		try:
+			if mode == "all":
+				loaded = slughorn.freetype.load_all_font_glyphs(args.font, atlas)
+			else:
+				if codepoints is None:
+					fail("internal error: missing explicit codepoint selection", 2)
+				loaded = slughorn.freetype.load_font_glyphs(args.font, codepoints, atlas)
+		except Exception as exc:  # pragma: no cover
+			fail(f"failed to load font glyphs from {args.font}: {exc}")
+
+	if loaded == 0:
+		fail(f"no glyphs were loaded from {args.font}", 1)
+
+	with timer(args.time, "build"):
+		try:
+			atlas.build()
+		except Exception as exc:  # pragma: no cover
+			fail(f"failed to build atlas from {args.font}: {exc}")
+
+	with timer(args.time, "write"):
+		try:
+			slughorn.write(atlas, args.output)
+		except Exception as exc:  # pragma: no cover
+			fail(f"failed to write atlas to {args.output}: {exc}")
+
+	label = {
+		"ascii": "ASCII",
+		"range": f"range {args.range}",
+		"chars": f"{len(codepoints or [])} explicit chars",
+		"all": "full font charmap",
+	}[mode]
+	print(f"Packed {loaded} glyphs from {args.font} ({label}) -> {args.output}")
+	return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
 	parser = argparse.ArgumentParser(
 		prog="slughorn",
@@ -459,6 +584,15 @@ def build_parser() -> argparse.ArgumentParser:
 	shell.add_argument("key", nargs="?", help="Optional key to pre-decode.")
 	shell.add_argument("--plain", action="store_true", help="Force the stdlib REPL even if IPython is installed.")
 	shell.set_defaults(func=command_shell)
+
+	font = sub.add_parser("font", help="Pack font glyphs into a .slug or .slugb atlas.")
+	font.add_argument("font", help="Path to an input font file.")
+	font.add_argument("output", help="Output atlas path (.slug or .slugb).")
+	font.add_argument("--ascii", action="store_true", help="Pack printable ASCII only (U+0020-U+007E).")
+	font.add_argument("--range", help="Pack one inclusive Unicode range, e.g. U+0020-U+007E.")
+	font.add_argument("--chars", help="Pack the unique codepoints present in this literal string.")
+	font.add_argument("--time", action="store_true", help="Print timing for load/build/write stages.")
+	font.set_defaults(func=command_font)
 
 	return parser
 

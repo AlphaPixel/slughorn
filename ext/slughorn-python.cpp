@@ -1555,6 +1555,47 @@ PYBIND11_MODULE(slughorn, m) {
 		"Returns True on success, False if the font cannot be opened."
 	);
 
+	freetype.def("load_font_glyphs",
+		[](const std::string& fontPath,
+		   const std::vector<uint32_t>& codepoints,
+		   slughorn::Atlas& atlas,
+		   std::optional<slughorn::Atlas::SplitStrategy> strategy)
+		{
+			return slughorn::freetype::loadFontGlyphs(
+				fontPath, codepoints, atlas,
+				strategy ? *strategy : slughorn::Atlas::SplitStrategy{}
+			);
+		},
+		py::arg("font_path"),
+		py::arg("codepoints"),
+		py::arg("atlas"),
+		py::arg("strategy") = py::none(),
+		"Load an explicit list of Unicode codepoints from font_path into atlas.\n"
+		"Creates and destroys an FT_Library/FT_Face internally.\n"
+		"strategy: optional callable(curves) -> (splits_x, splits_y).\n"
+		"Pass None (default) to use the uniform fast path.\n"
+		"Returns the number of glyphs successfully added."
+	);
+
+	freetype.def("load_all_font_glyphs",
+		[](const std::string& fontPath, slughorn::Atlas& atlas,
+		   std::optional<slughorn::Atlas::SplitStrategy> strategy)
+		{
+			return slughorn::freetype::loadAllFontGlyphs(
+				fontPath, atlas,
+				strategy ? *strategy : slughorn::Atlas::SplitStrategy{}
+			);
+		},
+		py::arg("font_path"),
+		py::arg("atlas"),
+		py::arg("strategy") = py::none(),
+		"Load every mapped codepoint from font_path into atlas.\n"
+		"Creates and destroys an FT_Library/FT_Face internally.\n"
+		"strategy: optional callable(curves) -> (splits_x, splits_y).\n"
+		"Pass None (default) to use the uniform fast path.\n"
+		"Returns the number of glyphs successfully added."
+	);
+
 	freetype.def("load_emoji_font", [](
 		const std::string& fontPath,
 		const std::vector<uint32_t>& codepoints,
