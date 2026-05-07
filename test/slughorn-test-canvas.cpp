@@ -60,6 +60,32 @@ int main(int argc, char** argv) {
 	// Commit all three layers as one named composite shape
 	canvas.finalize(slughorn::Key::fromString("my_scene"));
 
+	// Stroke: S-curve (two connected quadratics, opposite curvature).
+	canvas.beginPath();
+	canvas.moveTo(0.2_cv, 0.85_cv);
+	canvas.quadTo(0.1_cv, 0.5_cv, 0.5_cv, 0.5_cv);
+	canvas.quadTo(0.9_cv, 0.5_cv, 0.8_cv, 0.15_cv);
+	canvas.stroke(0.12_cv);
+
+	// TODO: Phase 2 will see how far we get with this...
+	/* canvas.moveTo(0_cv, 0_cv);
+	canvas.lineTo(5_cv, 5_cv);
+	canvas.lineTo(10_cv, 0_cv);
+	canvas.lineTo(15_cv, 0_cv);
+	canvas.lineTo(20_cv, 10_cv);
+	canvas.lineTo(25_cv, 10_cv);
+	canvas.lineTo(30_cv, 15_cv);
+	canvas.lineTo(35_cv, 0_cv);
+	canvas.lineTo(40_cv, 5_cv);
+	canvas.lineTo(45_cv, 0_cv);
+	canvas.lineTo(50_cv, 0_cv);
+	canvas.stroke(2_cv); */
+
+	canvas.defineShape(slughorn::Key::fromString("stroke_test"), 1.0_cv);
+
+	// TODO: This is the corresponding Phase 2 test call.
+	// canvas.defineShape(slughorn::Key::fromString("stroke_test"), 1_cv / 50_cv);
+
 	atlas.build();
 
 	std::cerr << "PackingStats: " << atlas.getPackingStats() << std::endl;
