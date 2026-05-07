@@ -1,0 +1,473 @@
+#!/usr/bin/env python3
+
+import argparse
+import code
+import contextlib
+import importlib
+import sys
+import time
+from pathlib import Path
+
+from PIL import Image
+
+def import_compiled_slughorn():
+	repo_root = Path(__file__).resolve().parents[1]
+
+	def valid(mod) -> bool:
+		return hasattr(mod, "Key")
+
+	try:
+		mod = importlib.import_module("slughorn")
+		if valid(mod):
+			return mod
+	except ImportError:
+		pass
+
+	sys.modules.pop("slughorn", None)
+
+	pruned = []
+	for entry in sys.path:
+		if entry == "":
+			if Path.cwd().resolve() == repo_root:
+				continue
+		elif Path(entry).resolve() == repo_root:
+			continue
+
+		pruned.append(entry)
+
+	sys.path[:] = pruned
+
+	try:
+		mod = importlib.import_module("slughorn")
+	except ImportError as exc:
+		print(f"ERROR: failed to import compiled slughorn module: {exc}", file=sys.stderr)
+		sys.exit(1)
+
+	if not valid(mod):
+		print("ERROR: imported 'slughorn' is not the compiled extension module", file=sys.stderr)
+		sys.exit(1)
+
+	return mod
+
+
+slughorn = import_compiled_slughorn()
+
+
+def fail(message: str, code_: int=1) -> None:
+	print(f"ERROR: {message}", file=sys.stderr)
+	raise SystemExit(code_)
+
+
+def make_key(raw: str) -> slughorn.Key:
+	try:
+		return slughorn.Key(int(raw, 0))
+
+	except ValueError:
+		return slughorn.Key.from_string(raw)
+
+
+def format_key(key) -> str:
+	type_obj = key.type
+	type_name = type_obj.name if hasattr(type_obj, "name") else str(type_obj)
+
+	if type_name == "Codepoint":
+		cp = key.codepoint
+		label = repr(chr(cp)) if 32 <= cp <= 0x10FFFF else ""
+		return f"U+{cp:04X}" + (f" {label}" if label else "")
+
+	return key.name
+
+
+def load_atlas(path: str):
+	if not hasattr(slughorn, "read"):
+		fail("slughorn.read() is not available; build with SERIAL enabled", 2)
+
+	try:
+		return slughorn.read(path)
+	except Exception as exc:  # pragma: no cover
+		fail(f"failed to load atlas from {path}: {exc}")
+
+
+def clamp(x: float, lo: float, hi: float) -> float:
+	return lo if x < lo else hi if x > hi else x
+
+
+def compute_render_size(shape, size_hint: int=256) -> tuple[int, int]:
+	w = shape.width
+	h = shape.height
+
+	if w <= 0.0 or h <= 0.0:
+		raise ValueError(f"Invalid shape dimensions: width={w}, height={h}")
+
+	scale = size_hint / max(w, h)
+	out_w = max(1, int(round(w * scale)))
+	out_h = max(1, int(round(h * scale)))
+
+	return out_w, out_h
+
+
+class EmTransform:
+	def __init__(self, shape, width: int, height: int, margin: float=0.0):
+		ox, oy = shape.em_origin
+		sx, sy = shape.em_size
+
+		ox -= margin * sx
+		oy -= margin * sy
+		sx *= (1.0 + 2.0 * margin)
+		sy *= (1.0 + 2.0 * margin)
+
+		self.ox = ox
+		self.oy = oy
+		self.sx = sx
+		self.sy = sy
+		self.width = width
+		self.height = height
+
+	def em_to_px(self, ex: float, ey: float) -> tuple[int, int]:
+		u = (ex - self.ox) / self.sx
+		v = (ey - self.oy) / self.sy
+
+		return int(u * self.width), int(v * self.height)
+
+
+@contextlib.contextmanager
+def timer(enabled: bool, label: str):
+	start = time.perf_counter()
+	yield
+
+	if enabled:
+		print(f"{label}: {time.perf_counter() - start:.3f}s")
+
+
+def save_image(grid, filename: str, flip_y: bool=False) -> str:
+	if flip_y:
+		grid = grid[::-1]
+
+	h, w = grid.shape
+	img = Image.new("L", (w, h))
+	px = img.load()
+
+	for y in range(h):
+		for x in range(w):
+			px[x, y] = int(clamp(float(grid[y, x]), 0.0, 1.0) * 255)
+
+	img.save(filename)
+
+	return f"Saved {w}x{h} image -> {filename}"
+
+
+def save_curves_svg(
+	decoded,
+	filename: str,
+	scale: int=1024,
+	margin: float=0.0,
+	flip_y: bool=True,
+) -> str:
+	shape = decoded.shape
+	curves = decoded.curves
+	indir_x = bytes(decoded.indir_x)
+	indir_y = bytes(decoded.indir_y)
+	indir_size = len(indir_x)
+
+	w, h = compute_render_size(shape, scale)
+	xf = EmTransform(shape, w, h, margin)
+
+	ox, oy = shape.em_origin
+	sx, sy = shape.em_size
+
+	def em_to_px(ex: float, ey: float) -> tuple[int, int]:
+		px, py = xf.em_to_px(ex, ey)
+
+		if flip_y:
+			py = h - 1 - py
+
+		return px, py
+
+	elements: list[str] = []
+
+	def line(x1, y1, x2, y2, color, width=1):
+		elements.append(
+			f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" '
+			f'stroke="{color}" stroke-width="{width}" />'
+		)
+
+	def circle(cx, cy, r, fill=None, stroke=None):
+		parts = [f'cx="{cx}"', f'cy="{cy}"', f'r="{r}"']
+
+		if fill:
+			parts.append(f'fill="{fill}"')
+		else:
+			parts.append('fill="none"')
+
+		if stroke:
+			parts.append(f'stroke="{stroke}"')
+
+		elements.append(f'<circle {" ".join(parts)} />')
+
+	def quad_path(p1, p2, p3, color):
+		x1, y1 = em_to_px(*p1)
+		x2, y2 = em_to_px(*p2)
+		x3, y3 = em_to_px(*p3)
+
+		elements.append(
+			f'<path d="M {x1},{y1} Q {x2},{y2} {x3},{y3}" '
+			f'stroke="{color}" fill="none" stroke-width="1" />'
+		)
+
+	for c in curves:
+		p1 = (c.x1, c.y1)
+		p2 = (c.x2, c.y2)
+		p3 = (c.x3, c.y3)
+
+		quad_path(p1, p2, p3, "#CCCCCC")
+
+		px1, py1 = em_to_px(*p1)
+		px2, py2 = em_to_px(*p2)
+		px3, py3 = em_to_px(*p3)
+
+		line(px1, py1, px2, py2, "#5050B4")
+		line(px2, py2, px3, py3, "#5050B4")
+		circle(px1, py1, 2, fill="#50DC50")
+		circle(px3, py3, 2, fill="#50DC50")
+		circle(px2, py2, 3, stroke="#6464FF")
+
+	ys = [
+		(q + 1 - shape.band_offset_y) / shape.band_scale_y
+		for q in range(indir_size - 1)
+		if indir_y[q] != indir_y[q + 1]
+	]
+	xs = [
+		(q + 1 - shape.band_offset_x) / shape.band_scale_x
+		for q in range(indir_size - 1)
+		if indir_x[q] != indir_x[q + 1]
+	]
+
+	for y in ys:
+		x0, y0 = em_to_px(ox, y)
+		x1, y1 = em_to_px(ox + sx, y)
+		line(x0, y0, x1, y1, "#FF0000", width=1)
+
+	for x in xs:
+		x0, y0 = em_to_px(x, oy)
+		x1, y1 = em_to_px(x, oy + sy)
+		line(x0, y0, x1, y1, "#FF0000", width=1)
+
+	svg = " ".join((
+		'<svg xmlns="http://www.w3.org/2000/svg"',
+		f'width="{w}" height="{h}"',
+		f'viewBox="0 0 {w} {h}">\n'
+	))
+	svg += '\t<rect width="100%" height="100%" fill="#1E1E1E"/>\n'
+	svg += '\n'.join(f"\t{e}" for e in elements)
+	svg += "\n</svg>"
+
+	with open(filename, "w", encoding="utf-8") as f:
+		f.write(svg)
+
+	return f"Saved SVG debug -> {filename}"
+
+
+def default_output_path(raw_key: str, suffix: str) -> str:
+	safe = raw_key.replace("/", "_")
+	return str(Path(safe).with_suffix(suffix))
+
+
+def get_shape_or_fail(atlas, key):
+	shape = atlas.get_shape(key)
+	if shape is None:
+		available = ", ".join(format_key(k) for k in atlas.get_shapes().keys())
+		fail(f"key not found: {format_key(key)}\nAvailable shapes: {available or '(none)'}")
+	return shape
+
+
+def decode_or_fail(atlas, key):
+	get_shape_or_fail(atlas, key)
+	return atlas.decode(key)
+
+
+def command_info(args) -> int:
+	atlas = load_atlas(args.atlas)
+	shapes = atlas.get_shapes()
+	composites = atlas.get_composite_shapes()
+	curve_tex = atlas.curve_texture
+	band_tex = atlas.band_texture
+
+	print(f"Atlas: {args.atlas}")
+	print(f"  shapes:      {len(shapes)}")
+	print(f"  composites:  {len(composites)}")
+	print(f"  curve tex:   {curve_tex.width}x{curve_tex.height} {curve_tex.format}")
+	print(f"  band tex:    {band_tex.width}x{band_tex.height} {band_tex.format}")
+	print(f"  packing:     {atlas.packing_stats}")
+
+	if args.key is not None:
+		key = make_key(args.key)
+		shape = atlas.get_shape(key)
+		composite = atlas.get_composite_shape(key)
+
+		print("")
+		print(f"Key: {format_key(key)}")
+
+		if shape is not None:
+			print(f"  shape:       {shape}")
+			print(f"  em_origin:   {shape.em_origin}")
+			print(f"  em_size:     {shape.em_size}")
+
+		if composite is not None:
+			print(f"  composite:   layers={len(composite.layers)} advance={composite.advance}")
+
+		if shape is None and composite is None:
+			fail(f"key not found: {format_key(key)}")
+
+	return 0
+
+
+def command_list(args) -> int:
+	atlas = load_atlas(args.atlas)
+	shapes = atlas.get_shapes()
+	composites = atlas.get_composite_shapes()
+	show_shapes = args.shapes or not args.composites
+	show_composites = args.composites or not args.shapes
+
+	if show_shapes:
+		print("Shapes:")
+		for key in sorted(shapes.keys(), key=format_key):
+			print(f"  {format_key(key)}")
+
+	if show_shapes and show_composites:
+		print("")
+
+	if show_composites:
+		print("Composites:")
+		for key in sorted(composites.keys(), key=format_key):
+			print(f"  {format_key(key)}")
+
+	return 0
+
+
+def command_render(args) -> int:
+	atlas = load_atlas(args.atlas)
+	key = make_key(args.key)
+	decoded = decode_or_fail(atlas, key)
+	output = args.output or default_output_path(args.key, ".png")
+
+	with timer(args.time, "render"):
+		grid = decoded.render_grid(size=args.size, margin=args.margin, banded=not args.reference)
+
+	with timer(args.time, "write"):
+		message = save_image(grid, output, flip_y=args.flip_y)
+
+	print(message)
+	return 0
+
+
+def command_svg(args) -> int:
+	atlas = load_atlas(args.atlas)
+	key = make_key(args.key)
+	decoded = decode_or_fail(atlas, key)
+	output = args.output or default_output_path(args.key, ".svg")
+
+	with timer(args.time, "write"):
+		message = save_curves_svg(
+			decoded,
+			output,
+			scale=args.size,
+			margin=args.margin,
+			flip_y=not args.no_flip_y,
+		)
+
+	print(message)
+	return 0
+
+
+def command_shell(args) -> int:
+	atlas = load_atlas(args.atlas)
+	ns = {
+		"slughorn": slughorn,
+		"atlas": atlas,
+		"path": args.atlas,
+		"make_key": make_key,
+	}
+
+	if args.key is not None:
+		key = make_key(args.key)
+		ns["key"] = key
+		ns["shape"] = atlas.get_shape(key)
+		if ns["shape"] is not None:
+			ns["decoded"] = atlas.decode(key)
+
+	banner = "\n".join((
+		f"slughorn shell: {args.atlas}",
+		"Available names: slughorn, atlas, path, make_key"
+		+ (", key, shape, decoded" if args.key is not None and ns.get("shape") is not None else ""),
+	))
+
+	if args.plain:
+		code.interact(banner=banner, local=ns)
+		return 0
+
+	try:
+		from IPython import start_ipython
+	except ImportError:
+		code.interact(banner=banner + "\n(IPython not installed; using stdlib REPL)", local=ns)
+		return 0
+
+	start_ipython(argv=[], user_ns=ns)
+	return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+	parser = argparse.ArgumentParser(
+		prog="slughorn",
+		description="CLI utility for inspecting and exporting slughorn atlas files.",
+	)
+	sub = parser.add_subparsers(dest="command", required=True)
+
+	info = sub.add_parser("info", help="Show atlas summary, or details for one key.")
+	info.add_argument("atlas", help="Path to a .slug or .slugb atlas file.")
+	info.add_argument("key", nargs="?", help="Optional shape/composite key.")
+	info.set_defaults(func=command_info)
+
+	list_cmd = sub.add_parser("list", help="List keys stored in an atlas.")
+	list_cmd.add_argument("atlas", help="Path to a .slug or .slugb atlas file.")
+	list_cmd.add_argument("--shapes", action="store_true", help="Show only shape keys.")
+	list_cmd.add_argument("--composites", action="store_true", help="Show only composite keys.")
+	list_cmd.set_defaults(func=command_list)
+
+	render = sub.add_parser("render", help="Render a shape to grayscale PNG.")
+	render.add_argument("atlas", help="Path to a .slug or .slugb atlas file.")
+	render.add_argument("key", help="Shape key to render.")
+	render.add_argument("output", nargs="?", help="Output PNG path. Default: <key>.png")
+	render.add_argument("--size", type=int, default=256, help="Maximum output dimension.")
+	render.add_argument("--margin", type=float, default=0.0, help="Margin fraction around the shape.")
+	render.add_argument("--reference", action="store_true", help="Use the brute-force reference path instead of the banded path.")
+	render.add_argument("--flip-y", action="store_true", help="Flip the output image vertically before saving.")
+	render.add_argument("--time", action="store_true", help="Print timing for render/write stages.")
+	render.set_defaults(func=command_render)
+
+	svg = sub.add_parser("svg", help="Export decoded curves and band boundaries as SVG.")
+	svg.add_argument("atlas", help="Path to a .slug or .slugb atlas file.")
+	svg.add_argument("key", help="Shape key to export.")
+	svg.add_argument("output", nargs="?", help="Output SVG path. Default: <key>.svg")
+	svg.add_argument("--size", type=int, default=1024, help="Maximum output dimension.")
+	svg.add_argument("--margin", type=float, default=0.0, help="Margin fraction around the shape.")
+	svg.add_argument("--no-flip-y", action="store_true", help="Keep the authored Y direction instead of SVG-style flipped output.")
+	svg.add_argument("--time", action="store_true", help="Print timing for write stage.")
+	svg.set_defaults(func=command_svg)
+
+	shell = sub.add_parser("shell", help="Open an interactive shell with an atlas loaded.")
+	shell.add_argument("atlas", help="Path to a .slug or .slugb atlas file.")
+	shell.add_argument("key", nargs="?", help="Optional key to pre-decode.")
+	shell.add_argument("--plain", action="store_true", help="Force the stdlib REPL even if IPython is installed.")
+	shell.set_defaults(func=command_shell)
+
+	return parser
+
+
+def main(argv: list[str] | None=None) -> int:
+	parser = build_parser()
+	args = parser.parse_args(argv)
+	return args.func(args)
+
+
+if __name__ == "__main__":
+	raise SystemExit(main())

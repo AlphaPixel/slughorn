@@ -62,7 +62,7 @@ int main(int argc, char** argv) {
 
 	atlas.build();
 
-	// std::cerr << "PackingStats: " << atlas.getPackingStats() << std::endl;
+	std::cerr << "PackingStats: " << atlas.getPackingStats() << std::endl;
 
 	slughorn::serial::writeJSON(atlas, std::cout);
 
