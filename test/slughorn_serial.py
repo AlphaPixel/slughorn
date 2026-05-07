@@ -4,18 +4,11 @@
 # Pure-Python reader/writer for the slughorn .slug (JSON) and .slugb (binary)
 # atlas serialization formats.
 #
-# No compiled slughorn module required for reading — the duck-typed
-# SlugAtlasData class is accepted anywhere a slughorn.Atlas is expected,
-# as long as the consumer only calls:
-#   .get_shape(key)       → Shape-like object or None
-#   .get_composite(key)   → CompositeShape-like object or None
-#   .curve_texture        → object with .width, .height, .bytes (memoryview/bytes)
-#   .band_texture         → object with .width, .height, .bytes (memoryview/bytes)
+# No compiled slughorn module required for reading or writing serialized atlas
+# data. This file reconstructs a lightweight duck-typed atlas representation
+# for .slug / .slugb round-tripping and inspection.
 #
-# That covers AtlasView in slughorn_render.py and all the diagnostic tooling.
-#
-# Writing requires a real slughorn.Atlas (needs .getShapes() etc. from the
-# C++ bindings) OR a SlugAtlasData instance (round-trips cleanly).
+# Writing also accepts a real slughorn.Atlas from the C++ bindings.
 #
 # Formats
 # -------
