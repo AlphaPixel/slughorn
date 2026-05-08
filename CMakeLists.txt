@@ -181,6 +181,33 @@ if(SLUGHORN_BUILD_TESTS)
 		target_link_libraries(slughorn-test-canvas PRIVATE slughorn)
 		add_test(NAME canvas COMMAND slughorn-test-canvas)
 		message(STATUS "slughorn tests: serial found, building slughorn-test-canvas")
+
+		# Convenience targets: regenerate canvas.slug when the binary changes,
+		# then inspect it via the CLI without needing to type paths manually.
+		#
+		#   make canvas-list   — list all shape + composite keys
+		#   make canvas-info   — atlas summary (dimensions, packing stats)
+		#
+		set(_CANVAS_SLUG "${CMAKE_CURRENT_BINARY_DIR}/canvas.slug")
+
+		add_custom_command(
+			OUTPUT  ${_CANVAS_SLUG}
+			COMMAND $<TARGET_FILE:slughorn-test-canvas> ${_CANVAS_SLUG}
+			DEPENDS slughorn-test-canvas
+			COMMENT "Generating canvas.slug"
+		)
+
+		add_custom_target(canvas-list
+			COMMAND ${CMAKE_SOURCE_DIR}/bin/slughorn list ${_CANVAS_SLUG}
+			DEPENDS ${_CANVAS_SLUG}
+			USES_TERMINAL
+		)
+
+		add_custom_target(canvas-info
+			COMMAND ${CMAKE_SOURCE_DIR}/bin/slughorn info ${_CANVAS_SLUG}
+			DEPENDS ${_CANVAS_SLUG}
+			USES_TERMINAL
+		)
 	else()
 		message(STATUS "slughorn tests: SLUGHORN_SERIAL=OFF, skipping slughorn-test-canvas")
 	endif()

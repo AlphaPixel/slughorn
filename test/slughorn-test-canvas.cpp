@@ -1,4 +1,54 @@
 //vimrun! ./slughorn-test-canvas
+//
+// Canvas API demonstration: all commit patterns.
+//
+// There are three path-commit verbs:
+//
+// fill(color, scale, key?) -- commit as colored Layer
+// stroke(width, color, scale, key?) -- expand + commit as colored Layer
+// defineShape(key, scale) -- commit as geometry only (no Layer, no color)
+//
+// And one composite-commit verb:
+//
+// finalize() -- return in-progress CompositeShape, reset state
+// finalize(key) -- register CompositeShape in Atlas + reset
+//
+// strokePath(width) is the in-place path transformer for the rare case
+// where you need the raw outline before deciding how to commit it.
+//
+// ┌─────────────────────────┬─────────────────────────────────┬──────────────────────────────┐
+// │           Key           │              Type               │           Pattern            │
+// ├─────────────────────────┼─────────────────────────────────┼──────────────────────────────┤
+// │ s_0                     │ shape (auto-key)                │ 1 — fill auto-key            │
+// ├─────────────────────────┼─────────────────────────────────┼──────────────────────────────┤
+// │ tri_composite           │ composite [s_0]                 │ 1                            │
+// ├─────────────────────────┼─────────────────────────────────┼──────────────────────────────┤
+// │ circle_shape            │ shape (named)                   │ 2 — fill named               │
+// ├─────────────────────────┼─────────────────────────────────┼──────────────────────────────┤
+// │ circle_composite        │ composite [circle_shape]        │ 2                            │
+// ├─────────────────────────┼─────────────────────────────────┼──────────────────────────────┤
+// │ s_1..s_3                │ shapes (auto-key)               │ 3 — multi-layer auto         │
+// ├─────────────────────────┼─────────────────────────────────┼──────────────────────────────┤
+// │ three_layer             │ composite [s_1, s_2, s_3]       │ 3                            │
+// ├─────────────────────────┼─────────────────────────────────┼──────────────────────────────┤
+// │ badge_bg, badge_bar     │ shapes (named)                  │ 4 — multi-layer named        │
+// ├─────────────────────────┼─────────────────────────────────┼──────────────────────────────┤
+// │ badge_composite         │ composite [badge_bg, badge_bar] │ 4                            │
+// ├─────────────────────────┼─────────────────────────────────┼──────────────────────────────┤
+// │ rrect_geom              │ shape (geometry-only)           │ 5 — defineShape              │
+// ├─────────────────────────┼─────────────────────────────────┼──────────────────────────────┤
+// │ s_4                     │ shape (auto-key stroke)         │ 6 — stroke commit            │
+// ├─────────────────────────┼─────────────────────────────────┼──────────────────────────────┤
+// │ scurve_stroke_composite │ composite [s_4]                 │ 6                            │
+// ├─────────────────────────┼─────────────────────────────────┼──────────────────────────────┤
+// │ zigzag_stroke           │ shape (named stroke)            │ 7 — stroke named             │
+// ├─────────────────────────┼─────────────────────────────────┼──────────────────────────────┤
+// │ scurve_outline_geom     │ shape (geometry-only)           │ 8 — strokePath + defineShape │
+// ├─────────────────────────┼─────────────────────────────────┼──────────────────────────────┤
+// │ stadium_arcto           │ shape (named, known issue)      │ 9 — arcTo                    │
+// ├─────────────────────────┼─────────────────────────────────┼──────────────────────────────┤
+// │ stadium_composite       │ composite [stadium_arcto]       │ 9                            │
+// └─────────────────────────┴─────────────────────────────────┴──────────────────────────────┘
 
 #include "slughorn/canvas.hpp"
 
@@ -8,87 +58,201 @@
 
 #include "slughorn/serial.hpp"
 
+#include <fstream>
 #include <iostream>
 
 using namespace slughorn::literals;
-using slughorn::slug_t;
+using slughorn::Color;
+using slughorn::Key;
+
+// All shapes authored in [0, 1] em-space; scale = 1.0 throughout.
+static const Color RED = {1_cv, 0_cv, 0_cv, 1_cv};
+static const Color GREEN = {0_cv, 0.6_cv, 0_cv, 1_cv};
+static const Color BLUE = {0_cv, 0_cv, 1_cv, 1_cv};
+static const Color WHITE = {1_cv, 1_cv, 1_cv, 1_cv};
+static const Color CYAN = {0_cv, 0.8_cv, 0.8_cv, 1_cv};
+static const Color GOLD = {1_cv, 0.75_cv, 0_cv, 1_cv};
 
 int main(int argc, char** argv) {
 	slughorn::Atlas atlas;
 
-	// slughorn::canvas::Canvas canvas(atlas, 0x0);
-	slughorn::canvas::Canvas canvas(atlas, "MyShape");
+	// KeyIterator prefix "s" produces auto-keys "s_0", "s_1", ... when fill()
+	// or stroke() is called without an explicit key.
+	slughorn::canvas::Canvas canvas(atlas, slughorn::KeyIterator("s"));
 
-	// fast, visible only at large sizes
-	canvas.decomposer().tolerance = slughorn::TOLERANCE_DRAFT;
+	canvas.decomposer().tolerance = slughorn::TOLERANCE_BALANCED;
 
-	// good default for screen work
-	// canvas.decomposer().tolerance = slughorn::TOLERANCE_BALANCED;
+	// ============================================================================================
+	// Pattern 1: fill(color) auto-key shape -> finalize(key) names composite.
+	//
+	// The shape gets an auto-key ("s_0"), the composite gets the named key.
+	// Most convenient for single-use geometry you never need to look up directly.
+	//
+	// CLI: `slughorn render atlas.slug tri_composite` resolves via composite
+	//      fallback to the single layer's shape.
+	// ============================================================================================
 
-	// high-DPI / print / export
-	// canvas.decomposer().tolerance = slughorn::TOLERANCE_FINE;
-
-	// The DEFAULT; lowest quality, always results in the simplest cubic -> 2x quadratics
-	// canvas.decomposer().tolerance = slughorn::TOLERANCE_EXACT;
-
-	slug_t scale = 1_cv / 4096_cv;
-
-	// Shape 1: a filled red triangle
 	canvas.beginPath();
-	canvas.moveTo(0.0_cv * scale, 0.0_cv * scale);
-	canvas.lineTo(1.0_cv * scale, 0.0_cv * scale);
-	canvas.lineTo(0.5_cv * scale, 1.0_cv * scale);
+	canvas.moveTo(0.5_cv, 0.9_cv);
+	canvas.lineTo(0.9_cv, 0.1_cv);
+	canvas.lineTo(0.1_cv, 0.1_cv);
 	canvas.closePath();
-	canvas.fill({1_cv, 0_cv, 0_cv, 1_cv}, scale);
+	canvas.fill(RED);
 
-	// Shape 2: a blue semicircle via arc()
+	// canvas.finalize(Key::fromString("tri_composite"));
+	canvas.finalize("tri_composite");
+
+	// ============================================================================================
+	// Pattern 2: fill(color, scale, key) named shape -> finalize(key).
+	//
+	// Shape and composite both get explicit names. Use when you need the shape directly addressable
+	// (e.g. CLI `render`, Python atlas.get_shape(), or sharing the geometry with another Layer
+	// later).
+	// ============================================================================================
+
+	canvas.circle(0.5_cv, 0.5_cv, 0.4_cv);
+	canvas.fill(BLUE, 1.0_cv, Key::fromString("circle_shape"));
+
+	canvas.finalize(Key::fromString("circle_composite"));
+
+	// ============================================================================================
+	// Pattern 3: Multi-layer composite with auto-key shapes.
+	//
+	// Each fill() generates a new auto-key shape and appends a Layer. All three accumulate before
+	// finalize(key) registers the composite. The standard pattern for building a scene with
+	// multiple colored regions.
+	// ============================================================================================
+
+	canvas.rect(0.05_cv, 0.05_cv, 0.9_cv, 0.9_cv);
+	canvas.fill(RED); // "s_2"
+
+	canvas.circle(0.5_cv, 0.5_cv, 0.35_cv);
+	canvas.fill(BLUE); // "s_3"
+
+	canvas.roundedRect(0.25_cv, 0.25_cv, 0.5_cv, 0.5_cv, 0.08_cv);
+	canvas.fill(GREEN); // "s_4"
+
+	canvas.finalize(Key::fromString("three_layer"));
+
+	// ============================================================================================
+	// Pattern 4: Multi-layer composite with named shapes.
+	//
+	// Each layer's shape is independently addressable AND part of the composite. Use when the
+	// caller needs both fine-grained shape access and the composite as a unit (e.g. one layer gets
+	// a hover highlight, the others do not).
+	// ============================================================================================
+
+	canvas.ellipse(0.5_cv, 0.5_cv, 0.45_cv, 0.28_cv);
+	canvas.fill(CYAN, 1.0_cv, Key::fromString("badge_bg"));
+
+	canvas.roundedRect(0.15_cv, 0.35_cv, 0.7_cv, 0.3_cv, 0.12_cv);
+	canvas.fill(GOLD, 1.0_cv, Key::fromString("badge_bar"));
+
+	canvas.finalize(Key::fromString("badge_composite"));
+
+	// ============================================================================================
+	// Pattern 5: defineShape(key) geometry only, no color, no Layer.
+	//
+	// Registers the shape in the Atlas but does NOT add a Layer to the in-progress composite. Use
+	// when you want to reuse the same outline with different colors or transforms, managed by the
+	// caller.
+	//
+	// finalize() is not needed here: defineShape() commits directly and the composite accumulator
+	// is still empty after this call.
+	// ============================================================================================
+
+	canvas.roundedRect(0.1_cv, 0.1_cv, 0.8_cv, 0.8_cv, 0.15_cv);
+	canvas.defineShape(Key::fromString("rrect_geom"));
+
+	// ============================================================================================
+	// Pattern 6: stroke(width, color) stroke as commit verb, auto-key.
+	//
+	// Expands the path to a constant-width outline AND commits it as a colored Layer in one call.
+	// Matches HTML Canvas / Cairo / NanoVG semantics. The path transformer (strokePath) is called
+	// internally.
+	// ============================================================================================
+
 	canvas.beginPath();
-	canvas.arc(0.5_cv * scale, 0.5_cv * scale, 0.4_cv * scale, 0.0_cv, cv(M_PI));
-	canvas.closePath();
-	canvas.fill({0_cv, 0_cv, 1_cv, 1_cv}, scale);
+	canvas.moveTo(0.1_cv, 0.5_cv);
+	canvas.quadTo(0.25_cv, 0.05_cv, 0.5_cv, 0.5_cv);
+	canvas.quadTo(0.75_cv, 0.95_cv, 0.9_cv, 0.5_cv);
+	canvas.stroke(0.06_cv, WHITE); // auto-key "s_5"
 
-	// Shape 3: a green stadium shape via arcTo() rounded corners
+	canvas.finalize(Key::fromString("scurve_stroke_composite"));
+
+	// ============================================================================================
+	// Pattern 7: stroke(width, color, scale, key) named stroke commit.
+	//
+	// Same as pattern 6 but the shape is registered under an explicit key. CLI `render atlas.slug
+	// zigzag_stroke` works without composite fallback. Also demonstrates miter joins from the
+	// Phase 2 stroke implementation.
+	// ============================================================================================
+
 	canvas.beginPath();
-	canvas.moveTo(0.2_cv * scale, 0.3_cv * scale);
-	canvas.arcTo(0.8_cv * scale, 0.3_cv * scale, 0.8_cv * scale, 0.7_cv * scale, 0.1_cv);
-	canvas.arcTo(0.8_cv * scale, 0.7_cv * scale, 0.2_cv * scale, 0.7_cv * scale, 0.1_cv);
-	canvas.arcTo(0.2_cv * scale, 0.7_cv * scale, 0.2_cv * scale, 0.3_cv * scale, 0.1_cv);
-	canvas.arcTo(0.2_cv * scale, 0.3_cv * scale, 0.8_cv * scale, 0.3_cv * scale, 0.1_cv);
-	canvas.closePath();
-	canvas.fill({0_cv, 0.6_cv, 0_cv, 1_cv}, scale);
+	canvas.moveTo(0.0_cv, 0.0_cv);
+	canvas.lineTo(0.1_cv, 0.5_cv);
+	canvas.lineTo(0.2_cv, 0.0_cv);
+	canvas.lineTo(0.3_cv, 0.5_cv);
+	canvas.lineTo(0.4_cv, 0.0_cv);
+	canvas.lineTo(0.5_cv, 0.5_cv);
+	canvas.lineTo(0.6_cv, 0.0_cv);
+	canvas.lineTo(0.7_cv, 0.5_cv);
+	canvas.lineTo(0.8_cv, 0.0_cv);
+	canvas.lineTo(0.9_cv, 0.5_cv);
+	canvas.lineTo(1.0_cv, 0.0_cv);
+	canvas.stroke(0.04_cv, CYAN, 1.0_cv, Key::fromString("zigzag_stroke"));
+	// stroke() with an explicit key registers the shape AND queues a Layer in the
+	// composite accumulator, just like fill(). If you only want the named shape
+	// and not the composite wrapper, clear the accumulator explicitly.
+	canvas.beginComposite();
 
-	// Commit all three layers as one named composite shape
-	canvas.finalize(slughorn::Key::fromString("my_scene"));
+	// ============================================================================================
+	// Pattern 8: strokePath(width) + defineShape(key) geometry-only stroke.
+	//
+	// The escape hatch: strokePath() transforms the path in place (centerline -> outline), then
+	// defineShape() commits the resulting outline as raw geometry with no color. Use when you need
+	// the outline curves for something the commit verbs can't express directly.
+	// ============================================================================================
 
-	// Stroke: Phase 1 S-curve (two connected quadratics, opposite curvature).
-	/* canvas.beginPath();
+	canvas.beginPath();
 	canvas.moveTo(0.2_cv, 0.85_cv);
 	canvas.quadTo(0.1_cv, 0.5_cv, 0.5_cv, 0.5_cv);
 	canvas.quadTo(0.9_cv, 0.5_cv, 0.8_cv, 0.15_cv);
-	canvas.stroke(0.12_cv);
-	canvas.defineShape(slughorn::Key::fromString("stroke_test"), 1.0_cv); */
+	canvas.strokePath(0.08_cv);
+	canvas.defineShape(Key::fromString("scurve_outline_geom"));
 
-	// Stroke: Phase 2 lineTo polyline (miter join test).
+	// ============================================================================================
+	// Pattern 9: arcTo() rounded corners, stadium shape.
+	//
+	// NOTE: arcTo() has a known seam artifact at axis-aligned right-angle corners (item #7 on the
+	// cleanup list). For axis-aligned rounded rects, use roundedRect() instead (Pattern 3/4 above).
+	// This test preserves the arcTo() path for investigation.
+	// ============================================================================================
+
 	canvas.beginPath();
-	canvas.moveTo(0_cv, 0_cv);
-	canvas.lineTo(5_cv, 5_cv);
-	canvas.lineTo(10_cv, 0_cv);
-	canvas.lineTo(15_cv, 0_cv);
-	canvas.lineTo(20_cv, 10_cv);
-	canvas.lineTo(25_cv, 10_cv);
-	canvas.lineTo(30_cv, 15_cv);
-	canvas.lineTo(35_cv, 0_cv);
-	canvas.lineTo(40_cv, 5_cv);
-	canvas.lineTo(45_cv, 0_cv);
-	canvas.lineTo(50_cv, 0_cv);
-	canvas.stroke(2_cv);
-	canvas.defineShape(slughorn::Key::fromString("stroke_test"), 1_cv / 50_cv);
+	canvas.moveTo(0.2_cv, 0.3_cv);
+	canvas.arcTo(0.8_cv, 0.3_cv, 0.8_cv, 0.7_cv, 0.1_cv);
+	canvas.arcTo(0.8_cv, 0.7_cv, 0.2_cv, 0.7_cv, 0.1_cv);
+	canvas.arcTo(0.2_cv, 0.7_cv, 0.2_cv, 0.3_cv, 0.1_cv);
+	canvas.arcTo(0.2_cv, 0.3_cv, 0.8_cv, 0.3_cv, 0.1_cv);
+	canvas.closePath();
+	canvas.fill(GREEN, 1.0_cv, Key::fromString("stadium_arcto"));
+
+	canvas.finalize(Key::fromString("stadium_composite"));
+
+	// ============================================================================================
 
 	atlas.build();
 
 	std::cerr << "PackingStats: " << atlas.getPackingStats() << std::endl;
 
-	slughorn::serial::writeJSON(atlas, std::cout);
+	if(argc > 1) {
+		std::ofstream f(argv[1]);
+
+		slughorn::serial::writeJSON(atlas, f);
+	}
+
+	else slughorn::serial::writeJSON(atlas, std::cout);
 
 	return 0;
 }

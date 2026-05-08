@@ -333,12 +333,12 @@ public:
 		const slug_t t1x = x1 + u1x * tangentDist; // arc end (on leg toward p2)
 		const slug_t t1y = y1 + u1y * tangentDist;
 
-		// Centre of the arc: perpendicular from the corner bisects the chord.
-		// The centre lies along the bisector of the two legs at distance r/|sin(halfAngle)|.
-		// Equivalent: offset t0 perpendicular to u0 by r (sign from cross product).
+		// Centre of the arc: offset t0 by r perpendicular to u0, toward the inside of the turn.
+		// Rotating u0 inward: CCW turn (cross>0) -> (-u0y, u0x); CW turn (cross<0) -> (u0y, -u0x).
+		// Unified: (-sign*u0y, sign*u0x).
 		const slug_t sign = (cross > 0.0_cv) ? 1.0_cv : -1.0_cv;
-		const slug_t cenX = t0x + sign * u0y * r; // u0 rotated 90?
-		const slug_t cenY = t0y - sign * u0x * r;
+		const slug_t cenX = t0x - sign * u0y * r;
+		const slug_t cenY = t0y + sign * u0x * r;
 
 		// Angles from centre to the two tangent points.
 		const slug_t a0 = std::atan2(t0y - cenY, t0x - cenX);
@@ -368,33 +368,14 @@ public:
 	Key fill(Color color, slug_t scale = 1.0_cv) {
 		if(_pendingCurves.empty()) return Key(0u);
 
-		Atlas::Curves scaled = _scaleCurves(_pendingCurves, scale);
+		return _fill(color, scale, _key.next());
+	}
 
-		Matrix transform;
-
-		Atlas::Curves local = _toLocalOrigin(scaled, transform);
-
-		if(local.empty()) return Key(0u);
-
-		const auto key = _key.next();
-
-		Atlas::ShapeInfo info;
-
-		// info.autoMetrics = true;
-		info.curves = std::move(local);
-
-		_atlas.addShape(key, info);
-
-		Layer layer;
-
-		layer.key = key;
-		layer.color = color;
-		layer.transform = transform;
-		// layer.scale intentionally left at 1.0 - see Scale Contract
-
-		_composite.layers.push_back(layer);
-
-		return key;
+	// Named variant: registers the shape under @p key instead of an auto-generated key.
+	// Use when you need the shape directly addressable (e.g. from CLI tools or external systems)
+	// without going through the composite.
+	Key fill(Color color, slug_t scale, Key key) {
+		return _fill(color, scale, key);
 	}
 
 	// Register the current path as a named Shape (geometry only, no color or Layer).
@@ -426,34 +407,45 @@ public:
 		return true;
 	}
 
-	// Transform the current pending path from a centerline description into a
-	// constant-width stroke outline. The result replaces the pending path; call
-	// fill() or defineShape() afterwards to commit the outline as a shape.
+	// Expand the current pending path from a centerline description into a constant-width stroke
+	// outline in place. The result replaces the pending path; call fill(), stroke(), or
+	// defineShape() afterwards to commit the outline as a shape.
+	//
+	// Use this when you need the raw outline geometry without color (e.g. to pass to defineShape()).
+	// For the common case of drawing a colored stroke, use stroke() instead.
 	//
 	// @p width - full stroke width in authoring-space units (half applied each side).
 	//
 	// Three-pass approach:
-	//   1. Flatten all centerline curves to a polyline (same De Casteljau tolerance).
-	//   2. Compute per-point miter-corrected normals so adjacent segments share an
-	//      exact wall intersection — no gaps or overlaps at joins. Miter limit 4x
-	//      (SVG default) falls back to a bevel at very sharp angles.
-	//   3. Build lwall/rwall from per-point normals, then close the outline.
+	//
+	// 1. Flatten all centerline curves to a polyline (same De Casteljau tolerance).
+	// 2. Compute per-point miter-corrected normals so adjacent segments share an exact wall
+	//    intersection; no gaps or overlaps at joins. Miter limit 4x (SVG default) falls back to a
+	//    bevel at very sharp angles.
+	// 3. Build lwall/rwall from per-point normals, then close the outline.
 	//
 	// Returns false if the pending path is empty.
-	bool stroke(slug_t width) {
+	bool strokePath(slug_t width) {
 		if(_pendingCurves.empty()) return false;
 
 		Atlas::Curves centerline = std::move(_pendingCurves);
 
-		const slug_t h   = width * 0.5_cv;
+		const slug_t h = width * 0.5_cv;
 		const slug_t tol = _decomposer.tolerance;
 
 		// Pass 1: flatten all centerline curves to a polyline.
 		std::vector<std::pair<slug_t, slug_t>> pts;
+
 		pts.push_back({centerline.front().x1, centerline.front().y1});
 
-		for(const auto& c : centerline)
-			_flattenCurve(c.x1, c.y1, c.x2, c.y2, c.x3, c.y3, tol, 0, pts);
+		for(const auto& c : centerline) _flattenCurve(
+			c.x1, c.y1,
+			c.x2, c.y2,
+			c.x3, c.y3,
+			tol,
+			0,
+			pts
+		);
 
 		if(pts.size() < 2) return false;
 
@@ -463,8 +455,8 @@ public:
 		std::vector<std::pair<slug_t, slug_t>> segN(numSegs);
 
 		for(size_t i = 0; i < numSegs; ++i) {
-			const slug_t dx  = pts[i+1].first  - pts[i].first;
-			const slug_t dy  = pts[i+1].second - pts[i].second;
+			const slug_t dx = pts[i + 1].first - pts[i].first;
+			const slug_t dy = pts[i + 1].second - pts[i].second;
 			const slug_t len = std::sqrt(dx * dx + dy * dy);
 
 			segN[i] = len > 1e-9_cv ? std::pair{-dy / len, dx / len} : std::pair{0.0_cv, 1.0_cv};
@@ -474,27 +466,33 @@ public:
 		static constexpr slug_t MITER_LIMIT = 4.0_cv;
 
 		struct PN { slug_t nx, ny; };
+
 		std::vector<PN> pn(pts.size());
 
 		for(size_t i = 0; i < pts.size(); ++i) {
-			if(i == 0) {
-				pn[i] = {segN[0].first, segN[0].second};
-			} else if(i == numSegs) {
-				pn[i] = {segN[numSegs-1].first, segN[numSegs-1].second};
-			} else {
-				slug_t nx = segN[i-1].first  + segN[i].first;
-				slug_t ny = segN[i-1].second + segN[i].second;
+			if(!i) pn[i] = {segN[0].first, segN[0].second};
+
+			else if(i == numSegs) pn[i] = {segN[numSegs - 1].first, segN[numSegs - 1].second};
+
+			else {
+				slug_t nx = segN[i - 1].first + segN[i].first;
+				slug_t ny = segN[i - 1].second + segN[i].second;
+
 				const slug_t len = std::sqrt(nx * nx + ny * ny);
 
 				if(len > 1e-6_cv) {
 					nx /= len; ny /= len;
+
 					const slug_t d = nx * segN[i].first + ny * segN[i].second;
 
 					if(d > 1e-3_cv) {
 						const slug_t m = 1.0_cv / d;
+
 						if(m <= MITER_LIMIT) { nx *= m; ny *= m; }
 					}
-				} else {
+				}
+
+				else {
 					// Nearly opposite directions (hairpin): use incoming segment normal.
 					nx = segN[i].first;
 					ny = segN[i].second;
@@ -508,45 +506,69 @@ public:
 		Atlas::Curves lwall, rwall;
 
 		for(size_t i = 0; i < numSegs; ++i) {
-			const slug_t p0x = pts[i].first,   p0y = pts[i].second;
-			const slug_t p2x = pts[i+1].first, p2y = pts[i+1].second;
+			const slug_t p0x = pts[i].first, p0y = pts[i].second;
+			const slug_t p2x = pts[i + 1].first, p2y = pts[i + 1].second;
 
-			const slug_t l0x = p0x + h * pn[i].nx,   l0y = p0y + h * pn[i].ny;
-			const slug_t l2x = p2x + h * pn[i+1].nx, l2y = p2y + h * pn[i+1].ny;
-			const slug_t r0x = p0x - h * pn[i].nx,   r0y = p0y - h * pn[i].ny;
-			const slug_t r2x = p2x - h * pn[i+1].nx, r2y = p2y - h * pn[i+1].ny;
+			const slug_t l0x = p0x + h * pn[i].nx, l0y = p0y + h * pn[i].ny;
+			const slug_t l2x = p2x + h * pn[i + 1].nx, l2y = p2y + h * pn[i + 1].ny;
+			const slug_t r0x = p0x - h * pn[i].nx, r0y = p0y - h * pn[i].ny;
+			const slug_t r2x = p2x - h * pn[i + 1].nx, r2y = p2y - h * pn[i + 1].ny;
 
-			lwall.push_back({l0x, l0y, (l0x+l2x)*0.5_cv, (l0y+l2y)*0.5_cv, l2x, l2y});
-			rwall.push_back({r0x, r0y, (r0x+r2x)*0.5_cv, (r0y+r2y)*0.5_cv, r2x, r2y});
+			lwall.push_back({l0x, l0y, (l0x + l2x) * 0.5_cv, (l0y + l2y) * 0.5_cv, l2x, l2y});
+			rwall.push_back({r0x, r0y, (r0x + r2x) * 0.5_cv, (r0y + r2y) * 0.5_cv, r2x, r2y});
 		}
 
 		if(lwall.empty()) return false;
 
 		// Reassemble closed outline (CCW winding, Y-up):
-		//   R wall forward -> end cap -> L wall reversed -> start cap
+		// R wall forward -> end cap -> L wall reversed -> start cap
 		_pendingCurves.clear();
 
-		for(const auto& r : rwall)
-			_pendingCurves.push_back(r);
+		for(const auto& r : rwall) _pendingCurves.push_back(r);
 
 		{
-			const slug_t ax = rwall.back().x3,  ay = rwall.back().y3;
-			const slug_t bx = lwall.back().x3,  by = lwall.back().y3;
-			_pendingCurves.push_back({ax, ay, (ax+bx)*0.5_cv, (ay+by)*0.5_cv, bx, by});
+			const slug_t ax = rwall.back().x3, ay = rwall.back().y3;
+			const slug_t bx = lwall.back().x3, by = lwall.back().y3;
+
+			_pendingCurves.push_back({ax, ay, (ax + bx) * 0.5_cv, (ay + by) * 0.5_cv, bx, by});
 		}
 
+		// TODO: This is a ... strange bit of code. :)
 		for(size_t i = lwall.size(); i-- > 0;) {
 			const auto& l = lwall[i];
+
 			_pendingCurves.push_back({l.x3, l.y3, l.x2, l.y2, l.x1, l.y1});
 		}
 
 		{
 			const slug_t ax = lwall.front().x1, ay = lwall.front().y1;
 			const slug_t bx = rwall.front().x1, by = rwall.front().y1;
-			_pendingCurves.push_back({ax, ay, (ax+bx)*0.5_cv, (ay+by)*0.5_cv, bx, by});
+
+			_pendingCurves.push_back({ax, ay, (ax + bx) * 0.5_cv, (ay + by) * 0.5_cv, bx, by});
 		}
 
 		return true;
+	}
+
+	// Expand the current path as a stroke outline and commit it as a colored Layer in one call.
+	// Equivalent to strokePath(width) followed by fill(color, scale), the common case.
+	//
+	// @p width - full stroke width in authoring-space units.
+	// @p color - fill color for the stroked layer.
+	// @p scale - same convention as fill(). Default 1.0.
+	//
+	// Returns the auto-generated Key, or Key(0u) if the path is empty.
+	Key stroke(slug_t width, Color color, slug_t scale = 1.0_cv) {
+		if(!strokePath(width)) return Key(0u);
+
+		return _fill(color, scale, _key.next());
+	}
+
+	// Named variant: registers the stroked shape under @p key.
+	Key stroke(slug_t width, Color color, slug_t scale, Key key) {
+		if(!strokePath(width)) return Key(0u);
+
+		return _fill(color, scale, key);
 	}
 
 	// -------------------------------------------------------------------------
@@ -602,11 +624,36 @@ private:
 	// Internal helpers
 	// -------------------------------------------------------------------------
 
-	// Flatten a quadratic Bézier to a polyline, appending only the endpoint of each
-	// flat piece. The caller must push the path start before the first call, and
-	// must NOT push it for subsequent curves in a chain (they share the prior endpoint).
-	//
-	// Same flatness test and De Casteljau split convention as the former _strokeSubdivide.
+	Key _fill(Color color, slug_t scale, Key key) {
+		if(_pendingCurves.empty()) return Key(0u);
+
+		Atlas::Curves scaled = _scaleCurves(_pendingCurves, scale);
+
+		Matrix transform;
+
+		Atlas::Curves local = _toLocalOrigin(scaled, transform);
+
+		if(local.empty()) return Key(0u);
+
+		Atlas::ShapeInfo info;
+		info.curves = std::move(local);
+
+		_atlas.addShape(key, info);
+
+		Layer layer;
+		layer.key = key;
+		layer.color = color;
+		layer.transform = transform;
+		// layer.scale intentionally left at 1.0 - see Scale Contract
+
+		_composite.layers.push_back(layer);
+
+		return key;
+	}
+
+	// Flatten a quadratic Bezier to a polyline, appending only the endpoint of each flat piece. The
+	// caller must push the path start before the first call, and must NOT push it for subsequent
+	// curves in a chain (they share the prior endpoint).
 	static void _flattenCurve(
 		slug_t p0x, slug_t p0y,
 		slug_t p1x, slug_t p1y,
@@ -614,21 +661,22 @@ private:
 		slug_t tol, int depth,
 		std::vector<std::pair<slug_t, slug_t>>& pts
 	) {
-		const slug_t dx    = p2x - p0x, dy = p2y - p0y;
+		const slug_t dx = p2x - p0x, dy = p2y - p0y;
 		const slug_t lenSq = dx * dx + dy * dy;
 		const slug_t cross = (p1x - p0x) * dy - (p1y - p0y) * dx;
 
 		if(lenSq < 1e-12_cv || (cross * cross) <= (tol * tol * lenSq) || depth >= 8) {
 			pts.push_back({p2x, p2y});
+
 			return;
 		}
 
-		const slug_t m01x = (p0x+p1x)*0.5_cv, m01y = (p0y+p1y)*0.5_cv;
-		const slug_t m12x = (p1x+p2x)*0.5_cv, m12y = (p1y+p2y)*0.5_cv;
-		const slug_t mx   = (m01x+m12x)*0.5_cv, my  = (m01y+m12y)*0.5_cv;
+		const slug_t m01x = (p0x + p1x) * 0.5_cv, m01y = (p0y + p1y) * 0.5_cv;
+		const slug_t m12x = (p1x + p2x) * 0.5_cv, m12y = (p1y + p2y) * 0.5_cv;
+		const slug_t mx = (m01x + m12x) * 0.5_cv, my = (m01y + m12y) * 0.5_cv;
 
-		_flattenCurve(p0x, p0y, m01x, m01y, mx,  my,  tol, depth+1, pts);
-		_flattenCurve(mx,  my,  m12x, m12y, p2x, p2y, tol, depth+1, pts);
+		_flattenCurve(p0x, p0y, m01x, m01y, mx, my, tol, depth + 1, pts);
+		_flattenCurve(mx, my, m12x, m12y, p2x, p2y, tol, depth + 1, pts);
 	}
 
 	// Decompose a circular arc into cubic Bezier segments and emit via bezierTo().

@@ -466,7 +466,7 @@ public:
 	//
 	// A callable that accepts the shape's curves and returns {splitsX, splitsY} as normalized
 	// [0,1] fraction vectors. Band count and placement algorithm are entirely encapsulated by
-	// the callable — the backend never sees or passes band counts.
+	// the callable; the backend never sees or passes band counts.
 	//
 	// Pass {} or nullptr to skip explicit splits and let addShape() use its
 	// normal band-count path without an explicit placement strategy object.
@@ -579,6 +579,7 @@ public:
 	struct SerialData {
 		TextureData curveData;
 		TextureData bandData;
+		PackingStats packingStats;
 		std::unordered_map<Key, Shape, KeyHash> shapes;
 		std::unordered_map<Key, CompositeShape, KeyHash> composites;
 	};
@@ -586,6 +587,7 @@ public:
 	void loadFromSerial(SerialData&& sd) {
 		_curveData = std::move(sd.curveData);
 		_bandData = std::move(sd.bandData);
+		_packingStats = sd.packingStats;
 		_shapes = std::move(sd.shapes);
 		_compositeShapes = std::move(sd.composites);
 		_built = true;
