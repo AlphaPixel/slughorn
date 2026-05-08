@@ -41,6 +41,14 @@
 //   {
 //     "asset": { "version": "1.0", "generator": "slughorn" },
 //     "tex_width": 512,
+//     "packing_stats": {
+//       "curve_texels_used": 1652,
+//       "curve_texels_padding": 0,
+//       "curve_texels_total": 2048,
+//       "band_texels_used": 3791,
+//       "band_texels_padding": 29,
+//       "band_texels_total": 4096
+//     },
 //     "bufferViews": [
 //       { "byteOffset": 0,    "byteLength": N, "format": "RGBA32F",  "width": 512, "height": H },
 //       { "byteOffset": N,    "byteLength": M, "format": "RGBA16UI", "width": 512, "height": H }
@@ -232,6 +240,30 @@ Key keyFromJson(const json& j) {
 	throw std::runtime_error("slughorn-serial: unknown key type '" + type + "'");
 }
 
+json packingStatsToJson(const Atlas::PackingStats& p) {
+	return {
+		{"curve_texels_used", p.curveTexelsUsed},
+		{"curve_texels_padding", p.curveTexelsPadding},
+		{"curve_texels_total", p.curveTexelsTotal},
+		{"band_texels_used", p.bandTexelsUsed},
+		{"band_texels_padding", p.bandTexelsPadding},
+		{"band_texels_total", p.bandTexelsTotal}
+	};
+}
+
+Atlas::PackingStats packingStatsFromJson(const json& j) {
+	Atlas::PackingStats p;
+
+	p.curveTexelsUsed = j.at("curve_texels_used").get<uint32_t>();
+	p.curveTexelsPadding = j.at("curve_texels_padding").get<uint32_t>();
+	p.curveTexelsTotal = j.at("curve_texels_total").get<uint32_t>();
+	p.bandTexelsUsed = j.at("band_texels_used").get<uint32_t>();
+	p.bandTexelsPadding = j.at("band_texels_padding").get<uint32_t>();
+	p.bandTexelsTotal = j.at("band_texels_total").get<uint32_t>();
+
+	return p;
+}
+
 // -----------------------------------------------------------------------------
 // Shared JSON builder (used by both writeJSON and writeBinary)
 //
@@ -257,6 +289,7 @@ json buildJson(
 	};
 
 	j["tex_width"] = 512;
+	j["packing_stats"] = packingStatsToJson(atlas.getPackingStats());
 
 	// Buffer views
 	json bv0 = {
@@ -397,6 +430,7 @@ Atlas atlasFromJson(
 
 	sd.curveData = loadTexture(j.at("curve_texture"));
 	sd.bandData = loadTexture(j.at("band_texture"));
+	sd.packingStats = packingStatsFromJson(j.at("packing_stats"));
 
 	// Shapes
 	for(const json& js : j.at("shapes")) {
