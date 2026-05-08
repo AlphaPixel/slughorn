@@ -416,7 +416,7 @@ void Atlas::buildShapeBands(
 			band.curveCount = static_cast<uint16_t>(band.curveIndices.size());
 		}
 
-		// Build Y indirection table: slot q → band index for em-fraction q/INDIRECTION_SIZE.
+		// Build Y indirection table: slot q -> band index for em-fraction q/INDIRECTION_SIZE.
 		build.indirY.resize(INDIRECTION_SIZE);
 
 		for(uint32_t q = 0; q < INDIRECTION_SIZE; q++) {
@@ -478,7 +478,7 @@ void Atlas::buildShapeBands(
 			band.curveCount = static_cast<uint16_t>(band.curveIndices.size());
 		}
 
-		// Build X indirection table: slot q → band index for em-fraction q/INDIRECTION_SIZE.
+		// Build X indirection table: slot q -> band index for em-fraction q/INDIRECTION_SIZE.
 		build.indirX.resize(INDIRECTION_SIZE);
 
 		for(uint32_t q = 0; q < INDIRECTION_SIZE; q++) {
