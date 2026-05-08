@@ -360,8 +360,22 @@ def get_shape_or_fail(atlas, key):
 
 
 def decode_or_fail(atlas, key):
-	get_shape_or_fail(atlas, key)
-	return atlas.decode(key)
+	shape = atlas.get_shape(key)
+	if shape is not None:
+		return atlas.decode(key)
+
+	composite = atlas.get_composite_shape(key)
+	if composite is not None:
+		if len(composite.layers) == 1:
+			layer_key = composite.layers[0].key
+			if atlas.get_shape(layer_key) is not None:
+				return atlas.decode(layer_key)
+
+		layer_keys = ", ".join(format_key(l.key) for l in composite.layers)
+		fail(f"'{format_key(key)}' is a {len(composite.layers)}-layer composite ({layer_keys}); render each shape individually")
+
+	available = ", ".join(format_key(k) for k in atlas.get_shapes().keys())
+	fail(f"key not found: {format_key(key)}\nAvailable shapes: {available or '(none)'}")
 
 
 def command_info(args) -> int:
