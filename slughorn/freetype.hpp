@@ -34,6 +34,7 @@
 #include <vector>
 #include <cstdint>
 #include <iostream>
+#include <utility>
 
 // FreeType headers are needed wherever you pass FT_Face / FT_Color* directly.
 // Include them before this header in those translation units.
@@ -250,6 +251,112 @@ static void log(int level, const auto&... args) {
 // detail - internal helpers (not part of the public API)
 // =============================================================================
 namespace detail {
+
+struct LibraryHandle {
+	FT_Library value = nullptr;
+
+	~LibraryHandle() {
+		if(value) FT_Done_FreeType(value);
+	}
+
+	bool init(const char* caller) {
+		if(FT_Init_FreeType(&value)) {
+			log(LOG_WARN, caller, ": failed to initialise FreeType");
+
+			return false;
+		}
+
+		return true;
+	}
+};
+
+struct FaceHandle {
+	FT_Face value = nullptr;
+
+	~FaceHandle() {
+		if(value) FT_Done_Face(value);
+	}
+
+	bool open(FT_Library library, const std::string& fontPath, const char* caller) {
+		if(FT_New_Face(library, fontPath.c_str(), 0, &value)) {
+			log(LOG_WARN, caller, ": failed to open font: ", fontPath);
+
+			return false;
+		}
+
+		return true;
+	}
+};
+
+template<typename Result, typename F>
+static Result withFace(
+	const std::string& fontPath,
+	const char* caller,
+	Result failureValue,
+	F&& fn
+) {
+	LibraryHandle library;
+
+	if(!library.init(caller)) return failureValue;
+
+	FaceHandle face;
+
+	if(!face.open(library.value, fontPath, caller)) return failureValue;
+
+	return std::forward<F>(fn)(face.value);
+}
+
+template<typename F>
+static size_t countRange(uint32_t first, uint32_t last, F&& fn) {
+	if(first > last) return 0;
+
+	size_t count = 0;
+
+	for(uint32_t cp = first; ; cp++) {
+		if(std::forward<F>(fn)(cp)) count++;
+
+		if(cp == last) break;
+	}
+
+	return count;
+}
+
+template<typename F>
+static size_t countCodepoints(const std::vector<uint32_t>& codepoints, F&& fn) {
+	size_t count = 0;
+
+	for(uint32_t cp : codepoints) if(std::forward<F>(fn)(cp)) count++;
+
+	return count;
+}
+
+template<typename F>
+static size_t countCharmap(FT_Face face, F&& fn) {
+	size_t count = 0;
+
+	FT_UInt glyphIndex = 0;
+	FT_ULong charCode = FT_Get_First_Char(face, &glyphIndex);
+
+	while(glyphIndex != 0) {
+		if(std::forward<F>(fn)(static_cast<uint32_t>(charCode))) count++;
+
+		charCode = FT_Get_Next_Char(face, charCode, &glyphIndex);
+	}
+
+	return count;
+}
+
+static FT_Color* selectPalette(FT_Face face) {
+	FT_Color* palette = nullptr;
+	FT_Palette_Data paletteData = {};
+
+	if(
+		!FT_Palette_Data_Get(face, &paletteData) &&
+		paletteData.num_palettes > 0
+	) FT_Palette_Select(face, 0, &palette);
+
+	return palette;
+}
 
 // -------------------------------------------------------------------------
 // FT_Outline_Decompose callbacks + outline decomposition
@@ -786,14 +893,10 @@ size_t loadGlyphRange(
 	Atlas& atlas,
 	const Atlas::SplitStrategy& strategy
 ) {
-	size_t count = 0;
-
-	for(uint32_t cp = first; cp <= last; cp++) {
+	return detail::countRange(first, last, [&](uint32_t cp) {
 		// TODO: Add log() calls here? Probably...
-		if(loadGlyph(face, cp, atlas, strategy)) count++;
-	}
-
-	return count;
+		return loadGlyph(face, cp, atlas, strategy);
+	});
 }
 
 size_t loadGlyphs(
@@ -802,13 +905,9 @@ size_t loadGlyphs(
 	Atlas& atlas,
 	const Atlas::SplitStrategy& strategy
 ) {
-	size_t count = 0;
-
-	for(uint32_t cp : codepoints) {
-		if(loadGlyph(face, cp, atlas, strategy)) count++;
-	}
-
-	return count;
+	return detail::countCodepoints(codepoints, [&](uint32_t cp) {
+		return loadGlyph(face, cp, atlas, strategy);
+	});
 }
 
 size_t loadAllGlyphs(
@@ -816,17 +915,9 @@ size_t loadAllGlyphs(
 	Atlas& atlas,
 	const Atlas::SplitStrategy& strategy
 ) {
-	size_t count = 0;
-	FT_UInt glyphIndex = 0;
-	FT_ULong charCode = FT_Get_First_Char(face, &glyphIndex);
-
-	while(glyphIndex != 0) {
-		if(loadGlyph(face, static_cast<uint32_t>(charCode), atlas, strategy)) count++;
-
-		charCode = FT_Get_Next_Char(face, charCode, &glyphIndex);
-	}
-
-	return count;
+	return detail::countCharmap(face, [&](uint32_t cp) {
+		return loadGlyph(face, cp, atlas, strategy);
+	});
 }
 
 bool loadColorGlyph(
@@ -899,48 +990,27 @@ size_t loadColorGlyphs(
 	std::map<uint32_t, CompositeShape>& colorGlyphs,
 	const Atlas::SplitStrategy& strategy
 ) {
-	size_t count = 0;
-
-	for(uint32_t cp : codepoints) {
+	return detail::countCodepoints(codepoints, [&](uint32_t cp) {
 		CompositeShape glyph;
 
 		if(loadColorGlyph(face, cp, palette, atlas, glyph, strategy)) {
 			colorGlyphs[cp] = std::move(glyph);
 
-			count++;
+			return true;
 		}
-	}
 
-	return count;
+		return false;
+	});
 }
 
 bool loadAsciiFont(const std::string& fontPath, Atlas& atlas,
 	const Atlas::SplitStrategy& strategy
 ) {
-	FT_Library library;
+	return detail::withFace(fontPath, "loadAsciiFont", false, [&](FT_Face face) {
+		loadGlyphRange(face, 32, 126, atlas, strategy);
 
-	if(FT_Init_FreeType(&library)) {
-		log(LOG_WARN, "loadAsciiFont: failed to initialise FreeType");
-
-		return false;
-	}
-
-	FT_Face face;
-
-	if(FT_New_Face(library, fontPath.c_str(), 0, &face)) {
-		log(LOG_WARN, "loadAsciiFont: failed to open font: ", fontPath);
-
-		FT_Done_FreeType(library);
-
-		return false;
-	}
-
-	loadGlyphRange(face, 32, 126, atlas, strategy);
-
-	FT_Done_Face(face);
-	FT_Done_FreeType(library);
-
-	return true;
+		return true;
+	});
 }
 
 size_t loadFontGlyphs(
@@ -949,30 +1019,9 @@ size_t loadFontGlyphs(
 	Atlas& atlas,
 	const Atlas::SplitStrategy& strategy
 ) {
-	FT_Library library;
-
-	if(FT_Init_FreeType(&library)) {
-		log(LOG_WARN, "loadFontGlyphs: failed to initialise FreeType");
-
-		return 0;
-	}
-
-	FT_Face face;
-
-	if(FT_New_Face(library, fontPath.c_str(), 0, &face)) {
-		log(LOG_WARN, "loadFontGlyphs: failed to open font: ", fontPath);
-
-		FT_Done_FreeType(library);
-
-		return 0;
-	}
-
-	const size_t count = loadGlyphs(face, codepoints, atlas, strategy);
-
-	FT_Done_Face(face);
-	FT_Done_FreeType(library);
-
-	return count;
+	return detail::withFace(fontPath, "loadFontGlyphs", size_t(0), [&](FT_Face face) {
+		return loadGlyphs(face, codepoints, atlas, strategy);
+	});
 }
 
 size_t loadAllFontGlyphs(
@@ -980,30 +1029,9 @@ size_t loadAllFontGlyphs(
 	Atlas& atlas,
 	const Atlas::SplitStrategy& strategy
 ) {
-	FT_Library library;
-
-	if(FT_Init_FreeType(&library)) {
-		log(LOG_WARN, "loadAllFontGlyphs: failed to initialise FreeType");
-
-		return 0;
-	}
-
-	FT_Face face;
-
-	if(FT_New_Face(library, fontPath.c_str(), 0, &face)) {
-		log(LOG_WARN, "loadAllFontGlyphs: failed to open font: ", fontPath);
-
-		FT_Done_FreeType(library);
-
-		return 0;
-	}
-
-	const size_t count = loadAllGlyphs(face, atlas, strategy);
-
-	FT_Done_Face(face);
-	FT_Done_FreeType(library);
-
-	return count;
+	return detail::withFace(fontPath, "loadAllFontGlyphs", size_t(0), [&](FT_Face face) {
+		return loadAllGlyphs(face, atlas, strategy);
+	});
 }
 
 bool loadEmojiFont(
@@ -1013,37 +1041,13 @@ bool loadEmojiFont(
 	std::map<uint32_t, CompositeShape>& colorGlyphs,
 	const Atlas::SplitStrategy& strategy
 ) {
-	FT_Library library;
+	return detail::withFace(fontPath, "loadEmojiFont", false, [&](FT_Face face) {
+		auto* palette = detail::selectPalette(face);
 
-	if(FT_Init_FreeType(&library)) {
-		log(LOG_WARN, "loadEmojiFont: failed to initialise FreeType");
+		loadColorGlyphs(face, codepoints, palette, atlas, colorGlyphs, strategy);
 
-		return false;
-	}
-
-	FT_Face face;
-
-	if(FT_New_Face(library, fontPath.c_str(), 0, &face)) {
-		log(LOG_WARN, "loadEmojiFont: failed to open font: ", fontPath);
-
-		FT_Done_FreeType(library);
-
-		return false;
-	}
-
-	FT_Color* palette = nullptr;
-	FT_Palette_Data paletteData = {};
-
-	if(!FT_Palette_Data_Get(face, &paletteData) && paletteData.num_palettes > 0) {
-		FT_Palette_Select(face, 0, &palette);
-	}
-
-	loadColorGlyphs(face, codepoints, palette, atlas, colorGlyphs, strategy);
-
-	FT_Done_Face(face);
-	FT_Done_FreeType(library);
-
-	return true;
+		return true;
+	});
 }
 
 }
