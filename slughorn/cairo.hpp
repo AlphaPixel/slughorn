@@ -67,7 +67,8 @@ Matrix loadShape(
 	Atlas& atlas,
 	Key key,
 	slug_t scale=1.0_cv,
-	bool autoMetrics=true
+	bool autoMetrics=true,
+	Atlas::ShapeInfo::Origin origin=Atlas::ShapeInfo::Origin::Default
 );
 
 }
@@ -141,7 +142,7 @@ std::pair<Atlas::Curves, Matrix> decomposePath(cairo_t* cr, slug_t scale) {
 	return { curves, transform };
 }
 
-Matrix loadShape(cairo_t* cr, Atlas& atlas, Key key, slug_t scale, bool autoMetrics) {
+Matrix loadShape(cairo_t* cr, Atlas& atlas, Key key, slug_t scale, bool autoMetrics, Atlas::ShapeInfo::Origin origin) {
 	auto [curves, transform] = decomposePath(cr, scale);
 
 	if(curves.empty()) return Matrix::identity();
@@ -149,6 +150,7 @@ Matrix loadShape(cairo_t* cr, Atlas& atlas, Key key, slug_t scale, bool autoMetr
 	Atlas::ShapeInfo info;
 
 	info.autoMetrics = autoMetrics;
+	info.origin = origin;
 	info.curves = std::move(curves);
 
 	atlas.addShape(key, info);

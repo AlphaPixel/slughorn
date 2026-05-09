@@ -503,6 +503,7 @@ public:
 						const slug_t m = 1.0_cv / d;
 
 						if(m <= MITER_LIMIT) { nx *= m; ny *= m; }
+						else { nx *= MITER_LIMIT; ny *= MITER_LIMIT; }
 					}
 				}
 

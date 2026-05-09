@@ -114,7 +114,8 @@ Matrix loadShape(
 	const NSVGshape* shape,
 	Atlas& atlas,
 	Key key,
-	slug_t scale=1.0_cv
+	slug_t scale=1.0_cv,
+	Atlas::ShapeInfo::Origin origin=Atlas::ShapeInfo::Origin::Default
 );
 
 // ================================================================================================
@@ -209,7 +210,7 @@ std::pair<Atlas::Curves, Matrix> decomposePath(const NSVGshape* shape, slug_t sc
 	return { curves, transform };
 }
 
-Matrix loadShape(const NSVGshape* shape, Atlas& atlas, Key key, slug_t scale) {
+Matrix loadShape(const NSVGshape* shape, Atlas& atlas, Key key, slug_t scale, Atlas::ShapeInfo::Origin origin) {
 	auto [curves, transform] = decomposePath(shape, scale);
 
 	if(curves.empty()) return Matrix::identity();
@@ -217,6 +218,7 @@ Matrix loadShape(const NSVGshape* shape, Atlas& atlas, Key key, slug_t scale) {
 	Atlas::ShapeInfo info;
 
 	// info.autoMetrics = true;
+	info.origin = origin;
 	info.curves = std::move(curves);
 
 	atlas.addShape(key, info);
