@@ -112,7 +112,8 @@ bool loadShape(
 	Atlas& atlas,
 	uint32_t key,
 	slug_t scale=1.0_cv,
-	bool autoMetrics=true
+	bool autoMetrics=true,
+	Atlas::ShapeInfo::Origin origin=Atlas::ShapeInfo::Origin::Default
 );
 
 // Decompose @p path in local coordinate space and register the result in @p atlas under @p key. The
@@ -131,7 +132,8 @@ bool loadShapeLocal(
 	uint32_t key,
 	Matrix& outTransform,
 	slug_t scale=1.0_cv,
-	bool autoMetrics=true
+	bool autoMetrics=true,
+	Atlas::ShapeInfo::Origin origin=Atlas::ShapeInfo::Origin::Default
 );
 
 // Convenience: stroke-expand then load. Equivalent to: loadShape(strokeToFill(path, strokeWidth,
@@ -143,7 +145,8 @@ bool loadStrokedShape(
 	float strokeWidth,
 	slug_t scale=1.0_cv,
 	SkPaint::Join join=SkPaint::kRound_Join,
-	SkPaint::Cap cap=SkPaint::kRound_Cap
+	SkPaint::Cap cap=SkPaint::kRound_Cap,
+	Atlas::ShapeInfo::Origin origin=Atlas::ShapeInfo::Origin::Default
 );
 
 }
@@ -313,11 +316,13 @@ bool loadShape(
 	Atlas& atlas,
 	uint32_t key,
 	slug_t scale,
-	bool autoMetrics
+	bool autoMetrics,
+	Atlas::ShapeInfo::Origin origin
 ) {
 	Atlas::ShapeInfo info;
 
 	info.autoMetrics = autoMetrics;
+	info.origin = origin;
 
 	decomposePath(path, info.curves, scale);
 
@@ -334,11 +339,13 @@ bool loadShapeLocal(
 	uint32_t key,
 	Matrix& outTransform,
 	slug_t scale,
-	bool autoMetrics
+	bool autoMetrics,
+	Atlas::ShapeInfo::Origin origin
 ) {
 	Atlas::ShapeInfo info;
 
 	info.autoMetrics = autoMetrics;
+	info.origin = origin;
 
 	if(!decomposePathLocal(path, info.curves, outTransform, scale)) return false;
 
@@ -354,9 +361,10 @@ bool loadStrokedShape(
 	float strokeWidth,
 	slug_t scale,
 	SkPaint::Join join,
-	SkPaint::Cap cap
+	SkPaint::Cap cap,
+	Atlas::ShapeInfo::Origin origin
 ) {
-	return loadShape(strokeToFill(path, strokeWidth, join, cap), atlas, key, scale);
+	return loadShape(strokeToFill(path, strokeWidth, join, cap), atlas, key, scale, true, origin);
 }
 
 }

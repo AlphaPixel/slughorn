@@ -867,7 +867,7 @@ PYBIND11_MODULE(slughorn, m) {
 	// ============================================================================================
 	// slughorn.ShapeInfo (Atlas::ShapeInfo in C++, flat in Python)
 	// ============================================================================================
-	py::class_<slughorn::Atlas::ShapeInfo>(m, "ShapeInfo")
+	auto shapeinfo_ = py::class_<slughorn::Atlas::ShapeInfo>(m, "ShapeInfo")
 		.def(py::init<>())
 		.def_readwrite("curves", &slughorn::Atlas::ShapeInfo::curves,
 			"List of Curve objects in em-normalized coordinates."
@@ -897,6 +897,18 @@ PYBIND11_MODULE(slughorn, m) {
 			"shape's X range (sorted ascending). When non-empty, overrides num_bands_x. "
 			"Use Atlas.compute_adaptive_splits() / Atlas.compute_uniform_splits(), or set manually."
 		)
+		.def_readwrite("origin", &slughorn::Atlas::ShapeInfo::origin,
+			"Where the transform origin is placed relative to the shape geometry.\n"
+			"ShapeInfo.Origin.Default  — origin at the shape's bottom-left corner (existing behavior).\n"
+			"ShapeInfo.Origin.Centered — origin at the geometric center (width/2, height/2);\n"
+			"  enables natural GPU-side rotation without translate-rotate-translate gymnastics."
+		)
+	;
+
+	py::enum_<slughorn::Atlas::ShapeInfo::Origin>(shapeinfo_, "Origin")
+		.value("Default",  slughorn::Atlas::ShapeInfo::Origin::Default)
+		.value("Centered", slughorn::Atlas::ShapeInfo::Origin::Centered)
+		.export_values()
 	;
 
 	// ============================================================================================
@@ -924,6 +936,14 @@ PYBIND11_MODULE(slughorn, m) {
 		.def_readonly("width", &slughorn::Atlas::Shape::width)
 		.def_readonly("height", &slughorn::Atlas::Shape::height)
 		.def_readonly("advance", &slughorn::Atlas::Shape::advance)
+		.def_readonly("origin_x", &slughorn::Atlas::Shape::originX,
+			"Em-space X offset of the transform origin. "
+			"0 = bottom-left corner (Origin.Default), width/2 = center (Origin.Centered)."
+		)
+		.def_readonly("origin_y", &slughorn::Atlas::Shape::originY,
+			"Em-space Y offset of the transform origin. "
+			"0 = bottom-left corner (Origin.Default), height/2 = center (Origin.Centered)."
+		)
 
 		// Convenience: recover em-space origin and size (mirrors slug_EmToUV logic)
 		.def_property_readonly("em_origin", [](const slughorn::Atlas::Shape& s) {
@@ -1389,21 +1409,73 @@ PYBIND11_MODULE(slughorn, m) {
 
 			// Commit ----------------------------------------------------------
 
+			// fill() — auto-key variant
 			.def("fill",
-				[](slughorn::canvas::Canvas& c, slughorn::Color color, slug_t scale) {
-					return c.fill(color, scale);
+				[](slughorn::canvas::Canvas& c, slughorn::Color color, slug_t scale,
+				   slughorn::Atlas::ShapeInfo::Origin origin) {
+					return c.fill(color, scale, origin);
 				},
 				py::arg("color"), py::arg("scale") = 1.0f,
+				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin::Default,
 				"Commit the current path as a new Layer with the given color.\n"
 				"Returns the auto-generated Key, or Key(0) if the path was empty."
 			)
+			// fill() — named-key variant: shape is also addressable by key
+			.def("fill",
+				[](slughorn::canvas::Canvas& c, slughorn::Color color, slug_t scale,
+				   slughorn::Key key, slughorn::Atlas::ShapeInfo::Origin origin) {
+					return c.fill(color, scale, key, origin);
+				},
+				py::arg("color"), py::arg("scale"), py::arg("key"),
+				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin::Default,
+				"Commit the current path as a new Layer, registering the Shape under key.\n"
+				"Returns key, or Key(0) if the path was empty."
+			)
 			.def("define_shape",
-				[](slughorn::canvas::Canvas& c, slughorn::Key key, slug_t scale) {
-					return c.defineShape(key, scale);
+				[](slughorn::canvas::Canvas& c, slughorn::Key key, slug_t scale,
+				   slughorn::Atlas::ShapeInfo::Origin origin) {
+					return c.defineShape(key, scale, origin);
 				},
 				py::arg("key"), py::arg("scale") = 1.0f,
+				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin::Default,
 				"Register the current path as a named Shape (geometry only, no Layer).\n"
 				"Returns False if the path was empty."
+			)
+			// stroke_path() — in-place path transformer (expand centerline → filled outline)
+			.def("stroke_path",
+				[](slughorn::canvas::Canvas& c, slug_t width) {
+					return c.strokePath(width);
+				},
+				py::arg("width"),
+				"Expand the current path from a centerline into a constant-width stroke outline\n"
+				"in place. The result replaces the pending path; call fill() or stroke() afterwards\n"
+				"to commit. Returns False if the path was empty.\n\n"
+				"Equivalent to the HTML Canvas / Cairo path-transformer concept: call\n"
+				"stroke_path(w) then fill(color) for explicit two-step control, or use\n"
+				"stroke(w, color) for the common one-call form."
+			)
+			// stroke() — auto-key variant: stroke_path() + fill() in one call
+			.def("stroke",
+				[](slughorn::canvas::Canvas& c, slug_t width, slughorn::Color color, slug_t scale,
+				   slughorn::Atlas::ShapeInfo::Origin origin) {
+					return c.stroke(width, color, scale, origin);
+				},
+				py::arg("width"), py::arg("color"), py::arg("scale") = 1.0f,
+				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin::Default,
+				"Expand the current path as a stroke outline and commit it as a colored Layer.\n"
+				"Equivalent to stroke_path(width) followed by fill(color, scale).\n"
+				"Returns the auto-generated Key, or Key(0) if the path was empty."
+			)
+			// stroke() — named-key variant
+			.def("stroke",
+				[](slughorn::canvas::Canvas& c, slug_t width, slughorn::Color color, slug_t scale,
+				   slughorn::Key key, slughorn::Atlas::ShapeInfo::Origin origin) {
+					return c.stroke(width, color, scale, key, origin);
+				},
+				py::arg("width"), py::arg("color"), py::arg("scale"), py::arg("key"),
+				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin::Default,
+				"Expand the current path as a stroke outline and commit it under key.\n"
+				"Returns key, or Key(0) if the path was empty."
 			)
 
 			// CompositeShape management ---------------------------------------
