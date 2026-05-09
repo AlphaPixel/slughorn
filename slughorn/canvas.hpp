@@ -365,17 +365,26 @@ public:
 	// in Layer::transform (dx/dy). An internal key is auto-generated and _key is incremented.
 	//
 	// Returns the auto-generated Key, or Key(0u) if the current path is empty.
-	Key fill(Color color, slug_t scale = 1.0_cv) {
+	Key fill(
+		Color color,
+		slug_t scale=1.0_cv,
+		Atlas::ShapeInfo::Origin origin=Atlas::ShapeInfo::Origin::Default
+	) {
 		if(_pendingCurves.empty()) return Key(0u);
 
-		return _fill(color, scale, _key.next());
+		return _fill(color, scale, _key.next(), origin);
 	}
 
 	// Named variant: registers the shape under @p key instead of an auto-generated key.
 	// Use when you need the shape directly addressable (e.g. from CLI tools or external systems)
 	// without going through the composite.
-	Key fill(Color color, slug_t scale, Key key) {
-		return _fill(color, scale, key);
+	Key fill(
+		Color color,
+		slug_t scale,
+		Key key,
+		Atlas::ShapeInfo::Origin origin=Atlas::ShapeInfo::Origin::Default
+	) {
+		return _fill(color, scale, key, origin);
 	}
 
 	// Register the current path as a named Shape (geometry only, no color or Layer).
@@ -386,7 +395,11 @@ public:
 	// @p scale - same normalization convention as fill(). NOT stored on any Layer.
 	//
 	// Returns false and does nothing if the current path is empty.
-	bool defineShape(Key key, slug_t scale = 1.0_cv) {
+	bool defineShape(
+		Key key,
+		slug_t scale=1.0_cv,
+		Atlas::ShapeInfo::Origin origin=Atlas::ShapeInfo::Origin::Default
+	) {
 		if(_pendingCurves.empty()) return false;
 
 		Atlas::Curves scaled = _scaleCurves(_pendingCurves, scale);
@@ -401,6 +414,7 @@ public:
 
 		// info.autoMetrics = true;
 		info.curves = std::move(local);
+		info.origin = origin;
 
 		_atlas.addShape(key, info);
 
@@ -558,17 +572,28 @@ public:
 	// @p scale - same convention as fill(). Default 1.0.
 	//
 	// Returns the auto-generated Key, or Key(0u) if the path is empty.
-	Key stroke(slug_t width, Color color, slug_t scale = 1.0_cv) {
+	Key stroke(
+		slug_t width,
+		Color color,
+		slug_t scale=1.0_cv,
+		Atlas::ShapeInfo::Origin origin=Atlas::ShapeInfo::Origin::Default
+	) {
 		if(!strokePath(width)) return Key(0u);
 
-		return _fill(color, scale, _key.next());
+		return _fill(color, scale, _key.next(), origin);
 	}
 
 	// Named variant: registers the stroked shape under @p key.
-	Key stroke(slug_t width, Color color, slug_t scale, Key key) {
+	Key stroke(
+		slug_t width,
+		Color color,
+		slug_t scale,
+		Key key,
+		Atlas::ShapeInfo::Origin origin=Atlas::ShapeInfo::Origin::Default
+	) {
 		if(!strokePath(width)) return Key(0u);
 
-		return _fill(color, scale, key);
+		return _fill(color, scale, key, origin);
 	}
 
 	// -------------------------------------------------------------------------
@@ -620,11 +645,12 @@ public:
 	bool hasPendingPath() const { return !_pendingCurves.empty(); }
 
 private:
-	// -------------------------------------------------------------------------
-	// Internal helpers
-	// -------------------------------------------------------------------------
-
-	Key _fill(Color color, slug_t scale, Key key) {
+	Key _fill(
+		Color color,
+		slug_t scale,
+		Key key,
+		Atlas::ShapeInfo::Origin origin=Atlas::ShapeInfo::Origin::Default
+	) {
 		if(_pendingCurves.empty()) return Key(0u);
 
 		Atlas::Curves scaled = _scaleCurves(_pendingCurves, scale);
@@ -636,7 +662,9 @@ private:
 		if(local.empty()) return Key(0u);
 
 		Atlas::ShapeInfo info;
+
 		info.curves = std::move(local);
+		info.origin = origin;
 
 		_atlas.addShape(key, info);
 
@@ -790,6 +818,7 @@ private:
 		outTransform.dy = minY;
 
 		Atlas::Curves out;
+
 		out.reserve(src.size());
 
 		for(const auto& c : src) {

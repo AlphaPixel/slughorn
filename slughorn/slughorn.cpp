@@ -251,7 +251,7 @@ void Atlas::addShape(Key key, const ShapeInfo& desc) {
 	build.splitsY = desc.splitsY;
 	build.splitsX = desc.splitsX;
 
-	buildShapeBands(key, build, numBandsX, numBandsY, /*overrideMetrics=*/!desc.autoMetrics);
+	buildShapeBands(key, build, numBandsX, numBandsY, /*overrideMetrics=*/!desc.autoMetrics, desc.origin);
 }
 
 // ================================================================================================
@@ -303,7 +303,8 @@ void Atlas::buildShapeBands(
 	ShapeBuild& build,
 	uint32_t numBandsX,
 	uint32_t numBandsY,
-	bool overrideMetrics
+	bool overrideMetrics,
+	ShapeInfo::Origin origin
 ) {
 	const auto& splitsY = build.splitsY;
 	const auto& splitsX = build.splitsX;
@@ -356,6 +357,14 @@ void Atlas::buildShapeBands(
 		build.metrics.bearingX = minX;
 		build.metrics.bearingY = maxY; // top of shape, Y-up convention
 		build.metrics.advance = rangeX;
+	}
+
+	// Origin offset: shifts the quad so transform.dx/dy points at the geometric center
+	// rather than the corner. Uses the actual curve bbox (rangeX/rangeY), not the metrics,
+	// so it is correct for both autoMetrics and overrideMetrics shapes.
+	if(origin == ShapeInfo::Origin::Centered) {
+		build.metrics.originX = rangeX / 2_cv;
+		build.metrics.originY = rangeY / 2_cv;
 	}
 
 	// --------------------------------------------------------------------------------------------

@@ -326,6 +326,12 @@ public:
 		slug_t width = 0, height = 0;
 		slug_t advance = 0;
 
+		// Origin offset in em-space. When non-zero, shifts the quad so that the
+		// transform origin lands at this point rather than the shape's corner.
+		// Set to (width/2, height/2) for a centered origin (ShapeInfo::Origin::Centered).
+		// Default (0, 0) preserves existing behavior.
+		slug_t originX = 0_cv, originY = 0_cv;
+
 		// Compute the world-space bounding quad for this shape.
 		//
 		// transform.dx/dy places the shape in world space. scale converts the
@@ -338,8 +344,8 @@ public:
 		// The returned quad is relative to (0,0) - scene placement is the
 		// caller's responsibility (e.g. osg::MatrixTransform).
 		Quad computeQuad(const Matrix& transform, slug_t scale=1_cv, slug_t expand=0_cv) const {
-			const slug_t ox = transform.dx * scale;
-			const slug_t oy = transform.dy * scale;
+			const slug_t ox = (transform.dx - originX) * scale;
+			const slug_t oy = (transform.dy - originY) * scale;
 			return {
 				ox + (bearingX - expand) * scale,
 				oy + (bearingY - height - expand) * scale,
@@ -381,6 +387,14 @@ public:
 		// Interior Y split positions as normalized [0,1] fractions of the shape's Y range
 		// (sorted ascending). If non-empty, overrides numBandsY; resulting numBands = splitsY.size() + 1.
 		std::vector<slug_t> splitsY;
+
+		// Controls where the transform origin is placed relative to the shape geometry.
+		// Default: origin at the shape's bottom-left corner (existing behavior).
+		// Centered: origin at the geometric center (width/2, height/2) — enables natural
+		// GPU-side rotation (e.g. clock hands) without manual translate-rotate-translate.
+		enum class Origin { Default, Centered };
+
+		Origin origin = Origin::Default;
 	};
 
 	// Size of the per-shape indirection table (both axes). Each shape's band block begins with two
@@ -624,7 +638,8 @@ private:
 		ShapeBuild& build,
 		uint32_t numBandsX,
 		uint32_t numBandsY,
-		bool overrideMetrics
+		bool overrideMetrics,
+		ShapeInfo::Origin origin = ShapeInfo::Origin::Default
 	);
 
 	void packTextures();
@@ -900,6 +915,7 @@ inline std::ostream& operator<<(std::ostream& os, const Atlas::Shape& s) {
 	return os
 		<< "Shape(w=" << s.width << " h=" << s.height
 		<< " bearing=" << s.bearingX << "/" << s.bearingY
+		<< " origin=" << s.originX << "/" << s.originY
 		<< " bandScale=" << s.bandScaleX << "/" << s.bandScaleY
 		<< " bandOffset=" << s.bandOffsetX << "/" << s.bandOffsetY << ")"
 	;

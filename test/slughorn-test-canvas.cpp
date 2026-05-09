@@ -240,6 +240,21 @@ int main(int argc, char** argv) {
 
 	canvas.finalize(Key::fromString("stadium_composite"));
 
+	canvas.beginPath();
+	canvas.moveTo(0_cv, 0_cv);
+	canvas.lineTo(5_cv, 5_cv);
+	canvas.lineTo(10_cv, 0_cv);
+	canvas.lineTo(15_cv, 0_cv);
+	canvas.lineTo(20_cv, 10_cv);
+	canvas.lineTo(25_cv, 10_cv);
+	canvas.lineTo(30_cv, 15_cv);
+	canvas.lineTo(35_cv, 0_cv);
+	canvas.lineTo(40_cv, 5_cv);
+	canvas.lineTo(45_cv, 0_cv);
+	canvas.lineTo(50_cv, 0_cv);
+	canvas.strokePath(2_cv);
+	canvas.defineShape(slughorn::Key::fromString("stroke_test"), 1_cv / 50_cv);
+
 	// ============================================================================================
 
 	atlas.build();

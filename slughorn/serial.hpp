@@ -340,7 +340,9 @@ json buildJson(
 			{"bearing_y", shape.bearingY},
 			{"width", shape.width},
 			{"height", shape.height},
-			{"advance", shape.advance}
+			{"advance", shape.advance},
+			{"origin_x", shape.originX},
+			{"origin_y", shape.originY}
 		});
 	}
 
@@ -451,6 +453,8 @@ Atlas atlasFromJson(
 		shape.width = js.at("width");
 		shape.height = js.at("height");
 		shape.advance = js.at("advance");
+		shape.originX = js.value("origin_x", 0.0f);
+		shape.originY = js.value("origin_y", 0.0f);
 
 		sd.shapes[key] = shape;
 	}
