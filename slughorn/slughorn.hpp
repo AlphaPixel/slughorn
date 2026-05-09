@@ -639,7 +639,7 @@ private:
 		uint32_t numBandsX,
 		uint32_t numBandsY,
 		bool overrideMetrics,
-		ShapeInfo::Origin origin = ShapeInfo::Origin::Default
+		ShapeInfo::Origin origin=ShapeInfo::Origin::Default
 	);
 
 	void packTextures();

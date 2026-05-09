@@ -120,18 +120,18 @@ void test_Shape() {
     const slug_t scale = 1.0_cv / cv(image->width); // = 1/100
 
     // --- decomposePath ---
-    auto [curves, transform] = slughorn::nanosvg::decomposePath(shape, scale);
+    auto [info, transform] = slughorn::nanosvg::decomposePath(shape, scale);
 
     std::cout << "  transform: " << transform << std::endl;
-    std::cout << "  curves:    " << curves.size() << std::endl;
-    for(size_t i = 0; i < curves.size(); i++)
-        std::cout << "    [" << i << "] " << curves[i] << std::endl;
+    std::cout << "  curves:    " << info.curves.size() << std::endl;
+    for(size_t i = 0; i < info.curves.size(); i++)
+        std::cout << "    [" << i << "] " << info.curves[i] << std::endl;
 
-    check("curve count >= 3", curves.size() >= 3);
+    check("curve count >= 3", info.curves.size() >= 3);
 
     // All curve points should be in [0,1]
     bool inRange = true;
-    for(const auto& c : curves) {
+    for(const auto& c : info.curves) {
         if(c.x1 < -1e-3_cv || c.x1 > 1.001_cv) inRange = false;
         if(c.x2 < -1e-3_cv || c.x2 > 1.001_cv) inRange = false;
         if(c.x3 < -1e-3_cv || c.x3 > 1.001_cv) inRange = false;
@@ -147,9 +147,9 @@ void test_Shape() {
 
     // --- atlas round-trip ---
     slughorn::Atlas atlas;
-    slughorn::Atlas::ShapeInfo info;
+    /* slughorn::Atlas::ShapeInfo info;
     info.autoMetrics = true;
-    info.curves = curves;
+    info.curves = curves; */
     atlas.addShape(1u, info);
     atlas.build();
 

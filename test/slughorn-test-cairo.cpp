@@ -24,13 +24,13 @@ void test_Shape() {
 	// -------------------------------------------------------------------------
 	// Step 1: raw decomposition
 	// -------------------------------------------------------------------------
-	auto [curves, transform] = slughorn::cairo::decomposePath(cr, 1.0_cv / 100.0_cv);
+	auto [info, transform] = slughorn::cairo::decomposePath(cr, 1.0_cv / 100.0_cv);
 
 	std::cout << "Matrix: " << transform << std::endl;
-	std::cout << "Curves: " << curves.size() << std::endl;
+	std::cout << "Curves: " << info.curves.size() << std::endl;
 
-	for(size_t i = 0; i < curves.size(); i++) std::cout
-		<< "  [" << i << "] " << curves[i] << std::endl
+	for(size_t i = 0; i < info.curves.size(); i++) std::cout
+		<< "  [" << i << "] " << info.curves[i] << std::endl
 	;
 
 	// -------------------------------------------------------------------------
@@ -38,6 +38,7 @@ void test_Shape() {
 	// -------------------------------------------------------------------------
 	slughorn::Atlas atlas;
 
+#if 0
 	slughorn::Atlas::ShapeInfo info;
 
 	// TODO: This is SO OFTEN `true` (except in FreeType2 contexts) that constantly setting it
@@ -46,6 +47,7 @@ void test_Shape() {
 	info.autoMetrics = true;
 
 	info.curves = curves;
+#endif
 
 	atlas.addShape(1u, info);
 	atlas.build();
@@ -104,19 +106,19 @@ void test_CompositeShape() {
 		cairo_restore(cr);
 
 		// auto [curves, transform] = slughorn::cairo::decomposePath(cr, 1.0_cv / 100.0_cv);
-		auto [curves, transform] = slughorn::cairo::decomposePath(cr, 1_cv);
+		auto [info, transform] = slughorn::cairo::decomposePath(cr, 1_cv);
 
 		std::cout << "Matrix: " << transform << std::endl;
-		std::cout << "Curves: " << curves.size() << std::endl;
+		std::cout << "Curves: " << info.curves.size() << std::endl;
 
-		for(size_t j = 0; j < curves.size(); j++) std::cout
-			<< "  [" << j << "] " << curves[j] << std::endl
+		for(size_t j = 0; j < info.curves.size(); j++) std::cout
+			<< "  [" << j << "] " << info.curves[j] << std::endl
 		;
 
-		slughorn::Atlas::ShapeInfo info;
+		// slughorn::Atlas::ShapeInfo info;
 
-		info.autoMetrics = true;
-		info.curves = curves;
+		// info.autoMetrics = true;
+		// info.curves = curves;
 
 		uint32_t key = static_cast<uint32_t>(i);
 

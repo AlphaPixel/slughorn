@@ -404,9 +404,7 @@ public:
 
 		Atlas::Curves scaled = _scaleCurves(_pendingCurves, scale);
 
-		Matrix transform; // discarded - caller manages placement
-
-		Atlas::Curves local = _toLocalOrigin(scaled, transform);
+		Atlas::Curves local = _toLocalOrigin(scaled).first;
 
 		if(local.empty()) return false;
 
@@ -656,9 +654,7 @@ private:
 
 		Atlas::Curves scaled = _scaleCurves(_pendingCurves, scale);
 
-		Matrix transform;
-
-		Atlas::Curves local = _toLocalOrigin(scaled, transform);
+		auto [local, transform] = _toLocalOrigin(scaled, origin);
 
 		if(local.empty()) return Key(0u);
 
@@ -792,14 +788,19 @@ private:
 		return out;
 	}
 
-	// Shift curves to local origin (bounding-box minimum -> 0,0). The subtracted offset is written
-	// to @p outTransform (dx/dy only). Returns an empty vector if the bounding box is degenerate.
+	// Shift curves to local origin (bounding-box minimum -> 0,0). Returns both the shifted curves
+	// and a Matrix (dx/dy only). Returns empty curves and an identity Matrix if @p src is empty or
+	// the bounding box is degenerate.
 	//
-	// TODO: I'd rather return an `std::pair` than have this `outTransform` parameter.
-	static Atlas::Curves _toLocalOrigin(const Atlas::Curves& src, Matrix& outTransform) {
-		outTransform = Matrix::identity();
-
-		if(src.empty()) return {};
+	// The returned transform depends on @p origin:
+	//   Origin::Default  — transform.dx/dy = bbox corner (minX, minY).
+	//   Origin::Centered — transform.dx/dy = bbox center; computeQuad still places the quad at the
+	//                      correct canvas position, and the transform acts as a pivot point.
+	static std::pair<Atlas::Curves, Matrix> _toLocalOrigin(
+		const Atlas::Curves& src,
+		Atlas::ShapeInfo::Origin origin=Atlas::ShapeInfo::Origin::Default
+	) {
+		if(src.empty()) return { {}, Matrix::identity() };
 
 		slug_t minX = std::numeric_limits<slug_t>::max();
 		slug_t minY = std::numeric_limits<slug_t>::max();
@@ -813,10 +814,17 @@ private:
 			maxY = std::max({maxY, c.y1, c.y2, c.y3});
 		}
 
-		if(maxX <= minX || maxY <= minY) return {};
+		if(maxX <= minX || maxY <= minY) return { {}, Matrix::identity() };
 
-		outTransform.dx = minX;
-		outTransform.dy = minY;
+		Matrix transform = Matrix::identity();
+
+		if(origin == Atlas::ShapeInfo::Origin::Centered) {
+			transform.dx = (minX + maxX) * 0.5_cv;
+			transform.dy = (minY + maxY) * 0.5_cv;
+		} else {
+			transform.dx = minX;
+			transform.dy = minY;
+		}
 
 		Atlas::Curves out;
 
@@ -830,7 +838,7 @@ private:
 			});
 		}
 
-		return out;
+		return { out, transform };
 	}
 
 	Atlas& _atlas;

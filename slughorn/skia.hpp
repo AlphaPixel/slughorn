@@ -1,5 +1,7 @@
 #pragma once
 
+#include <utility>
+
 // ================================================================================================
 // Decomposes Skia SkPath objects into slughorn Atlas shapes, with optional stroke-to-fill expansion
 // via skpathutils::FillPathWithPaint. No OSG, VSG, or other graphics library dependency.
@@ -44,40 +46,33 @@ namespace skia {
 // Decomposition
 // ================================================================================================
 
-// Decompose @p path into slughorn curves and append them to @p curves.
+// Decompose @p path into slughorn curves, shifted to local origin for tight atlas bands.
 //
-// @p scale is applied uniformly to every coordinate - use it to normalize path coordinates into the
-// [0, 1] em-square that slughorn expects. Pass 1.0 if your coordinates are already normalized.
+// The bounding box minimum is subtracted from every curve point. Returns both the shifted curves
+// and a transform Matrix (dx/dy only; xx/yy are identity). Store the Matrix in Layer::transform.
+//
+// The returned transform depends on @p origin:
+//
+//   Origin::Default  — transform.dx/dy = bounds.left/top * scale (bbox corner). Pass directly to
+//                      Layer::transform; computeQuad will reconstruct the correct world position.
+//
+//   Origin::Centered — transform.dx/dy = bounds.centerX/Y * scale (bbox center). Pass directly to
+//                      Layer::transform; computeQuad subtracts originX/Y (= rangeX/2, rangeY/2)
+//                      and the quad still lands at the correct canvas position. Use this when the
+//                      transform should act as a pivot point for GPU-side rotation.
+//
+// @p scale is applied uniformly to every coordinate after the local shift. Pass 1.0 if coordinates
+// are already normalized.
 //
 // Conic segments (kConic_Verb) are split into two ordinary quadratics. Cubic segments
 // (kCubic_Verb) are split at their midpoint into two quadratics via CurveDecomposer::cubicTo.
-void decomposePath(
+//
+// Returns a ShapeInfo with an empty Curves vector and an identity Matrix if @p path is empty or
+// has a zero-size bounding box.
+std::pair<Atlas::ShapeInfo, Matrix> decomposePath(
 	const SkPath& path,
-	Atlas::Curves& curves,
-	slug_t scale=1.0_cv
-);
-
-// Decompose @p path in local coordinate space (tight bounding box origin), appending curves to @p
-// curves.
-//
-// The path is translated so that its bounding box top-left moves to the origin before
-// decomposition. This means the atlas shape gets bands sized to its own geometry rather than the
-// full canvas, directly addressing the "every layer shares the full em-square."
-//
-// The translation that maps local space back to the original canvas space is returned in @p
-// outTransform as a pure translation Matrix (dx/dy only, xx/yy = 1, xy/yx = 0). Store this in
-// Layer::transform so that ShapeDrawable::compile() can apply it when building the quad position.
-//
-// @p scale is applied after the local translation, normalizing the local bounding box into
-// slughorn's em-space exactly as decomposePath() does for the full canvas.
-//
-// Returns false (and leaves @p curves and @p outTransform untouched) if @p path is empty or has a
-// zero-size bounding box.
-bool decomposePathLocal(
-	const SkPath& path,
-	Atlas::Curves& curves,
-	Matrix& outTransform,
-	slug_t scale=1.0_cv
+	slug_t scale=1.0_cv,
+	Atlas::ShapeInfo::Origin origin=Atlas::ShapeInfo::Origin::Default
 );
 
 // ================================================================================================
@@ -102,35 +97,18 @@ SkPath strokeToFill(
 
 // Decompose @p path and register the result in @p atlas under @p key.
 //
-// If autoMetrics is true (default) slughorn derives width/height/bearing/ advance from the curve
+// If autoMetrics is true (default) slughorn derives width/height/bearing/advance from the curve
 // bounding box. Set it to false and fill in the ShapeInfo fields below if you need precise control.
 //
-// Returns true if at least one curve was produced and the shape was added. Returns false (and does
-// NOT call addShape) if the path is empty.
-bool loadShape(
+// Returns the local-origin offset as a Matrix (see decomposePath). Store it in Layer::transform for
+// correct composite positioning.
+//
+// Returns an identity Matrix and does NOT call addShape if the path is empty or has a zero-size
+// bounding box.
+Matrix loadShape(
 	const SkPath& path,
 	Atlas& atlas,
 	uint32_t key,
-	slug_t scale=1.0_cv,
-	bool autoMetrics=true,
-	Atlas::ShapeInfo::Origin origin=Atlas::ShapeInfo::Origin::Default
-);
-
-// Decompose @p path in local coordinate space and register the result in @p atlas under @p key. The
-// canvas-space translation is written to @p outTransform; store it in the corresponding
-// Layer::transform.
-//
-// This is the local-coords counterpart to loadShape(). Use it for any layer whose geometry occupies
-// only a small portion of the full canvas, so the atlas allocates tight bands rather than
-// canvas-sized ones.
-//
-// Returns true if at least one curve was produced and the shape was added. Returns false (and does
-// NOT call addShape) if the path is empty or has a zero-size bounding box.
-bool loadShapeLocal(
-	const SkPath& path,
-	Atlas& atlas,
-	uint32_t key,
-	Matrix& outTransform,
 	slug_t scale=1.0_cv,
 	bool autoMetrics=true,
 	Atlas::ShapeInfo::Origin origin=Atlas::ShapeInfo::Origin::Default
@@ -138,7 +116,7 @@ bool loadShapeLocal(
 
 // Convenience: stroke-expand then load. Equivalent to: loadShape(strokeToFill(path, strokeWidth,
 // join, cap), atlas, key, scale)
-bool loadStrokedShape(
+Matrix loadStrokedShape(
 	const SkPath& path,
 	Atlas& atlas,
 	uint32_t key,
@@ -189,11 +167,26 @@ static void splitConic(
 
 }
 
-void decomposePath(const SkPath& path, Atlas::Curves& curves, slug_t scale) {
+std::pair<Atlas::ShapeInfo, Matrix> decomposePath(const SkPath& path, slug_t scale, Atlas::ShapeInfo::Origin origin) {
+	if(path.isEmpty()) return { {}, Matrix::identity() };
+
+	const SkRect bounds = path.getBounds();
+
+	if(bounds.isEmpty()) return { {}, Matrix::identity() };
+
+	// Translate path so its bounding box top-left sits at the origin.
+	// All curve coordinates then live in [0, width] x [0, height]; tight
+	// bands, no wasted em-space from canvas offset.
+	const SkPath local = path.makeTransform(
+		SkMatrix::Translate(-bounds.left(), -bounds.top())
+	);
+
+	Atlas::Curves curves;
+
 	CurveDecomposer decomposer(curves);
 
 	// Force-close open contours so the winding rule works correctly.
-	SkPath::Iter iter(path, true);
+	SkPath::Iter iter(local, true);
 
 	SkPoint pts[4];
 
@@ -261,38 +254,23 @@ void decomposePath(const SkPath& path, Atlas::Curves& curves, slug_t scale) {
 				break;
 		}
 	}
-}
 
-bool decomposePathLocal(
-	const SkPath& path,
-	Atlas::Curves& curves,
-	Matrix& outTransform,
-	slug_t scale
-) {
-	if(path.isEmpty()) return false;
+	Matrix transform = Matrix::identity();
 
-	const SkRect bounds = path.getBounds();
+	if(origin == Atlas::ShapeInfo::Origin::Centered) {
+		transform.dx = cv(bounds.centerX()) * scale;
+		transform.dy = cv(bounds.centerY()) * scale;
+	} else {
+		transform.dx = cv(bounds.left()) * scale;
+		transform.dy = cv(bounds.top()) * scale;
+	}
 
-	if(bounds.isEmpty()) return false;
+	Atlas::ShapeInfo info;
 
-	// Translate path so its bounding box top-left sits at the origin.
-	// All curve coordinates then live in [0, width] x [0, height]; tight
-	// bands, no wasted em-space from canvas offset.
-	const SkPath local = path.makeTransform(
-		SkMatrix::Translate(-bounds.left(), -bounds.top())
-	);
+	info.curves = std::move(curves);
+	info.origin = origin;
 
-	decomposePath(local, curves, scale);
-
-	if(curves.empty()) return false;
-
-	// Return the canvas-space offset in slughorn's scaled coordinate system.
-	// Layer::transform carries this so ShapeDrawable can add it to pos.
-	outTransform = Matrix::identity();
-	outTransform.dx = cv(bounds.left()) * scale;
-	outTransform.dy = cv(bounds.top()) * scale;
-
-	return true;
+	return { std::move(info), transform };
 }
 
 SkPath strokeToFill(
@@ -311,7 +289,7 @@ SkPath strokeToFill(
 	return skpathutils::FillPathWithPaint(src, paint);
 }
 
-bool loadShape(
+Matrix loadShape(
 	const SkPath& path,
 	Atlas& atlas,
 	uint32_t key,
@@ -319,42 +297,18 @@ bool loadShape(
 	bool autoMetrics,
 	Atlas::ShapeInfo::Origin origin
 ) {
-	Atlas::ShapeInfo info;
+	auto [info, transform] = decomposePath(path, scale, origin);
+
+	if(info.curves.empty()) return Matrix::identity();
 
 	info.autoMetrics = autoMetrics;
-	info.origin = origin;
-
-	decomposePath(path, info.curves, scale);
-
-	if(info.curves.empty()) return false;
 
 	atlas.addShape(key, info);
 
-	return true;
+	return transform;
 }
 
-bool loadShapeLocal(
-	const SkPath& path,
-	Atlas& atlas,
-	uint32_t key,
-	Matrix& outTransform,
-	slug_t scale,
-	bool autoMetrics,
-	Atlas::ShapeInfo::Origin origin
-) {
-	Atlas::ShapeInfo info;
-
-	info.autoMetrics = autoMetrics;
-	info.origin = origin;
-
-	if(!decomposePathLocal(path, info.curves, outTransform, scale)) return false;
-
-	atlas.addShape(key, info);
-
-	return true;
-}
-
-bool loadStrokedShape(
+Matrix loadStrokedShape(
 	const SkPath& path,
 	Atlas& atlas,
 	uint32_t key,

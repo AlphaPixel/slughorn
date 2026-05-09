@@ -94,11 +94,20 @@ inline Color colorFromNSVG(unsigned int packed) {
 // @p scale normalizes SVG canvas coordinates into em-space. For direct use, pass 1/image->width.
 // loadImage/loadFile/loadString handle this automatically.
 //
-// Returns the shifted curves and the canvas-space offset as a Matrix (dx/dy only; xx/yy are
-// identity). Store the Matrix in Layer::transform for correct composite positioning. Returns an
-// empty curves vector if the shape has no paths or a zero bounding box.
+// Returns a ShapeInfo (curves and origin pre-set) and a Matrix (dx/dy only; xx/yy are identity).
+// Store the Matrix in Layer::transform for correct composite positioning. Returns an empty ShapeInfo
+// if the shape has no paths or a zero bounding box.
+//
+// The returned transform depends on @p origin:
+//   Origin::Default  — transform.dx/dy = bbox corner * scale.
+//   Origin::Centered — transform.dx/dy = bbox center * scale; computeQuad still places the quad at
+//                      the correct canvas position, and the transform acts as a pivot point.
 // ================================================================================================
-std::pair<Atlas::Curves, Matrix> decomposePath( const NSVGshape* shape, slug_t scale=1.0_cv);
+std::pair<Atlas::ShapeInfo, Matrix> decomposePath(
+	const NSVGshape* shape,
+	slug_t scale=1.0_cv,
+	Atlas::ShapeInfo::Origin origin=Atlas::ShapeInfo::Origin::Default
+);
 
 // ================================================================================================
 // loadShape
@@ -167,7 +176,7 @@ CompositeShape loadString(
 namespace slughorn {
 namespace nanosvg {
 
-std::pair<Atlas::Curves, Matrix> decomposePath(const NSVGshape* shape, slug_t scale) {
+std::pair<Atlas::ShapeInfo, Matrix> decomposePath(const NSVGshape* shape, slug_t scale, Atlas::ShapeInfo::Origin origin) {
 	// NanoSVG pre-computes the bounding box for each shape.
 	const slug_t minX = cv(shape->bounds[0]) * scale;
 	const slug_t minY = cv(shape->bounds[1]) * scale;
@@ -204,22 +213,26 @@ std::pair<Atlas::Curves, Matrix> decomposePath(const NSVGshape* shape, slug_t sc
 
 	Matrix transform = Matrix::identity();
 
-	transform.dx = minX;
-	transform.dy = minY;
-
-	return { curves, transform };
-}
-
-Matrix loadShape(const NSVGshape* shape, Atlas& atlas, Key key, slug_t scale, Atlas::ShapeInfo::Origin origin) {
-	auto [curves, transform] = decomposePath(shape, scale);
-
-	if(curves.empty()) return Matrix::identity();
+	if(origin == Atlas::ShapeInfo::Origin::Centered) {
+		transform.dx = (minX + maxX) * 0.5_cv;
+		transform.dy = (minY + maxY) * 0.5_cv;
+	} else {
+		transform.dx = minX;
+		transform.dy = minY;
+	}
 
 	Atlas::ShapeInfo info;
 
-	// info.autoMetrics = true;
-	info.origin = origin;
 	info.curves = std::move(curves);
+	info.origin = origin;
+
+	return { std::move(info), transform };
+}
+
+Matrix loadShape(const NSVGshape* shape, Atlas& atlas, Key key, slug_t scale, Atlas::ShapeInfo::Origin origin) {
+	auto [info, transform] = decomposePath(shape, scale, origin);
+
+	if(info.curves.empty()) return Matrix::identity();
 
 	atlas.addShape(key, info);
 
