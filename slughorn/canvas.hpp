@@ -74,7 +74,7 @@ public:
 	Canvas(Atlas& atlas, KeyIterator key=KeyIterator()):
 	_atlas(atlas),
 	_key(key),
-	_decomposer(_pendingCurves) {
+	_decomposer(_activeCurves) {
 	}
 
 	// -------------------------------------------------------------------------
@@ -100,6 +100,7 @@ public:
 
 	void beginPath() {
 		_pendingCurves.clear();
+		_activeCurves.clear();
 
 		_decomposer._x = _decomposer._y = 0.0_cv;
 		_decomposer._sx = _decomposer._sy = 0.0_cv;
@@ -126,6 +127,10 @@ public:
 
 	void closePath() {
 		_decomposer.close();
+
+		for(const auto& c : _activeCurves) _pendingCurves.push_back(c);
+
+		_activeCurves.clear();
 	}
 
 	// -------------------------------------------------------------------------
@@ -400,6 +405,10 @@ public:
 		slug_t scale=1.0_cv,
 		Atlas::ShapeInfo::Origin origin=Atlas::ShapeInfo::Origin::Default
 	) {
+		for(const auto& c : _activeCurves) _pendingCurves.push_back(c);
+
+		_activeCurves.clear();
+
 		if(_pendingCurves.empty()) return false;
 
 		Atlas::Curves scaled = _scaleCurves(_pendingCurves, scale);
@@ -419,9 +428,27 @@ public:
 		return true;
 	}
 
-	// Expand the current pending path from a centerline description into a constant-width stroke
-	// outline in place. The result replaces the pending path; call fill(), stroke(), or
-	// defineShape() afterwards to commit the outline as a shape.
+	// Expand the active sub-path (curves since the last moveTo or beginPath) as a constant-width
+	// stroke outline and append it to the accumulated shape buffer.
+	// The active sub-path is consumed.
+	//
+	// Multiple strokePath() calls (and closePath() calls) can be chained within one beginPath()
+	// session. Each appends another closed sub-path to the shape accumulator. Together they
+	// participate in the non-zero winding rule exactly like fill sub-paths do.
+	//
+	// @p cw - if false (default) the outline is appended CCW (filled area). If true the outline
+	// is appended CW (subtracts coverage), enabling punch-outs when combined with a CCW outline
+	// in the same beginPath() session. The centerline itself does NOT need to be reversed — the
+	// cw flag reverses the assembled output, not the input path.
+	//
+	// Hollow stroke pattern (same centerline, two widths):
+	//
+	//   canvas.beginPath();
+	//   canvas.moveTo(...); canvas.lineTo(...);
+	//   canvas.strokePath(outerWidth);        // CCW outer wall
+	//   canvas.moveTo(...); canvas.lineTo(...); // same centerline
+	//   canvas.strokePath(innerWidth, true);   // CW inner wall -> punch-out
+	//   canvas.fill(color);
 	//
 	// Use this when you need the raw outline geometry without color (e.g. to pass to defineShape()).
 	// For the common case of drawing a colored stroke, use stroke() instead.
@@ -436,11 +463,11 @@ public:
 	//    bevel at very sharp angles.
 	// 3. Build lwall/rwall from per-point normals, then close the outline.
 	//
-	// Returns false if the pending path is empty.
-	bool strokePath(slug_t width) {
-		if(_pendingCurves.empty()) return false;
+	// Returns false if the active path is empty.
+	bool strokePath(slug_t width, bool cw=false) {
+		if(_activeCurves.empty()) return false;
 
-		Atlas::Curves centerline = std::move(_pendingCurves);
+		Atlas::Curves centerline = std::move(_activeCurves);
 
 		const slug_t h = width * 0.5_cv;
 		const slug_t tol = _decomposer.tolerance;
@@ -533,31 +560,41 @@ public:
 
 		if(lwall.empty()) return false;
 
-		// Reassemble closed outline (CCW winding, Y-up):
+		// Assemble closed outline (CCW winding, Y-up) into a local buffer:
 		// R wall forward -> end cap -> L wall reversed -> start cap
-		_pendingCurves.clear();
+		Atlas::Curves outline;
 
-		for(const auto& r : rwall) _pendingCurves.push_back(r);
+		for(const auto& r : rwall) outline.push_back(r);
 
 		{
 			const slug_t ax = rwall.back().x3, ay = rwall.back().y3;
 			const slug_t bx = lwall.back().x3, by = lwall.back().y3;
 
-			_pendingCurves.push_back({ax, ay, (ax + bx) * 0.5_cv, (ay + by) * 0.5_cv, bx, by});
+			outline.push_back({ax, ay, (ax + bx) * 0.5_cv, (ay + by) * 0.5_cv, bx, by});
 		}
 
-		// TODO: This is a ... strange bit of code. :)
 		for(size_t i = lwall.size(); i-- > 0;) {
 			const auto& l = lwall[i];
 
-			_pendingCurves.push_back({l.x3, l.y3, l.x2, l.y2, l.x1, l.y1});
+			outline.push_back({l.x3, l.y3, l.x2, l.y2, l.x1, l.y1});
 		}
 
 		{
 			const slug_t ax = lwall.front().x1, ay = lwall.front().y1;
 			const slug_t bx = rwall.front().x1, by = rwall.front().y1;
 
-			_pendingCurves.push_back({ax, ay, (ax + bx) * 0.5_cv, (ay + by) * 0.5_cv, bx, by});
+			outline.push_back({ax, ay, (ax + bx) * 0.5_cv, (ay + by) * 0.5_cv, bx, by});
+		}
+
+		// Append to the shape accumulator: forward = CCW (fills), reversed = CW (punch-out).
+		if(!cw) {
+			for(const auto& c : outline) _pendingCurves.push_back(c);
+		} else {
+			for(size_t i = outline.size(); i-- > 0;) {
+				const auto& c = outline[i];
+
+				_pendingCurves.push_back({c.x3, c.y3, c.x2, c.y2, c.x1, c.y1});
+			}
 		}
 
 		return true;
@@ -640,8 +677,8 @@ public:
 	// Number of Layers accumulated in the current composite.
 	size_t layerCount() const { return _composite.layers.size(); }
 
-	// True if the pending path has any curves.
-	bool hasPendingPath() const { return !_pendingCurves.empty(); }
+	// True if there are any curves in either the active sub-path or the shape accumulator.
+	bool hasPendingPath() const { return !_pendingCurves.empty() || !_activeCurves.empty(); }
 
 private:
 	Key _fill(
@@ -650,6 +687,10 @@ private:
 		Key key,
 		Atlas::ShapeInfo::Origin origin=Atlas::ShapeInfo::Origin::Default
 	) {
+		for(const auto& c : _activeCurves) _pendingCurves.push_back(c);
+
+		_activeCurves.clear();
+
 		if(_pendingCurves.empty()) return Key(0u);
 
 		Atlas::Curves scaled = _scaleCurves(_pendingCurves, scale);
@@ -843,7 +884,8 @@ private:
 
 	Atlas& _atlas;
 	KeyIterator _key;
-	Atlas::Curves _pendingCurves;
+	Atlas::Curves _activeCurves;  // current sub-path being drawn; consumed by closePath/strokePath
+	Atlas::Curves _pendingCurves; // accumulated closed sub-paths; submitted by fill/defineShape
 	CurveDecomposer _decomposer;
 	CompositeShape _composite;
 };
