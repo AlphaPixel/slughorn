@@ -790,6 +790,38 @@ PYBIND11_MODULE(slughorn, m) {
 	// ============================================================================================
 	py::class_<slughorn::Layer>(m, "Layer")
 		.def(py::init<>())
+
+		.def(
+			py::init([](
+				py::object key,
+				slughorn::Color color,
+				slughorn::Matrix transform,
+				slug_t scale,
+				uint32_t effect_id
+			) {
+				slughorn::Layer layer;
+
+				if (py::isinstance<py::str>(key)) {
+					layer.key = slughorn::Key(py::cast<std::string>(key));
+				}
+				else {
+					layer.key = py::cast<slughorn::Key>(key);
+				}
+
+				layer.color = color;
+				layer.transform = transform;
+				layer.scale = scale;
+				layer.effectId = effect_id;
+
+				return layer;
+			}),
+			py::arg("key"),
+			py::arg("color") = slughorn::Color{},
+			py::arg("transform") = slughorn::Matrix{},
+			py::arg("scale") = slug_t{1},
+			py::arg("effect_id") = 0
+		)
+
 		.def_readwrite("key", &slughorn::Layer::key,
 			"Key identifying the shape in the Atlas.")
 		.def_readwrite("color", &slughorn::Layer::color,
@@ -1031,7 +1063,8 @@ PYBIND11_MODULE(slughorn, m) {
 	// ============================================================================================
 	// slughorn.Atlas
 	// ============================================================================================
-	py::class_<slughorn::Atlas, std::shared_ptr<slughorn::Atlas>>(m, "Atlas")
+	// py::class_<slughorn::Atlas, std::shared_ptr<slughorn::Atlas>>(m, "Atlas")
+	py::class_<slughorn::Atlas>(m, "Atlas")
 		.def(py::init<>())
 
 		.def("add_shape", &slughorn::Atlas::addShape,
@@ -1516,7 +1549,8 @@ PYBIND11_MODULE(slughorn, m) {
 		[](const std::string& path) {
 			// serial::read() returns Atlas by value; move into a shared_ptr so
 			// Python's ref-counting and C++'s shared_ptr cooperate correctly.
-			return std::make_shared<slughorn::Atlas>(slughorn::serial::read(path));
+			// return std::make_shared<slughorn::Atlas>(slughorn::serial::read(path));
+			return slughorn::serial::read(path);
 		},
 		py::arg("path"),
 		"Load a .slug (JSON) or .slugb (binary) atlas file.\n"
