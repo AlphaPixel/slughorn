@@ -436,18 +436,18 @@ public:
 	// session. Each appends another closed sub-path to the shape accumulator. Together they
 	// participate in the non-zero winding rule exactly like fill sub-paths do.
 	//
-	// @p cw - if false (default) the outline is appended CCW (filled area). If true the outline
+	// @p ccw - if true (default) the outline is appended CCW (filled area). If false the outline
 	// is appended CW (subtracts coverage), enabling punch-outs when combined with a CCW outline
 	// in the same beginPath() session. The centerline itself does NOT need to be reversed — the
-	// cw flag reverses the assembled output, not the input path.
+	// ccw flag reverses the assembled output, not the input path.
 	//
 	// Hollow stroke pattern (same centerline, two widths):
 	//
 	//   canvas.beginPath();
 	//   canvas.moveTo(...); canvas.lineTo(...);
-	//   canvas.strokePath(outerWidth);        // CCW outer wall
+	//   canvas.strokePath(outerWidth);         // CCW outer wall
 	//   canvas.moveTo(...); canvas.lineTo(...); // same centerline
-	//   canvas.strokePath(innerWidth, true);   // CW inner wall -> punch-out
+	//   canvas.strokePath(innerWidth, false);   // CW inner wall -> punch-out
 	//   canvas.fill(color);
 	//
 	// Use this when you need the raw outline geometry without color (e.g. to pass to defineShape()).
@@ -464,7 +464,7 @@ public:
 	// 3. Build lwall/rwall from per-point normals, then close the outline.
 	//
 	// Returns false if the active path is empty.
-	bool strokePath(slug_t width, bool cw=false) {
+	bool strokePath(slug_t width, bool ccw=true) {
 		if(_activeCurves.empty()) return false;
 
 		Atlas::Curves centerline = std::move(_activeCurves);
@@ -587,7 +587,7 @@ public:
 		}
 
 		// Append to the shape accumulator: forward = CCW (fills), reversed = CW (punch-out).
-		if(!cw) {
+		if(ccw) {
 			for(const auto& c : outline) _pendingCurves.push_back(c);
 		} else {
 			for(size_t i = outline.size(); i-- > 0;) {
@@ -794,7 +794,7 @@ private:
 
 			// On the very first segment, snap the start to a moveTo if the path is empty; otherwise
 			// emit a lineTo to connect cleanly.
-			if(i == 0 && _pendingCurves.empty()) moveTo(p0x, p0y);
+			if(i == 0 && _activeCurves.empty() && _pendingCurves.empty()) moveTo(p0x, p0y);
 
 			else if(i == 0) {
 				// Connect current position to arc start with a line (arc() callers that want a

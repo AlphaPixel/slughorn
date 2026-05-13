@@ -45,7 +45,7 @@
 // ├─────────────────────────┼─────────────────────────────────┼──────────────────────────────┤
 // │ scurve_outline_geom     │ shape (geometry-only)           │ 8 — strokePath + defineShape │
 // ├─────────────────────────┼─────────────────────────────────┼──────────────────────────────┤
-// │ stadium_arcto           │ shape (named, known issue)      │ 9 — arcTo                    │
+// │ stadium_arcto           │ shape (named)                   │ 9 — arcTo                    │
 // ├─────────────────────────┼─────────────────────────────────┼──────────────────────────────┤
 // │ stadium_composite       │ composite [stadium_arcto]       │ 9                            │
 // └─────────────────────────┴─────────────────────────────────┴──────────────────────────────┘
@@ -224,13 +224,13 @@ int main(int argc, char** argv) {
 	// ============================================================================================
 	// Pattern 9: arcTo() rounded corners, stadium shape.
 	//
-	// NOTE: arcTo() has a known seam artifact at axis-aligned right-angle corners (item #7 on the
-	// cleanup list). For axis-aligned rounded rects, use roundedRect() instead (Pattern 3/4 above).
-	// This test preserves the arcTo() path for investigation.
+	// moveTo() must start at a tangent point on the shape boundary, not at a bounding-box corner.
+	// closePath() then returns to that same point with a zero-length segment. For axis-aligned
+	// rounded rects prefer roundedRect() (Patterns 3/4); arcTo() shines for irregular corners.
 	// ============================================================================================
 
 	canvas.beginPath();
-	canvas.moveTo(0.2_cv, 0.3_cv);
+	canvas.moveTo(0.3_cv, 0.3_cv);
 	canvas.arcTo(0.8_cv, 0.3_cv, 0.8_cv, 0.7_cv, 0.1_cv);
 	canvas.arcTo(0.8_cv, 0.7_cv, 0.2_cv, 0.7_cv, 0.1_cv);
 	canvas.arcTo(0.2_cv, 0.7_cv, 0.2_cv, 0.3_cv, 0.1_cv);

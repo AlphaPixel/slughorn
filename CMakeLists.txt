@@ -185,8 +185,8 @@ if(SLUGHORN_BUILD_TESTS)
 		# Convenience targets: regenerate canvas.slug when the binary changes,
 		# then inspect it via the CLI without needing to type paths manually.
 		#
-		#   make canvas-list   — list all shape + composite keys
-		#   make canvas-info   — atlas summary (dimensions, packing stats)
+		#   make canvas-list - list all shape + composite keys
+		#   make canvas-info - atlas summary (dimensions, packing stats)
 		#
 		set(_CANVAS_SLUG "${CMAKE_CURRENT_BINARY_DIR}/canvas.slug")
 
