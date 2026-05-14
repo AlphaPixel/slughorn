@@ -438,17 +438,17 @@ public:
 	//
 	// @p ccw - if true (default) the outline is appended CCW (filled area). If false the outline
 	// is appended CW (subtracts coverage), enabling punch-outs when combined with a CCW outline
-	// in the same beginPath() session. The centerline itself does NOT need to be reversed — the
+	// in the same beginPath() session. The centerline itself does NOT need to be reversed; the
 	// ccw flag reverses the assembled output, not the input path.
 	//
 	// Hollow stroke pattern (same centerline, two widths):
 	//
-	//   canvas.beginPath();
-	//   canvas.moveTo(...); canvas.lineTo(...);
-	//   canvas.strokePath(outerWidth);         // CCW outer wall
-	//   canvas.moveTo(...); canvas.lineTo(...); // same centerline
-	//   canvas.strokePath(innerWidth, false);   // CW inner wall -> punch-out
-	//   canvas.fill(color);
+	// canvas.beginPath();
+	// canvas.moveTo(...); canvas.lineTo(...);
+	// canvas.strokePath(outerWidth); // CCW outer wall
+	// canvas.moveTo(...); canvas.lineTo(...); // same centerline
+	// canvas.strokePath(innerWidth, false); // CW inner wall -> punch-out
+	// canvas.fill(color);
 	//
 	// Use this when you need the raw outline geometry without color (e.g. to pass to defineShape()).
 	// For the common case of drawing a colored stroke, use stroke() instead.
@@ -834,9 +834,10 @@ private:
 	// the bounding box is degenerate.
 	//
 	// The returned transform depends on @p origin:
-	//   Origin::Default  — transform.dx/dy = bbox corner (minX, minY).
-	//   Origin::Centered — transform.dx/dy = bbox center; computeQuad still places the quad at the
-	//                      correct canvas position, and the transform acts as a pivot point.
+	//
+	// Origin::Default - transform.dx/dy = bbox corner (minX, minY).
+	// Origin::Centered - transform.dx/dy = bbox center; computeQuad still places the quad at the
+	// correct canvas position, and the transform acts as a pivot point.
 	static std::pair<Atlas::Curves, Matrix> _toLocalOrigin(
 		const Atlas::Curves& src,
 		Atlas::ShapeInfo::Origin origin=Atlas::ShapeInfo::Origin::Default

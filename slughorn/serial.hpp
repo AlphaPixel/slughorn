@@ -288,7 +288,7 @@ json buildJson(
 		{"generator", "slughorn"}
 	};
 
-	j["tex_width"] = 512;
+	j["tex_width"] = atlas.getTextureWidth();
 	j["packing_stats"] = packingStatsToJson(atlas.getPackingStats());
 
 	// Buffer views

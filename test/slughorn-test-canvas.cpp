@@ -4,51 +4,51 @@
 //
 // There are three path-commit verbs:
 //
-// fill(color, scale, key?) -- commit as colored Layer
-// stroke(width, color, scale, key?) -- expand + commit as colored Layer
-// defineShape(key, scale) -- commit as geometry only (no Layer, no color)
+// fill(color, scale, key?) - commit as colored Layer
+// stroke(width, color, scale, key?) - expand + commit as colored Layer
+// defineShape(key, scale) - commit as geometry only (no Layer, no color)
 //
 // And one composite-commit verb:
 //
-// finalize() -- return in-progress CompositeShape, reset state
-// finalize(key) -- register CompositeShape in Atlas + reset
+// finalize() - return in-progress CompositeShape, reset state
+// finalize(key) - register CompositeShape in Atlas + reset
 //
 // strokePath(width) is the in-place path transformer for the rare case
 // where you need the raw outline before deciding how to commit it.
 //
-// ┌─────────────────────────┬─────────────────────────────────┬──────────────────────────────┐
-// │           Key           │              Type               │           Pattern            │
-// ├─────────────────────────┼─────────────────────────────────┼──────────────────────────────┤
-// │ s_0                     │ shape (auto-key)                │ 1 — fill auto-key            │
-// ├─────────────────────────┼─────────────────────────────────┼──────────────────────────────┤
-// │ tri_composite           │ composite [s_0]                 │ 1                            │
-// ├─────────────────────────┼─────────────────────────────────┼──────────────────────────────┤
-// │ circle_shape            │ shape (named)                   │ 2 — fill named               │
-// ├─────────────────────────┼─────────────────────────────────┼──────────────────────────────┤
-// │ circle_composite        │ composite [circle_shape]        │ 2                            │
-// ├─────────────────────────┼─────────────────────────────────┼──────────────────────────────┤
-// │ s_1..s_3                │ shapes (auto-key)               │ 3 — multi-layer auto         │
-// ├─────────────────────────┼─────────────────────────────────┼──────────────────────────────┤
-// │ three_layer             │ composite [s_1, s_2, s_3]       │ 3                            │
-// ├─────────────────────────┼─────────────────────────────────┼──────────────────────────────┤
-// │ badge_bg, badge_bar     │ shapes (named)                  │ 4 — multi-layer named        │
-// ├─────────────────────────┼─────────────────────────────────┼──────────────────────────────┤
-// │ badge_composite         │ composite [badge_bg, badge_bar] │ 4                            │
-// ├─────────────────────────┼─────────────────────────────────┼──────────────────────────────┤
-// │ rrect_geom              │ shape (geometry-only)           │ 5 — defineShape              │
-// ├─────────────────────────┼─────────────────────────────────┼──────────────────────────────┤
-// │ s_4                     │ shape (auto-key stroke)         │ 6 — stroke commit            │
-// ├─────────────────────────┼─────────────────────────────────┼──────────────────────────────┤
-// │ scurve_stroke_composite │ composite [s_4]                 │ 6                            │
-// ├─────────────────────────┼─────────────────────────────────┼──────────────────────────────┤
-// │ zigzag_stroke           │ shape (named stroke)            │ 7 — stroke named             │
-// ├─────────────────────────┼─────────────────────────────────┼──────────────────────────────┤
-// │ scurve_outline_geom     │ shape (geometry-only)           │ 8 — strokePath + defineShape │
-// ├─────────────────────────┼─────────────────────────────────┼──────────────────────────────┤
-// │ stadium_arcto           │ shape (named)                   │ 9 — arcTo                    │
-// ├─────────────────────────┼─────────────────────────────────┼──────────────────────────────┤
-// │ stadium_composite       │ composite [stadium_arcto]       │ 9                            │
-// └─────────────────────────┴─────────────────────────────────┴──────────────────────────────┘
+// +-------------------------+---------------------------------+------------------------------+
+// |           Key           |              Type               |           Pattern            |
+// +-------------------------+---------------------------------+------------------------------+
+// | s_0                     | shape (auto-key)                | 1 - fill auto-key            |
+// +-------------------------+---------------------------------+------------------------------+
+// | tri_composite           | composite [s_0]                 | 1                            |
+// +-------------------------+---------------------------------+------------------------------+
+// | circle_shape            | shape (named)                   | 2 - fill named               |
+// +-------------------------+---------------------------------+------------------------------+
+// | circle_composite        | composite [circle_shape]        | 2                            |
+// +-------------------------+---------------------------------+------------------------------+
+// | s_1..s_3                | shapes (auto-key)               | 3 - multi-layer auto         |
+// +-------------------------+---------------------------------+------------------------------+
+// | three_layer             | composite [s_1, s_2, s_3]       | 3                            |
+// +-------------------------+---------------------------------+------------------------------+
+// | badge_bg, badge_bar     | shapes (named)                  | 4 - multi-layer named        |
+// +-------------------------+---------------------------------+------------------------------+
+// | badge_composite         | composite [badge_bg, badge_bar] | 4                            |
+// +-------------------------+---------------------------------+------------------------------+
+// | rrect_geom              | shape (geometry-only)           | 5 - defineShape              |
+// +-------------------------+---------------------------------+------------------------------+
+// | s_4                     | shape (auto-key stroke)         | 6 - stroke commit            |
+// +-------------------------+---------------------------------+------------------------------+
+// | scurve_stroke_composite | composite [s_4]                 | 6                            |
+// +-------------------------+---------------------------------+------------------------------+
+// | zigzag_stroke           | shape (named stroke)            | 7 - stroke named             |
+// +-------------------------+---------------------------------+------------------------------+
+// | scurve_outline_geom     | shape (geometry-only)           | 8 - strokePath + defineShape |
+// +-------------------------+---------------------------------+------------------------------+
+// | stadium_arcto           | shape (named)                   | 9 - arcTo                    |
+// +-------------------------+---------------------------------+------------------------------+
+// | stadium_composite       | composite [stadium_arcto]       | 9                            |
+// +-------------------------+---------------------------------+------------------------------+
 
 #include "slughorn/canvas.hpp"
 

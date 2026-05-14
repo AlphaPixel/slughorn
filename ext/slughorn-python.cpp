@@ -931,14 +931,14 @@ PYBIND11_MODULE(slughorn, m) {
 		)
 		.def_readwrite("origin", &slughorn::Atlas::ShapeInfo::origin,
 			"Where the transform origin is placed relative to the shape geometry.\n"
-			"ShapeInfo.Origin.Default  — origin at the shape's bottom-left corner (existing behavior).\n"
-			"ShapeInfo.Origin.Centered — origin at the geometric center (width/2, height/2);\n"
+			"ShapeInfo.Origin.Default - origin at the shape's bottom-left corner (existing behavior).\n"
+			"ShapeInfo.Origin.Centered - origin at the geometric center (width/2, height/2);\n"
 			"  enables natural GPU-side rotation without translate-rotate-translate gymnastics."
 		)
 	;
 
 	py::enum_<slughorn::Atlas::ShapeInfo::Origin>(shapeinfo_, "Origin")
-		.value("Default",  slughorn::Atlas::ShapeInfo::Origin::Default)
+		.value("Default", slughorn::Atlas::ShapeInfo::Origin::Default)
 		.value("Centered", slughorn::Atlas::ShapeInfo::Origin::Centered)
 		.export_values()
 	;
@@ -1275,12 +1275,16 @@ PYBIND11_MODULE(slughorn, m) {
 			.def_readonly("iters", &RenderSampleResult::iters)
 			.def("__repr__", [](const RenderSampleResult& r) {
 				std::ostringstream ss;
-				ss << "RenderSampleResult(fill=" << r.fill
-				   << ", xcov=" << r.xcov
-				   << ", ycov=" << r.ycov
-				   << ", xwgt=" << r.xwgt
-				   << ", ywgt=" << r.ywgt
-				   << ", iters=" << r.iters << ")";
+
+				ss
+					<< "RenderSampleResult(fill=" << r.fill
+					<< ", xcov=" << r.xcov
+					<< ", ycov=" << r.ycov
+					<< ", xwgt=" << r.xwgt
+					<< ", ywgt=" << r.ywgt
+					<< ", iters=" << r.iters << ")"
+				;
+
 				return ss.str();
 			})
 		;
@@ -1442,10 +1446,14 @@ PYBIND11_MODULE(slughorn, m) {
 
 			// Commit ----------------------------------------------------------
 
-			// fill() — auto-key variant
+			// fill() - auto-key variant
 			.def("fill",
-				[](slughorn::canvas::Canvas& c, slughorn::Color color, slug_t scale,
-				   slughorn::Atlas::ShapeInfo::Origin origin) {
+				[](
+					slughorn::canvas::Canvas& c,
+					slughorn::Color color,
+					slug_t scale,
+					slughorn::Atlas::ShapeInfo::Origin origin
+				) {
 					return c.fill(color, scale, origin);
 				},
 				py::arg("color"), py::arg("scale") = 1.0f,
@@ -1453,10 +1461,15 @@ PYBIND11_MODULE(slughorn, m) {
 				"Commit the current path as a new Layer with the given color.\n"
 				"Returns the auto-generated Key, or Key(0) if the path was empty."
 			)
-			// fill() — named-key variant: shape is also addressable by key
+			// fill() - named-key variant: shape is also addressable by key
 			.def("fill",
-				[](slughorn::canvas::Canvas& c, slughorn::Color color, slug_t scale,
-				   slughorn::Key key, slughorn::Atlas::ShapeInfo::Origin origin) {
+				[](
+					slughorn::canvas::Canvas& c,
+					slughorn::Color color,
+					slug_t scale,
+					slughorn::Key key,
+					slughorn::Atlas::ShapeInfo::Origin origin
+				) {
 					return c.fill(color, scale, key, origin);
 				},
 				py::arg("color"), py::arg("scale"), py::arg("key"),
@@ -1465,8 +1478,12 @@ PYBIND11_MODULE(slughorn, m) {
 				"Returns key, or Key(0) if the path was empty."
 			)
 			.def("define_shape",
-				[](slughorn::canvas::Canvas& c, slughorn::Key key, slug_t scale,
-				   slughorn::Atlas::ShapeInfo::Origin origin) {
+				[](
+					slughorn::canvas::Canvas& c,
+					slughorn::Key key,
+					slug_t scale,
+					slughorn::Atlas::ShapeInfo::Origin origin
+				) {
 					return c.defineShape(key, scale, origin);
 				},
 				py::arg("key"), py::arg("scale") = 1.0f,
@@ -1474,7 +1491,7 @@ PYBIND11_MODULE(slughorn, m) {
 				"Register the current path as a named Shape (geometry only, no Layer).\n"
 				"Returns False if the path was empty."
 			)
-			// stroke_path() — in-place path transformer (expand centerline → filled outline)
+			// stroke_path() - in-place path transformer (expand centerline -> filled outline)
 			.def("stroke_path",
 				[](slughorn::canvas::Canvas& c, slug_t width) {
 					return c.strokePath(width);
@@ -1487,10 +1504,15 @@ PYBIND11_MODULE(slughorn, m) {
 				"stroke_path(w) then fill(color) for explicit two-step control, or use\n"
 				"stroke(w, color) for the common one-call form."
 			)
-			// stroke() — auto-key variant: stroke_path() + fill() in one call
+			// stroke() - auto-key variant: stroke_path() + fill() in one call
 			.def("stroke",
-				[](slughorn::canvas::Canvas& c, slug_t width, slughorn::Color color, slug_t scale,
-				   slughorn::Atlas::ShapeInfo::Origin origin) {
+				[](
+					slughorn::canvas::Canvas& c,
+					slug_t width,
+					slughorn::Color color,
+					slug_t scale,
+					slughorn::Atlas::ShapeInfo::Origin origin
+				) {
 					return c.stroke(width, color, scale, origin);
 				},
 				py::arg("width"), py::arg("color"), py::arg("scale") = 1.0f,
@@ -1499,10 +1521,16 @@ PYBIND11_MODULE(slughorn, m) {
 				"Equivalent to stroke_path(width) followed by fill(color, scale).\n"
 				"Returns the auto-generated Key, or Key(0) if the path was empty."
 			)
-			// stroke() — named-key variant
+			// stroke() - named-key variant
 			.def("stroke",
-				[](slughorn::canvas::Canvas& c, slug_t width, slughorn::Color color, slug_t scale,
-				   slughorn::Key key, slughorn::Atlas::ShapeInfo::Origin origin) {
+				[](
+					slughorn::canvas::Canvas& c,
+					slug_t width,
+					slughorn::Color color,
+					slug_t scale,
+					slughorn::Key key,
+					slughorn::Atlas::ShapeInfo::Origin origin
+				) {
 					return c.stroke(width, color, scale, key, origin);
 				},
 				py::arg("width"), py::arg("color"), py::arg("scale"), py::arg("key"),
@@ -1591,7 +1619,9 @@ PYBIND11_MODULE(slughorn, m) {
 	emoji.def("codepoint_to_name",
 		[](uint32_t cp) -> std::optional<std::string> {
 			auto sv = slughorn::emoji::codepointToName(cp);
+
 			if(!sv) return std::nullopt;
+
 			return std::string(*sv);
 		}, py::arg("codepoint"),
 		"Return the CLDR short name for a codepoint, or None."
@@ -1642,11 +1672,14 @@ PYBIND11_MODULE(slughorn, m) {
 	);
 
 	freetype.def("load_ascii_font",
-		[](const std::string& fontPath, slughorn::Atlas& atlas,
-		   std::optional<slughorn::Atlas::SplitStrategy> strategy)
-		{
+		[](
+			const std::string& fontPath,
+			slughorn::Atlas& atlas,
+			std::optional<slughorn::Atlas::SplitStrategy> strategy
+		) {
 			return slughorn::freetype::loadAsciiFont(
-				fontPath, atlas,
+				fontPath,
+				atlas,
 				strategy ? *strategy : slughorn::Atlas::SplitStrategy{}
 			);
 		},
@@ -1662,13 +1695,16 @@ PYBIND11_MODULE(slughorn, m) {
 	);
 
 	freetype.def("load_font_glyphs",
-		[](const std::string& fontPath,
-		   const std::vector<uint32_t>& codepoints,
-		   slughorn::Atlas& atlas,
-		   std::optional<slughorn::Atlas::SplitStrategy> strategy)
-		{
+		[](
+			const std::string& fontPath,
+			const std::vector<uint32_t>& codepoints,
+			slughorn::Atlas& atlas,
+			std::optional<slughorn::Atlas::SplitStrategy> strategy
+		) {
 			return slughorn::freetype::loadFontGlyphs(
-				fontPath, codepoints, atlas,
+				fontPath,
+				codepoints,
+				atlas,
 				strategy ? *strategy : slughorn::Atlas::SplitStrategy{}
 			);
 		},
@@ -1684,11 +1720,14 @@ PYBIND11_MODULE(slughorn, m) {
 	);
 
 	freetype.def("load_all_font_glyphs",
-		[](const std::string& fontPath, slughorn::Atlas& atlas,
-		   std::optional<slughorn::Atlas::SplitStrategy> strategy)
-		{
+		[](
+			const std::string& fontPath,
+			slughorn::Atlas& atlas,
+			std::optional<slughorn::Atlas::SplitStrategy> strategy
+		) {
 			return slughorn::freetype::loadAllFontGlyphs(
-				fontPath, atlas,
+				fontPath,
+				atlas,
 				strategy ? *strategy : slughorn::Atlas::SplitStrategy{}
 			);
 		},

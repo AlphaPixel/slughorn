@@ -99,9 +99,10 @@ inline Color colorFromNSVG(unsigned int packed) {
 // if the shape has no paths or a zero bounding box.
 //
 // The returned transform depends on @p origin:
-//   Origin::Default  — transform.dx/dy = bbox corner * scale.
-//   Origin::Centered — transform.dx/dy = bbox center * scale; computeQuad still places the quad at
-//                      the correct canvas position, and the transform acts as a pivot point.
+//
+// Origin::Default - transform.dx/dy = bbox corner * scale.
+// Origin::Centered - transform.dx/dy = bbox center * scale; computeQuad still places the quad at
+// the correct canvas position, and the transform acts as a pivot point.
 // ================================================================================================
 std::pair<Atlas::ShapeInfo, Matrix> decomposePath(
 	const NSVGshape* shape,
