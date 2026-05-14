@@ -12,7 +12,28 @@
 // TODO: Something like `slugi_t` for `uint32_t`, since it SEEMS to be the only non-float type
 // we're using (beyond `size_t`).
 
+constexpr uint8_t SLUGHORN_VERSION_MAJOR = 0;
+constexpr uint8_t SLUGHORN_VERSION_MINOR = 0;
+constexpr uint8_t SLUGHORN_VERSION_PATCH = 1;
+
 namespace slughorn {
+
+// Intended to be used like this: `auto [major, minor, patch] = slughorn::versionNumbers();`
+constexpr auto versionNumbers() {
+	return std::make_tuple(
+		SLUGHORN_VERSION_MAJOR,
+		SLUGHORN_VERSION_MINOR,
+		SLUGHORN_VERSION_PATCH
+	);
+}
+
+inline std::string versionString() {
+	return
+		std::to_string(SLUGHORN_VERSION_MAJOR) + "." +
+		std::to_string(SLUGHORN_VERSION_MINOR) + "." +
+		std::to_string(SLUGHORN_VERSION_PATCH)
+	;
+}
 
 using slug_t = float;
 

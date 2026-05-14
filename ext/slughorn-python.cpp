@@ -727,6 +727,11 @@ PYBIND11_MODULE(slughorn, m) {
 		.def("__repr__", [](const slughorn::Color& c) { return streamRepr(c); })
 	;
 
+	m.attr("VERSION_MAJOR") = py::int_(SLUGHORN_VERSION_MAJOR);
+	m.attr("VERSION_MINOR") = py::int_(SLUGHORN_VERSION_MINOR);
+	m.attr("VERSION_PATCH") = py::int_(SLUGHORN_VERSION_PATCH);
+	m.attr("version") = slughorn::versionString();
+
 	m.attr("TOLERANCE_DRAFT") = py::float_(slughorn::TOLERANCE_DRAFT);
 	m.attr("TOLERANCE_BALANCED") = py::float_(slughorn::TOLERANCE_BALANCED);
 	m.attr("TOLERANCE_FINE") = py::float_(slughorn::TOLERANCE_FINE);
