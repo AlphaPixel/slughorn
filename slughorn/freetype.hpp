@@ -559,7 +559,7 @@ static std::vector<GradientStop> extractColorStops(
 
 static PaintResult traversePaint(
 	FT_Face face,
-	FT_OpaquePaint* opaquePaint,
+	const FT_OpaquePaint* opaquePaint,
 	FT_Color* palette,
 	slug_t emScale,
 	slug_t advance,
@@ -583,7 +583,7 @@ static PaintResult traversePaint(
 // -------------------------------------------------------------------------
 static PaintResult traversePaint(
 	FT_Face face,
-	FT_OpaquePaint* opaquePaint,
+	const FT_OpaquePaint* opaquePaint,
 	FT_Color* palette,
 	slug_t emScale,
 	slug_t advance,
@@ -752,6 +752,85 @@ static PaintResult traversePaint(
 			return traversePaint(
 				face, &paint.u.translate.paint, palette,
 				emScale, advance, combined,
+				codepoint, layerIdx, atlas, out, strategy
+			);
+		}
+
+		// -----------------------------------------------------------------
+		// Scale - scale_x/y are dimensionless 16.16; center is font units.
+		// -----------------------------------------------------------------
+		case FT_COLR_PAINTFORMAT_SCALE: {
+			const auto& s = paint.u.scale;
+			const slug_t sx = cv(s.scale_x) / 65536.0_cv;
+			const slug_t sy = cv(s.scale_y) / 65536.0_cv;
+			const slug_t cx = cv(s.center_x) / 65536.0_cv * emScale;
+			const slug_t cy = cv(s.center_y) / 65536.0_cv * emScale;
+
+			slughorn::Matrix m;
+
+			m.xx = sx;
+			m.yy = sy;
+			m.dx = cx * (1.0_cv - sx);
+			m.dy = cy * (1.0_cv - sy);
+
+			return traversePaint(
+				face, &s.paint, palette,
+				emScale, advance, m * parentMatrix,
+				codepoint, layerIdx, atlas, out, strategy
+			);
+		}
+
+		// -----------------------------------------------------------------
+		// Rotate - angle is degrees/180 in 16.16 (x angle = radians);
+		// center is in font units.
+		// -----------------------------------------------------------------
+		case FT_COLR_PAINTFORMAT_ROTATE: {
+			const auto& r = paint.u.rotate;
+			const slug_t theta = cv(r.angle) / 65536.0_cv * cv(M_PI);
+			const slug_t c = cv(std::cos(static_cast<double>(theta)));
+			const slug_t s = cv(std::sin(static_cast<double>(theta)));
+			const slug_t cx = cv(r.center_x) / 65536.0_cv * emScale;
+			const slug_t cy = cv(r.center_y) / 65536.0_cv * emScale;
+
+			slughorn::Matrix m;
+
+			m.xx = c;
+			m.xy = -s;
+			m.yx = s;
+			m.yy = c;
+			m.dx = cx * (1.0_cv - c) + s * cy;
+			m.dy = cy * (1.0_cv - c) - s * cx;
+
+			return traversePaint(
+				face, &r.paint, palette,
+				emScale, advance, m * parentMatrix,
+				codepoint, layerIdx, atlas, out, strategy
+			);
+		}
+
+		// -----------------------------------------------------------------
+		// Skew - angles are degrees/180 in 16.16; center is in font units.
+		// x' = x + tan(ax) * y, y' = y + tan(ay) * x
+		// -----------------------------------------------------------------
+		case FT_COLR_PAINTFORMAT_SKEW: {
+			const auto& sk = paint.u.skew;
+			const slug_t tax = cv(std::tan(static_cast<double>(cv(sk.x_skew_angle) / 65536.0_cv * cv(M_PI))));
+			const slug_t tay = cv(std::tan(static_cast<double>(cv(sk.y_skew_angle) / 65536.0_cv * cv(M_PI))));
+			const slug_t cx = cv(sk.center_x) / 65536.0_cv * emScale;
+			const slug_t cy = cv(sk.center_y) / 65536.0_cv * emScale;
+
+			slughorn::Matrix m;
+
+			m.xx = 1.0_cv;
+			m.xy = tax;
+			m.yx = tay;
+			m.yy = 1.0_cv;
+			m.dx = -tax * cy;
+			m.dy = -tay * cx;
+
+			return traversePaint(
+				face, &sk.paint, palette,
+				emScale, advance, m * parentMatrix,
 				codepoint, layerIdx, atlas, out, strategy
 			);
 		}

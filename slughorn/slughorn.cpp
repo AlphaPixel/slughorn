@@ -319,7 +319,13 @@ void Atlas::rasterizeGradients() {
 	_packingStats.gradientTexelsTotal = GRADIENT_STRIP_WIDTH * numGradients;
 
 	for(uint32_t g = 0; g < numGradients; g++) {
-		const auto& grad = _gradients[g];
+		auto& grad = _gradients[g];
+
+		std::sort(
+			grad.stops.begin(),
+			grad.stops.end(),
+			[](const GradientStop& a, const GradientStop& b) { return a.t < b.t; }
+		);
 
 		if(grad.stops.empty()) continue;
 
