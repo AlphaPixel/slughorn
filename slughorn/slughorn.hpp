@@ -296,6 +296,7 @@ struct CompositeShape {
 class Atlas {
 public:
 	Atlas();
+	Atlas(uint32_t texWidth);
 	virtual ~Atlas();
 
 	// A single quadratic Bezier segment: p1 -> p2 (control) -> p3.
@@ -390,7 +391,7 @@ public:
 
 		// Controls where the transform origin is placed relative to the shape geometry.
 		// Default: origin at the shape's bottom-left corner (existing behavior).
-		// Centered: origin at the geometric center (width/2, height/2) — enables natural
+		// Centered: origin at the geometric center (width/2, height/2) - enables natural
 		// GPU-side rotation (e.g. clock hands) without manual translate-rotate-translate.
 		enum class Origin { Default, Centered };
 
@@ -486,9 +487,10 @@ public:
 	// normal band-count path without an explicit placement strategy object.
 	//
 	// Example:
-	//   Atlas::SplitStrategy adaptive = [](const Atlas::Curves& c) {
-	//       return Atlas::computeAdaptiveSplits(c, 8, 8);
-	//   };
+	//
+	// Atlas::SplitStrategy adaptive = [](const Atlas::Curves& c) {
+	//    return Atlas::computeAdaptiveSplits(c, 8, 8);
+	// };
 	using SplitStrategy = std::function<
 		std::pair<std::vector<slug_t>, std::vector<slug_t>>(const Curves&)
 	>;
@@ -497,9 +499,10 @@ public:
 	// Split placement strategies
 	//
 	// All compute*Splits functions share the same contract:
-	//   - Take curves + band counts, return numBands-1 normalized [0,1] fractions sorted ascending.
-	//   - Assign {splitsX, splitsY} directly to ShapeInfo::splitsX / splitsY before addShape().
-	//   - numBands <= 1 for either axis returns an empty vector for that axis.
+	//
+	// - Take curves + band counts, return numBands-1 normalized [0,1] fractions sorted ascending.
+	// - Assign {splitsX, splitsY} directly to ShapeInfo::splitsX / splitsY before addShape().
+	// - numBands <= 1 for either axis returns an empty vector for that axis.
 	// --------------------------------------------------------------------------------------------
 
 	// Sweep-line valley placement: projects each curve's bounding box onto each axis, builds a
@@ -607,6 +610,9 @@ public:
 		_built = true;
 	}
 
+	// Get the texture width used for this atlas
+	uint32_t getTextureWidth() const { return _texWidth; }
+
 private:
 	// --------------------------------------------------------------------------------------------
 	// Internal build structures (discarded after build())
@@ -658,7 +664,7 @@ private:
 
 	bool _built = false;
 
-	static constexpr uint32_t TEX_WIDTH = 512;
+	uint32_t _texWidth;
 };
 
 // ================================================================================================

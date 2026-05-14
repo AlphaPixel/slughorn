@@ -52,9 +52,10 @@ namespace cairo {
 // in Layer::transform.
 //
 // The returned transform depends on @p origin:
-//   Origin::Default  — transform.dx/dy = bbox corner (x1, y1) * scale.
-//   Origin::Centered — transform.dx/dy = bbox center * scale; computeQuad will still place the
-//                      quad at the correct canvas position, and the transform acts as a pivot.
+//
+// Origin::Default - transform.dx/dy = bbox corner (x1, y1) * scale.
+// Origin::Centered - transform.dx/dy = bbox center * scale; computeQuad will still place the
+// quad at the correct canvas position, and the transform acts as a pivot.
 //
 // @p scale is applied uniformly to every coordinate after the local shift. Use it to normalize path
 // coordinates into the em-square slughorn expects (e.g. 1/100 if your path is built in a 100-unit

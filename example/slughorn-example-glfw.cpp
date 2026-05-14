@@ -98,7 +98,9 @@ uniform usampler2D u_bandTexture;
 
 out vec4 fragColor;
 
-// Must match slughorn::Atlas::TEX_WIDTH == 512 == 1<<9
+// Hardcoded to log2(512) = 9, matching the default Atlas() constructor.
+// If using Atlas(uint32_t texWidth), replace with: int(log2(atlas.getTextureWidth()))
+// and pass as a uniform rather than a define.
 #define TEX_WIDTH 9
 
 // Must match slughorn::Atlas::INDIRECTION_SIZE

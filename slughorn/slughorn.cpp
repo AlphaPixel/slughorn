@@ -13,6 +13,7 @@
 #endif
 
 #include <algorithm>
+#include <cassert>
 #include <cstring>
 
 using namespace slughorn::literals;
@@ -167,7 +168,13 @@ uint32_t alignCursorForSpan(uint32_t cursor, uint32_t width, uint32_t span) {
 
 namespace slughorn {
 
-Atlas::Atlas() = default;
+Atlas::Atlas() : _texWidth(512) {}
+
+Atlas::Atlas(uint32_t texWidth) : _texWidth(texWidth) {
+	// Must be a power of two: the shader uses texWidth as a bit-shift count (log2),
+	// so non-power-of-two widths would produce incorrect band coordinate wrapping.
+	assert(texWidth > 0 && (texWidth & (texWidth - 1)) == 0);
+}
 Atlas::~Atlas() = default;
 
 // ================================================================================================
@@ -199,7 +206,7 @@ std::pair<std::vector<slug_t>, std::vector<slug_t>> Atlas::computeAdaptiveSplits
 
 	return {
 		computeAxisSplits(curves, /*useY=*/false, minX, maxX, rangeX, nX),
-		computeAxisSplits(curves, /*useY=*/true,  minY, maxY, rangeY, nY),
+		computeAxisSplits(curves, /*useY=*/true, minY, maxY, rangeY, nY),
 	};
 }
 
@@ -521,19 +528,19 @@ void Atlas::packTextures() {
 
 	for(const auto& kv : _build) {
 		for(size_t i = 0; i < kv.second.curves.size(); i++) {
-			totalCurveTexels = alignCursorForSpan(totalCurveTexels, TEX_WIDTH, 2);
+			totalCurveTexels = alignCursorForSpan(totalCurveTexels, _texWidth, 2);
 			totalCurveTexels += 2;
 		}
 	}
 
-	const uint32_t curveTexHeight = std::max(1u, (totalCurveTexels + TEX_WIDTH - 1) / TEX_WIDTH);
+	const uint32_t curveTexHeight = std::max(1u, (totalCurveTexels + _texWidth - 1) / _texWidth);
 
-	_curveData.width = TEX_WIDTH;
+	_curveData.width = _texWidth;
 	_curveData.height = curveTexHeight;
 	_curveData.format = TextureData::Format::RGBA32F;
 
 	// 4 floats per texel
-	_curveData.bytes.assign(size_t(TEX_WIDTH) * curveTexHeight * 4 * sizeof(float), 0);
+	_curveData.bytes.assign(size_t(_texWidth) * curveTexHeight * 4 * sizeof(float), 0);
 
 	// --------------------------------------------------------------------------------------------
 	// Pass 1: measure band texture height
@@ -549,7 +556,7 @@ void Atlas::packTextures() {
 		const uint32_t indirSize = numBandHeaders > 0 ? 2 * INDIRECTION_SIZE : 0;
 		const uint32_t blockSize = indirSize + numBandHeaders;
 
-		totalBandTexels = alignCursorForSpan(totalBandTexels, TEX_WIDTH, blockSize);
+		totalBandTexels = alignCursorForSpan(totalBandTexels, _texWidth, blockSize);
 
 		uint32_t cursor = totalBandTexels + blockSize;
 
@@ -557,7 +564,7 @@ void Atlas::packTextures() {
 			for(const auto& band : bands) {
 				const auto count = static_cast<uint32_t>(band.curveIndices.size());
 
-				cursor = alignCursorForSpan(cursor, TEX_WIDTH, count);
+				cursor = alignCursorForSpan(cursor, _texWidth, count);
 				cursor += count;
 			}
 		};
@@ -568,39 +575,39 @@ void Atlas::packTextures() {
 		totalBandTexels = cursor;
 	}
 
-	const uint32_t bandTexHeight = std::max(1u, (totalBandTexels + TEX_WIDTH - 1) / TEX_WIDTH);
+	const uint32_t bandTexHeight = std::max(1u, (totalBandTexels + _texWidth - 1) / _texWidth);
 
-	_bandData.width = TEX_WIDTH;
+	_bandData.width = _texWidth;
 	_bandData.height = bandTexHeight;
 	_bandData.format = TextureData::Format::RGBA16UI;
 
 	// 4 uint16_t per texel
-	_bandData.bytes.assign(size_t(TEX_WIDTH) * bandTexHeight * 4 * sizeof(uint16_t), 0);
+	_bandData.bytes.assign(size_t(_texWidth) * bandTexHeight * 4 * sizeof(uint16_t), 0);
 
 	// --------------------------------------------------------------------------------------------
 	// Write helpers - write directly into TextureData::bytes
 	// --------------------------------------------------------------------------------------------
 	auto writeCurveTexel = [&](uint32_t idx, slug_t r, slug_t g, slug_t b, slug_t a) {
-		const uint32_t x = idx % TEX_WIDTH;
-		const uint32_t y = idx / TEX_WIDTH;
+		const uint32_t x = idx % _texWidth;
+		const uint32_t y = idx / _texWidth;
 
 		if(y >= curveTexHeight) return;
 
 		float* p = reinterpret_cast<float*>(
-			_curveData.bytes.data() + (size_t(y) * TEX_WIDTH + x) * 4 * sizeof(float)
+			_curveData.bytes.data() + (size_t(y) * _texWidth + x) * 4 * sizeof(float)
 		);
 
 		p[0] = r; p[1] = g; p[2] = b; p[3] = a;
 	};
 
 	auto writeBandTexel = [&](uint32_t idx, uint16_t r, uint16_t g, uint16_t b, uint16_t a) {
-		const uint32_t x = idx % TEX_WIDTH;
-		const uint32_t y = idx / TEX_WIDTH;
+		const uint32_t x = idx % _texWidth;
+		const uint32_t y = idx / _texWidth;
 
 		if(y >= bandTexHeight) return;
 
 		uint16_t* p = reinterpret_cast<uint16_t*>(
-			_bandData.bytes.data() + (size_t(y) * TEX_WIDTH + x) * 4 * sizeof(uint16_t)
+			_bandData.bytes.data() + (size_t(y) * _texWidth + x) * 4 * sizeof(uint16_t)
 		);
 
 		p[0] = r; p[1] = g; p[2] = b; p[3] = a;
@@ -612,11 +619,11 @@ void Atlas::packTextures() {
 	// Alignment wrappers record padding waste into _packingStats automatically.
 	// --------------------------------------------------------------------------------------------
 	_packingStats = PackingStats{};
-	_packingStats.curveTexelsTotal = TEX_WIDTH * curveTexHeight;
-	_packingStats.bandTexelsTotal = TEX_WIDTH * bandTexHeight;
+	_packingStats.curveTexelsTotal = _texWidth * curveTexHeight;
+	_packingStats.bandTexelsTotal = _texWidth * bandTexHeight;
 
 	auto alignCurve = [&](uint32_t cursor, uint32_t span) -> uint32_t {
-		const uint32_t aligned = alignCursorForSpan(cursor, TEX_WIDTH, span);
+		const uint32_t aligned = alignCursorForSpan(cursor, _texWidth, span);
 
 		_packingStats.curveTexelsPadding += aligned - cursor;
 
@@ -624,7 +631,7 @@ void Atlas::packTextures() {
 	};
 
 	auto alignBand = [&](uint32_t cursor, uint32_t span) -> uint32_t {
-		const uint32_t aligned = alignCursorForSpan(cursor, TEX_WIDTH, span);
+		const uint32_t aligned = alignCursorForSpan(cursor, _texWidth, span);
 
 		_packingStats.bandTexelsPadding += aligned - cursor;
 
@@ -655,8 +662,10 @@ void Atlas::packTextures() {
 		}
 
 		// Band texture block layout per shape:
-		//   [indirY x INDIRECTION_SIZE][indirX x INDIRECTION_SIZE][hband headers][vband headers]
-		//   followed by curve index lists (aligned, possibly wrapping rows via slug_CalcBandLoc)
+		//
+		// [indirY x INDIRECTION_SIZE][indirX x INDIRECTION_SIZE][hband headers][vband headers]
+		//
+		// followed by curve index lists (aligned, possibly wrapping rows via slug_CalcBandLoc)
 		// Empty-curve shapes (numBandHeaders == 0) get no indirection block, same as before.
 		Shape sd = g.metrics;
 
@@ -666,19 +675,19 @@ void Atlas::packTextures() {
 		const uint32_t indirSize = numBandHeaders > 0 ? 2 * INDIRECTION_SIZE : 0;
 		const uint32_t blockSize = indirSize + numBandHeaders;
 
-		if(blockSize > TEX_WIDTH) continue;
+		if(blockSize > _texWidth) continue;
 
 		bandTexelOffset = alignBand(bandTexelOffset, blockSize);
 
 		const uint32_t shapeStart = bandTexelOffset;
 
-		sd.bandTexX = shapeStart % TEX_WIDTH;
-		sd.bandTexY = shapeStart / TEX_WIDTH;
+		sd.bandTexX = shapeStart % _texWidth;
+		sd.bandTexY = shapeStart / _texWidth;
 
 		// Write indirection tables (only when shape has geometry).
 		if(indirSize > 0 && g.indirY.size() == INDIRECTION_SIZE && g.indirX.size() == INDIRECTION_SIZE) {
 			for(uint32_t q = 0; q < INDIRECTION_SIZE; q++) {
-				writeBandTexel(shapeStart + q,                    g.indirY[q], 0, 0, 0);
+				writeBandTexel(shapeStart + q, g.indirY[q], 0, 0, 0);
 				writeBandTexel(shapeStart + INDIRECTION_SIZE + q, g.indirX[q], 0, 0, 0);
 			}
 
@@ -697,7 +706,7 @@ void Atlas::packTextures() {
 				auto count = static_cast<uint32_t>(band.curveIndices.size());
 
 				// truncate oversized lists
-				if(count > TEX_WIDTH) count = 0;
+				if(count > _texWidth) count = 0;
 
 				cursor = alignBand(cursor, count);
 
@@ -711,8 +720,8 @@ void Atlas::packTextures() {
 
 					writeBandTexel(
 						cursor,
-						static_cast<uint16_t>(curveLoc % TEX_WIDTH),
-						static_cast<uint16_t>(curveLoc / TEX_WIDTH),
+						static_cast<uint16_t>(curveLoc % _texWidth),
+						static_cast<uint16_t>(curveLoc / _texWidth),
 						0, 0
 					);
 

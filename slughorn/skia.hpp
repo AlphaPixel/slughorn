@@ -53,13 +53,13 @@ namespace skia {
 //
 // The returned transform depends on @p origin:
 //
-//   Origin::Default  — transform.dx/dy = bounds.left/top * scale (bbox corner). Pass directly to
-//                      Layer::transform; computeQuad will reconstruct the correct world position.
+// Origin::Defaulf - transform.dx/dy = bounds.left/top * scale (bbox corner). Pass directly to
+// Layer::transform; computeQuad will reconstruct the correct world position.
 //
-//   Origin::Centered — transform.dx/dy = bounds.centerX/Y * scale (bbox center). Pass directly to
-//                      Layer::transform; computeQuad subtracts originX/Y (= rangeX/2, rangeY/2)
-//                      and the quad still lands at the correct canvas position. Use this when the
-//                      transform should act as a pivot point for GPU-side rotation.
+// Origin::Centered - transform.dx/dy = bounds.centerX/Y * scale (bbox center). Pass directly to
+// Layer::transform; computeQuad subtracts originX/Y (= rangeX/2, rangeY/2) and the quad still lands
+// at the correct canvas position. Use this when the transform should act as a pivot point for
+// GPU-side rotation.
 //
 // @p scale is applied uniformly to every coordinate after the local shift. Pass 1.0 if coordinates
 // are already normalized.
