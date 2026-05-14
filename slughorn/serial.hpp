@@ -247,7 +247,9 @@ json packingStatsToJson(const Atlas::PackingStats& p) {
 		{"curve_texels_total", p.curveTexelsTotal},
 		{"band_texels_used", p.bandTexelsUsed},
 		{"band_texels_padding", p.bandTexelsPadding},
-		{"band_texels_total", p.bandTexelsTotal}
+		{"band_texels_total", p.bandTexelsTotal},
+		{"gradient_count", p.gradientCount},
+		{"gradient_texels_total", p.gradientTexelsTotal}
 	};
 }
 
@@ -260,6 +262,8 @@ Atlas::PackingStats packingStatsFromJson(const json& j) {
 	p.bandTexelsUsed = j.at("band_texels_used").get<uint32_t>();
 	p.bandTexelsPadding = j.at("band_texels_padding").get<uint32_t>();
 	p.bandTexelsTotal = j.at("band_texels_total").get<uint32_t>();
+	p.gradientCount = j.value("gradient_count", 0u);
+	p.gradientTexelsTotal = j.value("gradient_texels_total", 0u);
 
 	return p;
 }
@@ -271,14 +275,34 @@ Atlas::PackingStats packingStatsFromJson(const json& j) {
 // embedBase64=false -> .slugb: bufferViews contain byteOffset into BIN chunk
 // -----------------------------------------------------------------------------
 
+json gradientTypeToString(GradientInfo::Type t) {
+	switch(t) {
+		case GradientInfo::Type::Linear: return "linear";
+		case GradientInfo::Type::Radial: return "radial";
+		case GradientInfo::Type::Sweep: return "sweep";
+	}
+
+	return "linear";
+}
+
+GradientInfo::Type gradientTypeFromString(const std::string& s) {
+	if(s == "radial") return GradientInfo::Type::Radial;
+	if(s == "sweep") return GradientInfo::Type::Sweep;
+
+	return GradientInfo::Type::Linear;
+}
+
 json buildJson(
 	const Atlas& atlas,
 	bool embedBase64,
 	uint32_t curveByteOffset=0,
-	uint32_t bandByteOffset=0
+	uint32_t bandByteOffset=0,
+	uint32_t gradByteOffset=0
 ) {
 	const Atlas::TextureData& curve = atlas.getCurveTextureData();
 	const Atlas::TextureData& band = atlas.getBandTextureData();
+	const Atlas::TextureData& grad = atlas.getGradientTextureData();
+	const bool hasGradients = !grad.bytes.empty();
 
 	json j;
 
@@ -311,16 +335,69 @@ json buildJson(
 		bv0["data"] = base64Encode(curve.bytes);
 		bv1["byteOffset"] = 0;
 		bv1["data"] = base64Encode(band.bytes);
-	}
-
-	else {
+	} else {
 		bv0["byteOffset"] = curveByteOffset;
 		bv1["byteOffset"] = bandByteOffset;
 	}
 
-	j["bufferViews"] = json::array({ bv0, bv1 });
+	json bufferViews = json::array({ bv0, bv1 });
+
+	if(hasGradients) {
+		json bv2 = {
+			{"byteLength", grad.bytes.size()},
+			{"format", "RGBA8"},
+			{"width", grad.width},
+			{"height", grad.height}
+		};
+
+		if(embedBase64) {
+			bv2["byteOffset"] = 0;
+			bv2["data"] = base64Encode(grad.bytes);
+		}
+
+		else bv2["byteOffset"] = gradByteOffset;
+
+		bufferViews.push_back(bv2);
+
+		j["gradient_texture"] = 2;
+	}
+
+	j["bufferViews"] = bufferViews;
 	j["curve_texture"] = 0;
 	j["band_texture"] = 1;
+
+	// Gradient metadata
+	if(hasGradients) {
+		json gradients = json::array();
+
+		for(const auto& gi : atlas.getGradients()) {
+			json stops = json::array();
+
+			for(const auto& s : gi.stops) {
+				json jstop;
+				jstop["t"] = s.t;
+				jstop["color"] = json::array({s.color.r, s.color.g, s.color.b, s.color.a});
+				stops.push_back(jstop);
+			}
+
+			json jgi;
+
+			jgi["type"] = gradientTypeToString(gi.type);
+			jgi["transform"] = json::array({
+				gi.transform.xx, gi.transform.yx,
+				gi.transform.xy, gi.transform.yy,
+				gi.transform.dx, gi.transform.dy
+			});
+			jgi["inner_radius"] = gi.innerRadius;
+			jgi["start_angle"] = gi.startAngle;
+			jgi["end_angle"] = gi.endAngle;
+			jgi["stops"] = stops;
+
+			gradients.push_back(jgi);
+		}
+
+		j["gradients"] = gradients;
+	}
 
 	// Shapes
 	json shapes = json::array();
@@ -363,7 +440,8 @@ json buildJson(
 					layer.transform.xy, layer.transform.yy,
 					layer.transform.dx, layer.transform.dy
 				}},
-				{"effect_id", layer.effectId}
+				{"effect_id", layer.effectId},
+				{"gradient_id", layer.gradientId}
 			});
 		}
 
@@ -404,6 +482,7 @@ Atlas atlasFromJson(
 
 		if (fmt == "RGBA32F") td.format = Atlas::TextureData::Format::RGBA32F;
 		else if(fmt == "RGBA16UI") td.format = Atlas::TextureData::Format::RGBA16UI;
+		else if(fmt == "RGBA8") td.format = Atlas::TextureData::Format::RGBA8;
 		else throw std::runtime_error("slughorn-serial: unknown texture format '" + fmt + "'");
 
 		if(binChunk) {
@@ -433,6 +512,38 @@ Atlas atlasFromJson(
 	sd.curveData = loadTexture(j.at("curve_texture"));
 	sd.bandData = loadTexture(j.at("band_texture"));
 	sd.packingStats = packingStatsFromJson(j.at("packing_stats"));
+
+	if(j.contains("gradient_texture")) sd.gradientData = loadTexture(j.at("gradient_texture"));
+
+	if(j.contains("gradients")) {
+		for(const json& jg : j.at("gradients")) {
+			GradientInfo gi;
+
+			gi.type = gradientTypeFromString(jg.value("type", "linear"));
+			gi.innerRadius = jg.value("inner_radius", 0.0f);
+			gi.startAngle = jg.value("start_angle", 0.0f);
+			gi.endAngle = jg.value("end_angle", 1.0f);
+
+			if(jg.contains("transform")) {
+				const auto& jt = jg.at("transform");
+				gi.transform = {
+					jt[0], jt[1], jt[2], jt[3], jt[4], jt[5]
+				};
+			}
+
+			if(jg.contains("stops")) {
+				for(const json& js : jg.at("stops")) {
+					GradientStop s;
+					s.t = js.at("t").get<float>();
+					const auto& jc = js.at("color");
+					s.color = { jc[0], jc[1], jc[2], jc[3] };
+					gi.stops.push_back(s);
+				}
+			}
+
+			sd.gradients.push_back(gi);
+		}
+	}
 
 	// Shapes
 	for(const json& js : j.at("shapes")) {
@@ -468,8 +579,10 @@ Atlas atlasFromJson(
 
 		for(const json& jl : jc.at("layers")) {
 			Layer layer;
+
 			layer.key = keyFromJson(jl.at("key"));
 			layer.effectId = jl.at("effect_id");
+			layer.gradientId = jl.value("gradient_id", 0u);
 
 			const auto& jcolor = jl.at("color");
 			layer.color = { jcolor[0], jcolor[1], jcolor[2], jcolor[3] };
@@ -558,8 +671,9 @@ void writeBinary(const Atlas& atlas, std::ostream& out) {
 
 	const Atlas::TextureData& curve = atlas.getCurveTextureData();
 	const Atlas::TextureData& band = atlas.getBandTextureData();
+	const Atlas::TextureData& grad = atlas.getGradientTextureData();
 
-	// Build BIN chunk: curve bytes then band bytes, each padded to 4 bytes
+	// Build BIN chunk: curve, band, then optional gradient bytes (each naturally aligned)
 	std::vector<uint8_t> binData;
 
 	binData.insert(binData.end(), curve.bytes.begin(), curve.bytes.end());
@@ -567,15 +681,16 @@ void writeBinary(const Atlas& atlas, std::ostream& out) {
 	const uint32_t curveByteOffset = 0;
 	const uint32_t bandByteOffset = static_cast<uint32_t>(curve.bytes.size());
 
-	// Note: curve texture size is always a multiple of 4 (4 floats * 4 bytes each)
-	// and band texture is always a multiple of 4 (4 uint16s * 2 bytes each, * even row).
-	// No padding needed between them in practice, but we pad the final buffer to be safe.
 	binData.insert(binData.end(), band.bytes.begin(), band.bytes.end());
+
+	const uint32_t gradByteOffset = static_cast<uint32_t>(binData.size());
+
+	if(!grad.bytes.empty()) binData.insert(binData.end(), grad.bytes.begin(), grad.bytes.end());
 
 	padTo4(binData, 0x00);
 
 	// Build JSON chunk
-	const json j = buildJson(atlas, /*embedBase64=*/false, curveByteOffset, bandByteOffset);
+	const json j = buildJson(atlas, /*embedBase64=*/false, curveByteOffset, bandByteOffset, gradByteOffset);
 	const std::string jsonStr = j.dump();
 
 	std::vector<uint8_t> jsonData(jsonStr.begin(), jsonStr.end());

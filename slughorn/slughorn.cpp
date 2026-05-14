@@ -43,7 +43,9 @@ std::vector<slug_t> computeAxisSplits(
 
 	// Build event list: +1 where a curve's bbox starts on this axis, -1 where it ends.
 	struct Event { slug_t pos; int delta; };
+
 	std::vector<Event> events;
+
 	events.reserve(curves.size() * 2);
 
 	for(const auto& c : curves) {
@@ -262,6 +264,18 @@ void Atlas::addShape(Key key, const ShapeInfo& desc) {
 }
 
 // ================================================================================================
+// Atlas::addGradient
+// ================================================================================================
+
+uint32_t Atlas::addGradient(const GradientInfo& info) {
+	if(_built) return 0;
+
+	_gradients.push_back(info);
+
+	return static_cast<uint32_t>(_gradients.size()); // 1-based
+}
+
+// ================================================================================================
 // Atlas::addCompositeShape
 // ================================================================================================
 
@@ -277,8 +291,84 @@ void Atlas::build() {
 	if(_built) return;
 
 	packTextures();
+	rasterizeGradients();
 
 	_built = true;
+}
+
+// ================================================================================================
+// Atlas::rasterizeGradients
+//
+// Rasterizes each registered GradientInfo into a row of GRADIENT_STRIP_WIDTH RGBA8 texels.
+// The resulting texture has one row per gradient (height = gradient count), and is sampled in
+// the fragment shader with V = (gradientId - 0.5) / gradientCount.
+// ================================================================================================
+
+void Atlas::rasterizeGradients() {
+	if(_gradients.empty()) return;
+
+	const uint32_t numGradients = static_cast<uint32_t>(_gradients.size());
+
+	_gradientData.width = GRADIENT_STRIP_WIDTH;
+	_gradientData.height = numGradients;
+	_gradientData.format = TextureData::Format::RGBA8;
+
+	_gradientData.bytes.assign(size_t(GRADIENT_STRIP_WIDTH) * numGradients * 4, 0);
+
+	_packingStats.gradientCount = numGradients;
+	_packingStats.gradientTexelsTotal = GRADIENT_STRIP_WIDTH * numGradients;
+
+	for(uint32_t g = 0; g < numGradients; g++) {
+		const auto& grad = _gradients[g];
+
+		if(grad.stops.empty()) continue;
+
+		for(uint32_t i = 0; i < GRADIENT_STRIP_WIDTH; i++) {
+			const slug_t t = cv(i) / cv(GRADIENT_STRIP_WIDTH - 1);
+
+			Color col;
+
+			if(t <= grad.stops.front().t) col = grad.stops.front().color;
+
+			else if(t >= grad.stops.back().t) col = grad.stops.back().color;
+
+			else {
+				for(size_t s = 0; s + 1 < grad.stops.size(); s++) {
+					const slug_t t0 = grad.stops[s].t;
+					const slug_t t1 = grad.stops[s + 1].t;
+
+					if(t >= t0 && t <= t1) {
+						const slug_t range = t1 - t0;
+						const slug_t frac = (range > 1e-9_cv) ? (t - t0) / range : 0_cv;
+						const auto& c0 = grad.stops[s].color;
+						const auto& c1 = grad.stops[s + 1].color;
+
+						col = {
+							c0.r + (c1.r - c0.r) * frac,
+							c0.g + (c1.g - c0.g) * frac,
+							c0.b + (c1.b - c0.b) * frac,
+							c0.a + (c1.a - c0.a) * frac
+						};
+
+						break;
+					}
+				}
+			}
+
+			auto toU8 = [](slug_t v) -> uint8_t {
+				return static_cast<uint8_t>(
+					std::max(0_cv, std::min(1_cv, v)) * 255_cv + 0.5_cv
+				);
+			};
+
+			const uint32_t base = (g * GRADIENT_STRIP_WIDTH + i) * 4;
+
+			_gradientData.bytes[base + 0] = toU8(col.r);
+			_gradientData.bytes[base + 1] = toU8(col.g);
+			_gradientData.bytes[base + 2] = toU8(col.b);
+			_gradientData.bytes[base + 3] = toU8(col.a);
+		}
+	}
 }
 
 // ================================================================================================

@@ -384,13 +384,18 @@ def command_info(args) -> int:
 	composites = atlas.get_composite_shapes()
 	curve_tex = atlas.curve_texture
 	band_tex = atlas.band_texture
+	grad_tex = atlas.gradient_texture
 
 	print(f"Atlas: {args.atlas}")
-	print(f"  shapes:      {len(shapes)}")
-	print(f"  composites:  {len(composites)}")
-	print(f"  curve tex:   {curve_tex.width}x{curve_tex.height} {curve_tex.format}")
-	print(f"  band tex:    {band_tex.width}x{band_tex.height} {band_tex.format}")
-	print(f"  packing:     {atlas.packing_stats}")
+	print(f"  shapes:       {len(shapes)}")
+	print(f"  composites:   {len(composites)}")
+	print(f"  curve tex:    {curve_tex.width}x{curve_tex.height} {curve_tex.format}")
+	print(f"  band tex:     {band_tex.width}x{band_tex.height} {band_tex.format}")
+
+	if grad_tex.width > 0:
+		print(f"  gradient tex: {grad_tex.width}x{grad_tex.height} {grad_tex.format}")
+
+	print(f"  packing:      {atlas.packing_stats}")
 
 	if args.key is not None:
 		key = make_key(args.key)
@@ -522,11 +527,14 @@ def command_font(args) -> int:
 		try:
 			if mode == "all":
 				loaded = slughorn.freetype.load_all_font_glyphs(args.font, atlas)
+
 			else:
 				if codepoints is None:
 					fail("internal error: missing explicit codepoint selection", 2)
+
 				loaded = slughorn.freetype.load_font_glyphs(args.font, codepoints, atlas)
-		except Exception as exc:  # pragma: no cover
+
+		except Exception as exc:
 			fail(f"failed to load font glyphs from {args.font}: {exc}")
 
 	if loaded == 0:
@@ -535,13 +543,15 @@ def command_font(args) -> int:
 	with timer(args.time, "build"):
 		try:
 			atlas.build()
-		except Exception as exc:  # pragma: no cover
+
+		except Exception as exc:
 			fail(f"failed to build atlas from {args.font}: {exc}")
 
 	with timer(args.time, "write"):
 		try:
 			slughorn.write(atlas, args.output)
-		except Exception as exc:  # pragma: no cover
+
+		except Exception as exc:
 			fail(f"failed to write atlas to {args.output}: {exc}")
 
 	label = {

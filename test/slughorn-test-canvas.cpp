@@ -256,6 +256,150 @@ int main(int argc, char** argv) {
 	canvas.defineShape(slughorn::Key::fromString("stroke_test"), 1_cv / 50_cv);
 
 	// ============================================================================================
+	// Pattern 10: Linear gradient fill.
+	//
+	// createLinearGradient() produces a GradientHandle from two authoring-space endpoints and a
+	// stop list. fillGradient() commits the path the same way fill() does - geometry goes into
+	// the atlas, a Layer is pushed onto the composite - but layer.gradientId is set to the 1-based
+	// gradient index instead of a flat color. The gradient atlas texture is rasterized during
+	// atlas.build().
+	// ============================================================================================
+
+	// Simple left-to-right red -> blue gradient over a unit square.
+	{
+		auto grad = canvas.createLinearGradient(
+			0_cv, 0_cv, 1_cv, 0_cv,
+			{
+				{0_cv, {1_cv, 0_cv, 0_cv, 1_cv}},  // red at t=0
+				{1_cv, {0_cv, 0_cv, 1_cv, 1_cv}}   // blue at t=1
+			}
+		);
+
+		canvas.beginPath();
+		canvas.rect(0.1_cv, 0.1_cv, 0.8_cv, 0.8_cv);
+		canvas.fillGradient(grad, 1_cv, Key::fromString("grad_rect_shape"));
+
+		canvas.finalize(Key::fromString("grad_rect_composite"));
+	}
+
+	// Diagonal yellow -> transparent gradient over a triangle.
+	{
+		auto grad = canvas.createLinearGradient(
+			0_cv, 0_cv, 1_cv, 1_cv,
+			{
+				{0_cv,  {1_cv, 0.8_cv, 0_cv, 1_cv}},  // gold at t=0
+				{1_cv,  {1_cv, 0.8_cv, 0_cv, 0_cv}}   // transparent gold at t=1
+			}
+		);
+
+		canvas.beginPath();
+		canvas.moveTo(0.5_cv, 0.9_cv);
+		canvas.lineTo(0.1_cv, 0.1_cv);
+		canvas.lineTo(0.9_cv, 0.1_cv);
+		canvas.closePath();
+		canvas.fillGradient(grad, 1_cv, Key::fromString("grad_tri_shape"));
+
+		canvas.finalize(Key::fromString("grad_tri_composite"));
+	}
+
+	// ============================================================================================
+	// Pattern 11: Radial gradient fill.
+	//
+	// createRadialGradient() takes a center (cx, cy), inner radius r0, and outer radius r1.
+	// r0 = 0 produces the common point-centre radial. t = 0 at the inner edge, t = 1 at the
+	// outer edge. Points beyond the outer radius clamp to the last stop color.
+	// ============================================================================================
+
+	// Point-centre radial: red at centre, blue at the rim, over a circle.
+	{
+		auto grad = canvas.createRadialGradient(
+			0.5_cv, 0.5_cv,  // center
+			0_cv,            // inner radius (point centre)
+			0.5_cv,          // outer radius (reaches the circle edge)
+			{
+				{0_cv, {1_cv, 0_cv, 0_cv, 1_cv}},  // red at t=0 (centre)
+				{1_cv, {0_cv, 0_cv, 1_cv, 1_cv}}   // blue at t=1 (rim)
+			}
+		);
+
+		canvas.circle(0.5_cv, 0.5_cv, 0.45_cv);
+		canvas.fillGradient(grad, 1_cv, Key::fromString("grad_radial_circle_shape"));
+
+		canvas.finalize(Key::fromString("grad_radial_circle_composite"));
+	}
+
+	// Annular radial: green ring (inner radius 0.2, outer 0.45) over a circle.
+	{
+		auto grad = canvas.createRadialGradient(
+			0.5_cv, 0.5_cv,
+			0.2_cv,          // inner radius
+			0.45_cv,         // outer radius
+			{
+				{0_cv, {0_cv, 0.8_cv, 0_cv, 1_cv}},  // bright green at inner edge
+				{1_cv, {0_cv, 0.2_cv, 0_cv, 1_cv}}   // dark green at outer edge
+			}
+		);
+
+		canvas.circle(0.5_cv, 0.5_cv, 0.45_cv);
+		canvas.fillGradient(grad, 1_cv, Key::fromString("grad_radial_ring_shape"));
+
+		canvas.finalize(Key::fromString("grad_radial_ring_composite"));
+	}
+
+	// ============================================================================================
+	// Pattern 12: Sweep (conic) gradient fill.
+	//
+	// createSweepGradient() takes a center, startAngle and endAngle (radians, same convention as
+	// arc()). t=0 at startAngle, t=1 at endAngle. Using -π to +π gives a seam-free full circle
+	// because atan2's output range exactly matches, so the first and last stops meet cleanly.
+	// ============================================================================================
+
+	// Full-circle colour wheel: red -> yellow -> green -> cyan -> blue -> magenta -> red.
+	{
+		const auto PI = cv(M_PI);
+
+		auto grad = canvas.createSweepGradient(
+			0.5_cv, 0.5_cv,  // center
+			-PI, PI,          // full circle, seam at -π/+π (left edge)
+			{
+				{0.000_cv, {1_cv, 0_cv, 0_cv, 1_cv}},  // red
+				{0.167_cv, {1_cv, 1_cv, 0_cv, 1_cv}},  // yellow
+				{0.333_cv, {0_cv, 1_cv, 0_cv, 1_cv}},  // green
+				{0.500_cv, {0_cv, 1_cv, 1_cv, 1_cv}},  // cyan
+				{0.667_cv, {0_cv, 0_cv, 1_cv, 1_cv}},  // blue
+				{0.833_cv, {1_cv, 0_cv, 1_cv, 1_cv}},  // magenta
+				{1.000_cv, {1_cv, 0_cv, 0_cv, 1_cv}}   // red (closes seam-free)
+			}
+		);
+
+		canvas.circle(0.5_cv, 0.5_cv, 0.45_cv);
+		canvas.fillGradient(grad, 1_cv, Key::fromString("grad_sweep_wheel_shape"));
+
+		canvas.finalize(Key::fromString("grad_sweep_wheel_composite"));
+	}
+
+	// 270-degree progress gauge: green (start) -> yellow (mid) -> red (end).
+	// Sweep from -135° to +135° (bottom-left to bottom-right, leaving a gap at the bottom).
+	{
+		const auto PI = cv(M_PI);
+
+		auto grad = canvas.createSweepGradient(
+			0.5_cv, 0.5_cv,
+			-PI * 0.75_cv, PI * 0.75_cv,
+			{
+				{0.0_cv, {0_cv, 1_cv, 0_cv, 1_cv}},   // green
+				{0.5_cv, {1_cv, 1_cv, 0_cv, 1_cv}},   // yellow
+				{1.0_cv, {1_cv, 0_cv, 0_cv, 1_cv}}    // red
+			}
+		);
+
+		canvas.circle(0.5_cv, 0.5_cv, 0.45_cv);
+		canvas.fillGradient(grad, 1_cv, Key::fromString("grad_sweep_gauge_shape"));
+
+		canvas.finalize(Key::fromString("grad_sweep_gauge_composite"));
+	}
+
+	// ============================================================================================
 
 	atlas.build();
 
