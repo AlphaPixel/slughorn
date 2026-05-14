@@ -633,6 +633,77 @@ public:
 	}
 
 	// -------------------------------------------------------------------------
+	// Gradient fills
+	//
+	// GradientHandle is a lightweight descriptor created by createLinearGradient(). Pass it to
+	// fillGradient() to commit the current path with a gradient instead of a flat color. The
+	// gradient endpoints are in the same authoring space as the path coordinates; the required
+	// em-space shift is applied automatically at fillGradient() time to match the local-origin
+	// shift applied to the curves.
+	// -------------------------------------------------------------------------
+
+	struct GradientHandle {
+		GradientInfo::Type type = GradientInfo::Type::Linear;
+		// Linear: (x0,y0) -> (x1,y1) authoring-space endpoints.
+		// Radial: (x0,y0) = center; x1 = innerRadius, y1 = outerRadius.
+		slug_t x0 = 0, y0 = 0, x1 = 1, y1 = 0;
+
+		std::vector<GradientStop> stops;
+	};
+
+	GradientHandle createLinearGradient(
+		slug_t x0, slug_t y0,
+		slug_t x1, slug_t y1,
+		std::vector<GradientStop> stops
+	) {
+		return { GradientInfo::Type::Linear, x0, y0, x1, y1, std::move(stops) };
+	}
+
+	// Concentric radial gradient centred at (cx, cy) with inner radius r0 and outer radius r1.
+	// r0 = 0 produces the common point-centre radial. Coordinates are in authoring space.
+	GradientHandle createRadialGradient(
+		slug_t cx, slug_t cy, slug_t r0, slug_t r1,
+		std::vector<GradientStop> stops
+	) {
+		return { GradientInfo::Type::Radial, cx, cy, r0, r1, std::move(stops) };
+	}
+
+	// Sweep (conic) gradient that rotates colour around (cx, cy) from startAngle to endAngle
+	// (radians, measured from the +X axis, Y-up convention; same as arc()).
+	//
+	// t = 0 at startAngle, t = 1 at endAngle. Angles outside [start, end] clamp to the nearest
+	// stop. For a seam-free full-circle colour wheel use startAngle = -a, endAngle = a.
+	GradientHandle createSweepGradient(
+		slug_t cx, slug_t cy,
+		slug_t startAngle, slug_t endAngle,
+		std::vector<GradientStop> stops
+	) {
+		return { GradientInfo::Type::Sweep, cx, cy, startAngle, endAngle, std::move(stops) };
+	}
+
+	// Commit the current path as a gradient-filled Layer. Equivalent to fill() but uses
+	// a gradient instead of a flat color. The gradient is registered with the atlas at call time.
+	Key fillGradient(
+		const GradientHandle& handle,
+		slug_t scale=1.0_cv,
+		Atlas::ShapeInfo::Origin origin=Atlas::ShapeInfo::Origin::Default
+	) {
+		if(_pendingCurves.empty() && _activeCurves.empty()) return Key(0u);
+
+		return _fillGradient(handle, scale, _key.next(), origin);
+	}
+
+	// Named variant: registers the shape under @p key.
+	Key fillGradient(
+		const GradientHandle& handle,
+		slug_t scale,
+		Key key,
+		Atlas::ShapeInfo::Origin origin=Atlas::ShapeInfo::Origin::Default
+	) {
+		return _fillGradient(handle, scale, key, origin);
+	}
+
+	// -------------------------------------------------------------------------
 	// CompositeShape management
 	// -------------------------------------------------------------------------
 
@@ -713,6 +784,95 @@ private:
 		// layer.scale intentionally left at 1.0 - see Scale Contract
 
 		_composite.layers.push_back(layer);
+
+		return key;
+	}
+
+	Key _fillGradient(
+		const GradientHandle& handle,
+		slug_t scale,
+		Key key,
+		Atlas::ShapeInfo::Origin origin
+	) {
+		for(const auto& c : _activeCurves) _pendingCurves.push_back(c);
+
+		_activeCurves.clear();
+
+		if(_pendingCurves.empty()) return Key(0u);
+
+		Atlas::Curves scaled = _scaleCurves(_pendingCurves, scale);
+
+		// Compute the bounding-box minimum (minX, minY) before _toLocalOrigin shifts the curves.
+		// The gradient endpoints are in the same authoring space; they must be shifted by the
+		// same (minX, minY) so the gradient matrix operates in the same local em-space as v_emCoord.
+		slug_t minX = std::numeric_limits<slug_t>::max();
+		slug_t minY = std::numeric_limits<slug_t>::max();
+
+		for(const auto& c : scaled) {
+			minX = std::min({minX, c.x1, c.x2, c.x3});
+			minY = std::min({minY, c.y1, c.y2, c.y3});
+		}
+
+		auto [local, transform] = _toLocalOrigin(scaled, origin);
+
+		if(local.empty()) return Key(0u);
+
+		GradientInfo info;
+
+		info.type = handle.type;
+		info.stops = handle.stops;
+
+		if(handle.type == GradientInfo::Type::Radial) {
+			// Center is a position: shift by local origin. Radii are distances: scale only.
+			const slug_t cx = handle.x0 * scale - minX;
+			const slug_t cy = handle.y0 * scale - minY;
+			const slug_t r0 = handle.x1 * scale;
+			const slug_t r1 = handle.y1 * scale;
+
+			info.innerRadius = r0;
+			info.transform = buildRadialGradientMatrix(cx, cy, r1);
+		}
+
+		else if(handle.type == GradientInfo::Type::Sweep) {
+			// Center is a position: shift by local origin. Angles are raw radians: no transform.
+			const slug_t cx = handle.x0 * scale - minX;
+			const slug_t cy = handle.y0 * scale - minY;
+			const slug_t startAngle = handle.x1;
+			const slug_t arcSpan = handle.y1 - handle.x1;
+
+			info.transform = buildSweepGradientMatrix(cx, cy, startAngle, arcSpan);
+		}
+
+		else {
+			// Linear: both endpoints are positions; shift by local origin.
+			const slug_t gx0 = handle.x0 * scale - minX;
+			const slug_t gy0 = handle.y0 * scale - minY;
+			const slug_t gx1 = handle.x1 * scale - minX;
+			const slug_t gy1 = handle.y1 * scale - minY;
+
+			info.transform = buildLinearGradientMatrix(gx0, gy0, gx1, gy1);
+		}
+
+		const uint32_t gid = _atlas.addGradient(info);
+
+		Atlas::ShapeInfo shapeInfo;
+
+		shapeInfo.curves = std::move(local);
+		shapeInfo.origin = origin;
+
+		_atlas.addShape(key, shapeInfo);
+
+		Layer layer;
+
+		layer.key = key;
+		// rgb ignored when gradientId != 0; a=1 = full opacity
+		layer.color = {};
+		layer.transform = transform;
+		layer.gradientId = gid;
+
+		_composite.layers.push_back(layer);
+
+		_pendingCurves.clear();
 
 		return key;
 	}
@@ -885,8 +1045,10 @@ private:
 
 	Atlas& _atlas;
 	KeyIterator _key;
-	Atlas::Curves _activeCurves;  // current sub-path being drawn; consumed by closePath/strokePath
-	Atlas::Curves _pendingCurves; // accumulated closed sub-paths; submitted by fill/defineShape
+	// current sub-path being drawn; consumed by closePath/strokePath
+	Atlas::Curves _activeCurves;
+	// accumulated closed sub-paths; submitted by fill/defineShape
+	Atlas::Curves _pendingCurves;
 	CurveDecomposer _decomposer;
 	CompositeShape _composite;
 };

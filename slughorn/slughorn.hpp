@@ -126,6 +126,44 @@ struct Matrix {
 };
 
 // ================================================================================================
+// GradientStop / GradientInfo
+//
+// Describes a color ramp used for gradient fills. GradientInfo is registered with Atlas via
+// addGradient() before build(); the returned ID is stored in Layer::gradientId to activate the
+// gradient for that layer.
+//
+// The transform matrix encodes gradient geometry in local em-space:
+//
+// Linear: t = m.xx * emX + m.xy * emY + m.dx (build with buildLinearGradientMatrix)
+// Radial: m.dx/dy = center; m.xx = outerRadius; innerRadius field = inner radius
+//         t = (length(emCoord - center) - innerRadius) / (outerRadius - innerRadius)
+//         (build with buildRadialGradientMatrix; set innerRadius separately)
+// ================================================================================================
+struct GradientStop {
+	// position along gradient axis [0, 1]
+	slug_t t = 0_cv;
+
+	Color color;
+};
+
+struct GradientInfo {
+	enum class Type { Linear, Radial, Sweep };
+
+	Type type = Type::Linear;
+
+	std::vector<GradientStop> stops;
+
+	Matrix transform;
+
+	// Radial: inner radius in local em-space (0 = point center). See buildRadialGradientMatrix.
+	slug_t innerRadius = 0_cv;
+
+	// Sweep only: arc range in turns [0, 1]. Default = full circle.
+	slug_t startAngle = 0_cv;
+	slug_t endAngle = 1_cv;
+};
+
+// ================================================================================================
 // Quad
 //
 // Used both as a LITERAL "quad" for use in creating compatible 2D geometry and as a "bounding box"
@@ -281,6 +319,11 @@ struct Layer {
 	//
 	// TODO: It is likely this will be called `fillMode` or similar in future versions!
 	uint32_t effectId = 0;
+
+	// Gradient fill; 0 = flat color (layer.color used). Non-zero = 1-based index into the atlas
+	// gradient list (registered via addGradient()). When non-zero, layer.color.rgb is ignored and
+	// layer.color.a acts as a global opacity multiplier.
+	uint32_t gradientId = 0;
 };
 
 // ================================================================================================
@@ -425,6 +468,10 @@ public:
 	// Must match SLUG_INDIRECTION_SIZE in the fragment shader.
 	static constexpr uint32_t INDIRECTION_SIZE = 32;
 
+	// Width (in texels) of each gradient color strip. 256 gives 8-bit t precision; hardware
+	// bilinear filtering smooths between texels. One row per gradient.
+	static constexpr uint32_t GRADIENT_STRIP_WIDTH = 256;
+
 	// --------------------------------------------------------------------------------------------
 	// Raw texture descriptor returned after build() is called.
 	//
@@ -436,7 +483,7 @@ public:
 	// RGBA16UI - four 16-bit unsigned ints per texel (band texture)
 	// --------------------------------------------------------------------------------------------
 	struct TextureData {
-		enum class Format { RGBA32F, RGBA16UI };
+		enum class Format { RGBA32F, RGBA16UI, RGBA8 };
 
 		std::vector<uint8_t> bytes;
 
@@ -466,6 +513,10 @@ public:
 		uint32_t bandTexelsUsed = 0;
 		uint32_t bandTexelsPadding = 0;
 		uint32_t bandTexelsTotal = 0;
+
+		// Gradient texture (one GRADIENT_STRIP_WIDTH-wide RGBA8 row per gradient; no padding)
+		uint32_t gradientCount = 0;
+		uint32_t gradientTexelsTotal = 0;
 
 		// Fraction of allocated texels actually containing live data [0, 1].
 		float curveUtilization() const {
@@ -551,6 +602,12 @@ public:
 	// Population (call before build())
 	// --------------------------------------------------------------------------------------------
 
+	// Register a gradient. Returns a 1-based ID (0 = error / atlas already built).
+	// The ID is stored in Layer::gradientId to activate the gradient for that layer.
+	// Must be called before build(). Gradients are rasterized into the gradient atlas texture
+	// during build(); adding one after build() has no effect on rendering.
+	uint32_t addGradient(const GradientInfo& info);
+
 	// Register a geometry shape under @p key.
 	//
 	// Must be called before build(). Calling addShape() with an already-registered key silently
@@ -589,6 +646,10 @@ public:
 
 	const TextureData& getCurveTextureData() const { return _curveData; }
 	const TextureData& getBandTextureData() const { return _bandData; }
+	const TextureData& getGradientTextureData() const { return _gradientData; }
+
+	// Gradient list (valid after build() if any gradients were registered).
+	const std::vector<GradientInfo>& getGradients() const { return _gradients; }
 
 	// Valid after build(). Reports texture utilization and alignment padding waste.
 	// See PackingStats for field documentation.
@@ -617,14 +678,18 @@ public:
 	struct SerialData {
 		TextureData curveData;
 		TextureData bandData;
+		TextureData gradientData;
 		PackingStats packingStats;
 		std::unordered_map<Key, Shape, KeyHash> shapes;
 		std::unordered_map<Key, CompositeShape, KeyHash> composites;
+		std::vector<GradientInfo> gradients;
 	};
 
 	void loadFromSerial(SerialData&& sd) {
 		_curveData = std::move(sd.curveData);
 		_bandData = std::move(sd.bandData);
+		_gradientData = std::move(sd.gradientData);
+		_gradients = std::move(sd.gradients);
 		_packingStats = sd.packingStats;
 		_shapes = std::move(sd.shapes);
 		_compositeShapes = std::move(sd.composites);
@@ -670,6 +735,7 @@ private:
 	);
 
 	void packTextures();
+	void rasterizeGradients();
 
 	// --------------------------------------------------------------------------------------------
 	// Data
@@ -680,6 +746,9 @@ private:
 
 	TextureData _curveData;
 	TextureData _bandData;
+	TextureData _gradientData;
+
+	std::vector<GradientInfo> _gradients;
 
 	PackingStats _packingStats; // populated by packTextures()
 
@@ -687,6 +756,86 @@ private:
 
 	uint32_t _texWidth;
 };
+
+// ================================================================================================
+// buildLinearGradientMatrix
+//
+// Converts two em-space endpoints into the affine matrix that maps the gradient axis onto [0,1]:
+//
+// t = m.xx * emX + m.xy * emY + m.dx
+//
+// The result should be stored in GradientInfo::transform and is consumed directly by the
+// a_gradientXform vertex attribute (x=m.xx, y=m.xy, z=m.dx).
+//
+// Returns Matrix::identity() for degenerate (zero-length) inputs.
+// ================================================================================================
+inline Matrix buildLinearGradientMatrix(slug_t x0, slug_t y0, slug_t x1, slug_t y1) {
+	const slug_t dx = x1 - x0;
+	const slug_t dy = y1 - y0;
+	const slug_t lenSq = dx * dx + dy * dy;
+
+	if(lenSq < 1e-12_cv) return Matrix::identity();
+
+	const slug_t invLenSq = 1_cv / lenSq;
+
+	Matrix m;
+	m.xx = dx * invLenSq;
+	m.xy = dy * invLenSq;
+	m.dx = -(x0 * dx + y0 * dy) * invLenSq;
+	// yx, yy, dy are unused for linear gradient t computation
+
+	return m;
+}
+
+// ================================================================================================
+// buildRadialGradientMatrix
+//
+// Encodes the center and outer radius of a concentric radial gradient into GradientInfo::transform:
+//
+// m.dx = cx (center X in local em-space)
+// m.dy = cy (center Y in local em-space)
+// m.xx = r1 (outer radius in local em-space)
+//
+// The inner radius is stored separately in GradientInfo::innerRadius. Drawable.cpp reads both to
+// compute the GPU-packed xform: (cx, cy, r0*invDR, invDR) where invDR = 1/(r1 - r0).
+//
+// Shader formula: t = length(emCoord - center) * invDR - r0 * invDR
+//                   = (length(emCoord - center) - r0) / (r1 - r0), clamped to [0, 1].
+// ================================================================================================
+inline Matrix buildRadialGradientMatrix(slug_t cx, slug_t cy, slug_t r1) {
+	Matrix m;
+	m.dx = cx;
+	m.dy = cy;
+	m.xx = r1;
+	return m;
+}
+
+// ================================================================================================
+// buildSweepGradientMatrix
+//
+// Encodes the center and angular range of a sweep (conic) gradient into GradientInfo::transform:
+//
+// m.dx = cx (center X in local em-space)
+// m.dy = cy (center Y in local em-space)
+// m.xx = startAngle (radians, measured from +X axis)
+// m.xy = arcSpan (endAngle - startAngle, radians; must be > 0)
+//
+// Drawable.cpp packs: (cx, cy, startAngle, -invArcSpan) where invArcSpan = 1/arcSpan.
+// The negative w value is the type discriminator (w==0 = linear, w>0 = radial, w<0 = sweep).
+//
+// Shader formula: t = (atan2(emCoord.y - cy, emCoord.x - cx) - startAngle) / arcSpan
+//
+// For a seam-free full-circle gradient, use startAngle = -a and arcSpan = 2a. atan2 returns
+// values in [-a, a], which exactly covers the sweep, so t goes cleanly from 0 to 1.
+// ================================================================================================
+inline Matrix buildSweepGradientMatrix(slug_t cx, slug_t cy, slug_t startAngle, slug_t arcSpan) {
+	Matrix m;
+	m.dx = cx;
+	m.dy = cy;
+	m.xx = startAngle;
+	m.xy = arcSpan;
+	return m;
+}
 
 // ================================================================================================
 // CurveDecomposer
@@ -928,13 +1077,18 @@ inline std::ostream& operator<<(std::ostream& os, const Quad& q) {
 	;
 }
 
+inline std::ostream& operator<<(std::ostream& os, const GradientStop& s) {
+	return os << "GradientStop(t=" << s.t << " color=" << s.color << ")";
+}
+
 inline std::ostream& operator<<(std::ostream& os, const Layer& l) {
 	return os
 		<< "Layer(" << l.key
 		<< " color=" << l.color
 		<< " transform=" << l.transform
 		<< " scale=" << l.scale
-		<< " effectId=" << l.effectId << ")"
+		<< " effectId=" << l.effectId
+		<< " gradientId=" << l.gradientId << ")"
 	;
 }
 
@@ -971,6 +1125,10 @@ inline std::ostream& operator<<(std::ostream& os, const Atlas::PackingStats& p) 
 		<< " / " << p.bandTexelsTotal << " total"
 		<< " (" << int(p.bandUtilization() * 100.f) << "% util,"
 		<< " " << int(p.bandPaddingRatio() * 100.f) << "% pad)"
+		<< " | gradient: " << p.gradientCount
+		<< " gradient" << (p.gradientCount != 1 ? "s" : "")
+		<< " (" << Atlas::GRADIENT_STRIP_WIDTH << "x" << p.gradientCount
+		<< " RGBA8, " << p.gradientTexelsTotal << " texels)"
 		<< ")"
 	;
 }

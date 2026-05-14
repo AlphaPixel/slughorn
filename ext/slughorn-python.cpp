@@ -6,7 +6,7 @@
 // slughorn.Color
 // slughorn.Matrix
 // slughorn.Key (both Codepoint and Name flavors, full __hash__/__eq__)
-// slughorn.Layer (key, color, transform, effect_id)
+// slughorn.Layer (key, color, transform, effectId)
 // slughorn.CompositeShape (layers, advance)
 // slughorn.Curve (flat - not Atlas.Curve, intentional; see note below)
 // slughorn.ShapeInfo (flat)
@@ -772,6 +772,62 @@ PYBIND11_MODULE(slughorn, m) {
 	;
 
 	// ============================================================================================
+	// slughorn.GradientStop / slughorn.GradientInfo
+	// ============================================================================================
+	py::class_<slughorn::GradientStop>(m, "GradientStop")
+		.def(py::init<>(), "Default: t=0, color=(0, 0, 0, 1).")
+		.def(py::init([](slug_t t, slughorn::Color color) {
+			return slughorn::GradientStop{t, color};
+		}), py::arg("t"), py::arg("color"),
+			"Construct from position t in [0,1] and RGBA color."
+		)
+		.def_readwrite("t", &slughorn::GradientStop::t,
+			"Position along the gradient axis [0, 1]."
+		)
+		.def_readwrite("color", &slughorn::GradientStop::color)
+		.def("__repr__", [](const slughorn::GradientStop& s) { return streamRepr(s); })
+	;
+
+	auto gradinfo_ = py::class_<slughorn::GradientInfo>(m, "GradientInfo")
+		.def(py::init<>(), "Default: linear gradient, no stops.")
+		.def_readwrite("type", &slughorn::GradientInfo::type,
+			"GradientInfo.Type.Linear, .Radial, or .Sweep."
+		)
+		.def_readwrite("stops", &slughorn::GradientInfo::stops,
+			"List of GradientStop objects defining the color ramp."
+		)
+		.def_readwrite("transform", &slughorn::GradientInfo::transform,
+			"Affine matrix mapping em-space to gradient-space. "
+			"Build with slughorn.build_linear_gradient_matrix() for linear gradients."
+		)
+		.def_readwrite("inner_radius", &slughorn::GradientInfo::innerRadius,
+			"Radial only: inner radius as a fraction of outer [0, 1]."
+		)
+		.def_readwrite("start_angle", &slughorn::GradientInfo::startAngle,
+			"Sweep only: start angle in turns [0, 1]."
+		)
+		.def_readwrite("end_angle", &slughorn::GradientInfo::endAngle,
+			"Sweep only: end angle in turns [0, 1]. Default = 1 (full circle)."
+		)
+	;
+
+	py::enum_<slughorn::GradientInfo::Type>(gradinfo_, "Type")
+		.value("Linear", slughorn::GradientInfo::Type::Linear)
+		.value("Radial", slughorn::GradientInfo::Type::Radial)
+		.value("Sweep", slughorn::GradientInfo::Type::Sweep)
+		.export_values()
+	;
+
+	// Free function: convert two em-space endpoints to a GradientInfo::transform matrix.
+	m.def("build_linear_gradient_matrix",
+		&slughorn::buildLinearGradientMatrix,
+		py::arg("x0"), py::arg("y0"), py::arg("x1"), py::arg("y1"),
+		"Build the affine matrix for a linear gradient from em-space points (x0,y0)->(x1,y1).\n"
+		"Store the result in GradientInfo.transform.\n"
+		"Returns Matrix.identity() for degenerate (zero-length) inputs."
+	);
+
+	// ============================================================================================
 	// slughorn.Quad
 	// ============================================================================================
 	py::class_<slughorn::Quad>(m, "Quad")
@@ -791,7 +847,7 @@ PYBIND11_MODULE(slughorn, m) {
 	// ============================================================================================
 	// slughorn.Layer
 	//
-	// key, color, transform, effect_id - all four fields now present.
+	// key, color, transform, effectId - all four fields now present.
 	// ============================================================================================
 	py::class_<slughorn::Layer>(m, "Layer")
 		.def(py::init<>())
@@ -802,7 +858,8 @@ PYBIND11_MODULE(slughorn, m) {
 				slughorn::Color color,
 				slughorn::Matrix transform,
 				slug_t scale,
-				uint32_t effect_id
+				uint32_t effectId,
+				uint32_t gradientId
 			) {
 				slughorn::Layer layer;
 
@@ -816,15 +873,17 @@ PYBIND11_MODULE(slughorn, m) {
 				layer.color = color;
 				layer.transform = transform;
 				layer.scale = scale;
-				layer.effectId = effect_id;
+				layer.effectId = effectId;
+				layer.gradientId = gradientId;
 
 				return layer;
 			}),
 			py::arg("key"),
 			py::arg("color") = slughorn::Color{},
 			py::arg("transform") = slughorn::Matrix{},
-			py::arg("scale") = slug_t{1},
-			py::arg("effect_id") = 0
+			py::arg("scale") = 1_cv,
+			py::arg("effectId") = 0,
+			py::arg("gradientId") = 0
 		)
 
 		.def_readwrite("key", &slughorn::Layer::key,
@@ -841,10 +900,15 @@ PYBIND11_MODULE(slughorn, m) {
 			"    compile() both read this value.\n"
 			"  SVG / Cairo / NanoSVG: leave at the default of 1.0 - curves are\n"
 			"    already em-normalised by the backend.")
-		.def_readwrite("effect_id", &slughorn::Layer::effectId,
+		.def_readwrite("effectId", &slughorn::Layer::effectId,
 			"Fragment-shader fill mode selector. "
 			"0 = standard Slug fill (default). "
 			"See osgSlug-frag.glsl slug_ApplyEffect() for the full table.")
+		.def_readwrite("gradientId", &slughorn::Layer::gradientId,
+			"Gradient fill ID. 0 = flat color (layer.color used). "
+			"Non-zero = 1-based index into the atlas gradient list "
+			"(registered via Atlas.add_gradient()). "
+			"When non-zero, layer.color.rgb is ignored; layer.color.a is a global opacity multiplier.")
 		.def("__repr__", [](const slughorn::Layer& l) { return streamRepr(l); })
 	;
 
@@ -1027,19 +1091,27 @@ PYBIND11_MODULE(slughorn, m) {
 	py::class_<slughorn::Atlas::TextureData>(m, "TextureData")
 		.def_readonly("width", &slughorn::Atlas::TextureData::width)
 		.def_readonly("height", &slughorn::Atlas::TextureData::height)
-		.def_property_readonly("format", [](const slughorn::Atlas::TextureData& td) {
-			return td.format == slughorn::Atlas::TextureData::Format::RGBA32F
-				? "RGBA32F" : "RGBA16UI"
-			;
-		}, "String: 'RGBA32F' (curve texture) or 'RGBA16UI' (band texture).")
+		.def_property_readonly("format", [](const slughorn::Atlas::TextureData& td) -> const char* {
+			switch(td.format) {
+				case slughorn::Atlas::TextureData::Format::RGBA32F:  return "RGBA32F";
+				case slughorn::Atlas::TextureData::Format::RGBA16UI: return "RGBA16UI";
+				case slughorn::Atlas::TextureData::Format::RGBA8:    return "RGBA8";
+			}
+			return "unknown";
+		}, "String: 'RGBA32F' (curve texture), 'RGBA16UI' (band texture), or 'RGBA8' (gradient texture).")
 		.def_property_readonly("bytes", [](const slughorn::Atlas::TextureData& td) {
 			return bytesView(td.bytes);
 		}, "Zero-copy memoryview of the raw pixel data (row-major). "
 			"Keep the Atlas alive for the duration of any view."
 		)
 		.def("__repr__", [](const slughorn::Atlas::TextureData& td) {
-			const char* fmt = td.format == slughorn::Atlas::TextureData::Format::RGBA32F
-				? "RGBA32F" : "RGBA16UI";
+			const char* fmt;
+			switch(td.format) {
+				case slughorn::Atlas::TextureData::Format::RGBA32F: fmt = "RGBA32F"; break;
+				case slughorn::Atlas::TextureData::Format::RGBA16UI: fmt = "RGBA16UI"; break;
+				case slughorn::Atlas::TextureData::Format::RGBA8: fmt = "RGBA8"; break;
+				default: fmt = "unknown"; break;
+			}
 
 			return "TextureData(" + std::to_string(td.width) + "x" +
 				std::to_string(td.height) + " " + fmt + " " +
@@ -1058,6 +1130,10 @@ PYBIND11_MODULE(slughorn, m) {
 		.def_readonly("band_texels_used", &slughorn::Atlas::PackingStats::bandTexelsUsed)
 		.def_readonly("band_texels_padding", &slughorn::Atlas::PackingStats::bandTexelsPadding)
 		.def_readonly("band_texels_total", &slughorn::Atlas::PackingStats::bandTexelsTotal)
+		.def_readonly("gradient_count", &slughorn::Atlas::PackingStats::gradientCount,
+			"Number of registered gradients (0 when none).")
+		.def_readonly("gradient_texels_total", &slughorn::Atlas::PackingStats::gradientTexelsTotal,
+			"Total gradient texture texels (GRADIENT_STRIP_WIDTH * gradient_count).")
 		.def("curve_utilization", &slughorn::Atlas::PackingStats::curveUtilization)
 		.def("band_utilization", &slughorn::Atlas::PackingStats::bandUtilization)
 		.def("curve_padding_ratio", &slughorn::Atlas::PackingStats::curvePaddingRatio)
@@ -1170,6 +1246,31 @@ PYBIND11_MODULE(slughorn, m) {
 			py::return_value_policy::reference_internal,
 			"TextureData for the RGBA16UI band texture (valid after build())."
 		)
+
+		.def_property_readonly("gradient_texture",
+			[](const slughorn::Atlas& a) -> const slughorn::Atlas::TextureData& {
+				return a.getGradientTextureData();
+			},
+			py::return_value_policy::reference_internal,
+			"TextureData for the RGBA8 gradient color-strip texture (valid after build()). "
+			"Empty (width=height=0) when no gradients are registered."
+		)
+
+		.def("add_gradient",
+			&slughorn::Atlas::addGradient,
+			py::arg("info"),
+			"Register a gradient. Returns a 1-based ID (0 = error / atlas already built).\n"
+			"Store the ID in Layer.gradientId to activate the gradient for that layer.\n"
+			"Must be called before build(). Gradients are rasterized during build()."
+		)
+
+		.def("get_gradients",
+			[](const slughorn::Atlas& a) {
+				return a.getGradients();
+			},
+			"Return a copy of the registered GradientInfo list (valid after build())."
+		)
+
 		.def("decode",
 			[](const slughorn::Atlas& a, slughorn::Key key) {
 				return decodeShape(a, key);
@@ -1394,6 +1495,27 @@ PYBIND11_MODULE(slughorn, m) {
 			"Call finalize() to retrieve the completed CompositeShape."
 		);
 
+		py::class_<slughorn::canvas::Canvas::GradientHandle>(canvas, "GradientHandle",
+			"Lightweight gradient descriptor returned by Canvas.create_linear_gradient().\n"
+			"Pass it to Canvas.fill_gradient() to commit the current path with a gradient fill.\n"
+			"The endpoints are in the same authoring space as the path coordinates.")
+			.def_readwrite("x0", &slughorn::canvas::Canvas::GradientHandle::x0)
+			.def_readwrite("y0", &slughorn::canvas::Canvas::GradientHandle::y0)
+			.def_readwrite("x1", &slughorn::canvas::Canvas::GradientHandle::x1)
+			.def_readwrite("y1", &slughorn::canvas::Canvas::GradientHandle::y1)
+			.def_readwrite("stops", &slughorn::canvas::Canvas::GradientHandle::stops,
+				"List of GradientStop objects."
+			)
+			.def("__repr__", [](const slughorn::canvas::Canvas::GradientHandle& h) {
+				std::ostringstream ss;
+				ss << "GradientHandle("
+					<< h.x0 << "," << h.y0 << " -> "
+					<< h.x1 << "," << h.y1
+					<< " stops=" << h.stops.size() << ")";
+				return ss.str();
+			})
+		;
+
 		py::class_<slughorn::canvas::Canvas>(canvas, "Canvas")
 			.def(py::init<slughorn::Atlas&, slughorn::KeyIterator>(),
 				py::arg("atlas"), py::arg("key_iterator")=slughorn::KeyIterator(),
@@ -1541,6 +1663,60 @@ PYBIND11_MODULE(slughorn, m) {
 				py::arg("width"), py::arg("color"), py::arg("scale"), py::arg("key"),
 				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin::Default,
 				"Expand the current path as a stroke outline and commit it under key.\n"
+				"Returns key, or Key(0) if the path was empty."
+			)
+
+			// Gradient fills --------------------------------------------------
+
+			.def("create_linear_gradient",
+				[](
+					slughorn::canvas::Canvas& c,
+					slug_t x0, slug_t y0,
+					slug_t x1, slug_t y1,
+					std::vector<slughorn::GradientStop> stops
+				) {
+					return c.createLinearGradient(x0, y0, x1, y1, std::move(stops));
+				},
+				py::arg("x0"), py::arg("y0"),
+				py::arg("x1"), py::arg("y1"),
+				py::arg("stops"),
+				"Create a GradientHandle for a linear gradient from (x0,y0) to (x1,y1).\n"
+				"stops is a list of GradientStop objects.\n"
+				"Pass the handle to fill_gradient() to commit the current path."
+			)
+
+			// fill_gradient() - auto-key variant
+			.def("fill_gradient",
+				[](
+					slughorn::canvas::Canvas& c,
+					const slughorn::canvas::Canvas::GradientHandle& handle,
+					slug_t scale,
+					slughorn::Atlas::ShapeInfo::Origin origin
+				) {
+					return c.fillGradient(handle, scale, origin);
+				},
+				py::arg("handle"),
+				py::arg("scale") = 1.0f,
+				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin::Default,
+				"Commit the current path as a gradient-filled Layer.\n"
+				"Returns the auto-generated Key, or Key(0) if the path was empty."
+			)
+			// fill_gradient() - named-key variant
+			.def("fill_gradient",
+				[](
+					slughorn::canvas::Canvas& c,
+					const slughorn::canvas::Canvas::GradientHandle& handle,
+					slug_t scale,
+					slughorn::Key key,
+					slughorn::Atlas::ShapeInfo::Origin origin
+				) {
+					return c.fillGradient(handle, scale, key, origin);
+				},
+				py::arg("handle"),
+				py::arg("scale"),
+				py::arg("key"),
+				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin::Default,
+				"Commit the current path as a gradient-filled Layer, registering under key.\n"
 				"Returns key, or Key(0) if the path was empty."
 			)
 
