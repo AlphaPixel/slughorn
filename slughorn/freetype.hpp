@@ -529,7 +529,35 @@ static void processColorGlyphV0(
 
 #if FREETYPE_MAJOR > 2 || (FREETYPE_MAJOR == 2 && FREETYPE_MINOR >= 11)
 
-static Color traversePaint(
+// Carries both the resolved solid color and any gradient ID up the paint tree.
+// gradientId == 0 means solid color; non-zero means the gradient was registered with the atlas.
+struct PaintResult {
+	Color color = {1_cv, 1_cv, 1_cv, 1_cv};
+	uint32_t gradientId = 0;
+};
+
+// Extract all stops from a COLRv1 color line iterator. stop_offset is 16.16 fixed-point [0, 1].
+// FT_ColorIndex.alpha is FT_F2Dot14 (0x4000 = 1.0) and multiplied into the palette alpha.
+static std::vector<GradientStop> extractColorStops(
+	FT_Face face,
+	FT_ColorStopIterator iter,
+	FT_Color* palette
+) {
+	std::vector<GradientStop> stops;
+	FT_ColorStop stop;
+
+	while(FT_Get_Colorline_Stops(face, &stop, &iter)) {
+		Color c = resolveColor(palette, stop.color.palette_index);
+
+		c.a *= cv(stop.color.alpha) / 16384.0_cv;
+
+		stops.push_back({cv(stop.stop_offset) / 65536.0_cv, c});
+	}
+
+	return stops;
+}
+
+static PaintResult traversePaint(
 	FT_Face face,
 	FT_OpaquePaint* opaquePaint,
 	FT_Color* palette,
@@ -550,10 +578,10 @@ static Color traversePaint(
 // affine transform (parentMatrix) and emitting one atlas shape + Layer
 // per PaintGlyph leaf.
 //
-// Return value: the Color resolved at this node (meaningful for PaintSolid
-// and gradient stubs; used by the PaintGlyph case to colour its layer).
+// Return value: the PaintResult resolved at this node (color for PaintSolid,
+// gradientId for gradient nodes; used by the PaintGlyph case).
 // -------------------------------------------------------------------------
-static Color traversePaint(
+static PaintResult traversePaint(
 	FT_Face face,
 	FT_OpaquePaint* opaquePaint,
 	FT_Color* palette,
@@ -566,12 +594,11 @@ static Color traversePaint(
 	CompositeShape& out,
 	const Atlas::SplitStrategy& strategy
 ) {
-	// TODO: Probably safe to just return `{}`, since `Color` defaults to that.
 	const auto white = Color{1_cv, 1_cv, 1_cv, 1_cv};
 
 	FT_COLR_Paint paint;
 
-	if(!FT_Get_Paint(face, *opaquePaint, &paint)) return white;
+	if(!FT_Get_Paint(face, *opaquePaint, &paint)) return {white};
 
 	switch(paint.format) {
 		// -----------------------------------------------------------------
@@ -592,7 +619,7 @@ static Color traversePaint(
 				);
 			}
 
-			return white;
+			return {white};
 		}
 
 		// -----------------------------------------------------------------
@@ -601,9 +628,9 @@ static Color traversePaint(
 		case FT_COLR_PAINTFORMAT_GLYPH: {
 			const FT_UInt gi = paint.u.glyph.glyphID;
 
-			// Get color from child paint BEFORE loading the glyph --
+			// Get color/gradient from child paint BEFORE loading the glyph --
 			// loading a new glyph clobbers face->glyph.
-			Color color = traversePaint(
+			PaintResult result = traversePaint(
 				face, &paint.u.glyph.paint, palette,
 				emScale, advance, parentMatrix,
 				codepoint, layerIdx, atlas, out, strategy
@@ -645,18 +672,24 @@ static Color traversePaint(
 
 			atlas.addShape(layerKey, data);
 
-			out.layers.push_back({layerKey, color});
+			Layer layer;
+
+			layer.key = layerKey;
+			layer.color = result.color;
+			layer.gradientId = result.gradientId;
+
+			out.layers.push_back(layer);
 
 			layerIdx++;
 
-			return color;
+			return result;
 		}
 
 		// -----------------------------------------------------------------
 		// Flat color
 		// -----------------------------------------------------------------
 		case FT_COLR_PAINTFORMAT_SOLID: {
-			return resolveColor(palette, paint.u.solid.color.palette_index);
+			return {resolveColor(palette, paint.u.solid.color.palette_index)};
 		}
 
 		// -----------------------------------------------------------------
@@ -743,29 +776,87 @@ static Color traversePaint(
 		}
 
 		// -----------------------------------------------------------------
-		// Gradients - use first color stop as flat approximation
-		// TODO: bake gradient into texture and sample via UV attribute
+		// Linear gradient
+		// p0/p1 endpoints and p2 (rotation pivot) are 16.16 font units.
 		// -----------------------------------------------------------------
-		case FT_COLR_PAINTFORMAT_LINEAR_GRADIENT:
-		case FT_COLR_PAINTFORMAT_RADIAL_GRADIENT:
+		case FT_COLR_PAINTFORMAT_LINEAR_GRADIENT: {
+			const auto& lg = paint.u.linear_gradient;
+			auto stops = extractColorStops(face, lg.colorline.color_stop_iterator, palette);
+
+			if(stops.empty()) return {white};
+
+			slug_t x0 = cv(lg.p0.x) / 65536.0_cv * emScale;
+			slug_t y0 = cv(lg.p0.y) / 65536.0_cv * emScale;
+			slug_t x1 = cv(lg.p1.x) / 65536.0_cv * emScale;
+			slug_t y1 = cv(lg.p1.y) / 65536.0_cv * emScale;
+
+			parentMatrix.apply(x0, y0, x0, y0);
+			parentMatrix.apply(x1, y1, x1, y1);
+
+			GradientInfo info;
+
+			info.type = GradientInfo::Type::Linear;
+			info.stops = std::move(stops);
+			info.transform = buildLinearGradientMatrix(x0, y0, x1, y1);
+
+			return {white, atlas.addGradient(info)};
+		}
+
+		// -----------------------------------------------------------------
+		// Radial gradient
+		// c0/c1 are 16.16 font units; r0/r1 are 16.16 distances.
+		// -----------------------------------------------------------------
+		case FT_COLR_PAINTFORMAT_RADIAL_GRADIENT: {
+			const auto& rg = paint.u.radial_gradient;
+			auto stops = extractColorStops(face, rg.colorline.color_stop_iterator, palette);
+
+			if(stops.empty()) return {white};
+
+			// Use the outer circle (c1, r1) as the gradient center/radius.
+			slug_t cx = cv(rg.c1.x) / 65536.0_cv * emScale;
+			slug_t cy = cv(rg.c1.y) / 65536.0_cv * emScale;
+			slug_t r1 = cv(rg.r1) / 65536.0_cv * emScale;
+			slug_t r0 = cv(rg.r0) / 65536.0_cv * emScale;
+
+			parentMatrix.apply(cx, cy, cx, cy);
+
+			GradientInfo info;
+
+			info.type = GradientInfo::Type::Radial;
+			info.stops = std::move(stops);
+			info.transform = buildRadialGradientMatrix(cx, cy, r1);
+			info.innerRadius = r0;
+
+			return {white, atlas.addGradient(info)};
+		}
+
+		// -----------------------------------------------------------------
+		// Sweep gradient
+		// center is 16.16 font units; angles are 16.16 fractions of a full
+		// turn (multiply by 2 for radians).
+		// -----------------------------------------------------------------
 		case FT_COLR_PAINTFORMAT_SWEEP_GRADIENT: {
-			const FT_ColorStopIterator& csi =
-				(paint.format == FT_COLR_PAINTFORMAT_LINEAR_GRADIENT)
-					? paint.u.linear_gradient.colorline.color_stop_iterator
-				: (paint.format == FT_COLR_PAINTFORMAT_RADIAL_GRADIENT)
-					? paint.u.radial_gradient.colorline.color_stop_iterator
-					: paint.u.sweep_gradient.colorline.color_stop_iterator
-			;
+			const auto& sg = paint.u.sweep_gradient;
+			auto stops = extractColorStops(face, sg.colorline.color_stop_iterator, palette);
 
-			FT_ColorStop stop;
-			FT_ColorStopIterator iter = csi;
+			if(stops.empty()) return {white};
 
-			if(FT_Get_Colorline_Stops(face, &stop, &iter)) return resolveColor(
-				palette,
-				stop.color.palette_index
-			);
+			slug_t cx = cv(sg.center.x) / 65536.0_cv * emScale;
+			slug_t cy = cv(sg.center.y) / 65536.0_cv * emScale;
 
-			return white;
+			parentMatrix.apply(cx, cy, cx, cy);
+
+			const slug_t tau = 2.0_cv * cv(M_PI);
+			const slug_t startAngle = cv(sg.start_angle) / 65536.0_cv * tau;
+			const slug_t arcSpan = cv(sg.end_angle) / 65536.0_cv * tau - startAngle;
+
+			GradientInfo info;
+
+			info.type = GradientInfo::Type::Sweep;
+			info.stops = std::move(stops);
+			info.transform = buildSweepGradientMatrix(cx, cy, startAngle, arcSpan);
+
+			return {white, atlas.addGradient(info)};
 		}
 
 		// -----------------------------------------------------------------
@@ -785,7 +876,7 @@ static Color traversePaint(
 		}
 	}
 
-	return white;
+	return {white};
 }
 
 static void processColorGlyphV1(
