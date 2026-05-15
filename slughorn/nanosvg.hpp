@@ -29,7 +29,7 @@
 //
 // WHAT IS SUPPORTED
 // -----------------
-// - Filled shapes (solid color only)
+// - Filled shapes (solid color and linear/radial gradients)
 // - All path segment types: lines, cubics (split to quadratics), and NanoSVG's
 //   pre-flattened cubic chains
 // - Fill color unpacked from NanoSVG's packed ABGR uint32
@@ -39,7 +39,9 @@
 // WHAT IS NOT (YET) SUPPORTED
 // ---------------------------
 // - Stroked shapes (stroke-to-fill expansion not yet wired up)
-// - Gradients (first stop color used as flat approximation)
+// - Sweep/conic gradients (SVG has no native sweep gradient type)
+// - Gradient spreadMethod reflect/repeat (clamped to pad)
+// - Radial focal point offset / cone gradients (g->fx/fy != 0 is the SVG cone case)
 // - Clip paths, masks, opacity, transforms on groups
 // - Text elements
 // ================================================================================================
@@ -262,15 +264,90 @@ CompositeShape loadImage(const NSVGimage* image, Atlas& atlas, uint32_t& baseKey
 	for(const NSVGshape* shape = image->shapes; shape; shape = shape->next) {
 		if(!(shape->flags & NSVG_FLAGS_VISIBLE)) continue;
 
-		if(shape->fill.type != NSVG_PAINT_COLOR) {
-			std::cerr << "slughorn::nanosvg: skipping shape with non-solid fill." << std::endl;
+		Color color = { 1.0_cv, 1.0_cv, 1.0_cv, 1.0_cv };
+		uint32_t gradientId = 0;
+
+		if(shape->fill.type == NSVG_PAINT_COLOR) {
+			color = colorFromNSVG(shape->fill.color);
+
+			if(color.a < 1e-4_cv) continue;
+		}
+		else if(
+			shape->fill.type == NSVG_PAINT_LINEAR_GRADIENT ||
+			shape->fill.type == NSVG_PAINT_RADIAL_GRADIENT
+		) {
+			NSVGgradient* g = shape->fill.gradient;
+
+			if(!g || g->nstops == 0) {
+				std::cerr << "slughorn::nanosvg: skipping gradient with no stops." << std::endl;
+				continue;
+			}
+
+			std::vector<GradientStop> stops;
+			stops.reserve(static_cast<size_t>(g->nstops));
+
+			for(int i = 0; i < g->nstops; i++) {
+				stops.push_back({ cv(g->stops[i].offset), colorFromNSVG(g->stops[i].color) });
+			}
+
+			// NanoSVG stores g->xform as the INVERSE of the gradient→pixel
+			// transform. nsvg__scaleToViewbox() builds the forward transform
+			// then inverts it for its software rasterizer. We invert back to
+			// get the forward transform so we can extract canonical endpoints.
+			//
+			// Gradient endpoints are shifted into local em-space to match
+			// _toLocalOrigin() applied to the path curves in decomposePath.
+			float fwd[6];
+			nsvg__xformInverse(fwd, g->xform);
+
+			const slug_t minX_em = cv(shape->bounds[0]) * scale;
+			const slug_t minY_em = cv(shape->bounds[1]) * scale;
+
+			GradientInfo info;
+			info.stops = std::move(stops);
+
+			if(shape->fill.type == NSVG_PAINT_LINEAR_GRADIENT) {
+				// In NanoSVG's convention, the gradient t-axis is the second
+				// column of the forward transform: (0,0)→start, (0,1)→end.
+				float px0, py0, px1, py1;
+
+				nsvg__xformPoint(&px0, &py0, 0.0f, 0.0f, fwd);
+				nsvg__xformPoint(&px1, &py1, 0.0f, 1.0f, fwd);
+
+				info.type = GradientInfo::Type::Linear;
+				info.transform = buildLinearGradientMatrix(
+					cv(px0) * scale - minX_em, cv(py0) * scale - minY_em,
+					cv(px1) * scale - minX_em, cv(py1) * scale - minY_em
+				);
+			} else {
+				// Center is at the origin of the forward transform; radius is
+				// the scale factor of its first column.
+				float pcx, pcy;
+
+				nsvg__xformPoint(&pcx, &pcy, 0.0f, 0.0f, fwd);
+
+				const float pr1 = std::sqrt(fwd[0]*fwd[0] + fwd[1]*fwd[1]);
+
+				info.type = GradientInfo::Type::Radial;
+				info.transform = buildRadialGradientMatrix(
+					cv(pcx) * scale - minX_em,
+					cv(pcy) * scale - minY_em,
+					cv(pr1) * scale
+				);
+				info.innerRadius = 0.0_cv;
+			}
+
+			gradientId = atlas.addGradient(info);
+		}
+		else {
+			std::cerr
+				<< "slughorn::nanosvg: skipping unsupported fill type "
+				<< static_cast<int>(shape->fill.type)
+				<< std::endl
+			;
 
 			continue;
 		}
-
-		const Color color = colorFromNSVG(shape->fill.color);
-
-		if(color.a < 1e-4_cv) continue;
 
 		const uint32_t key = baseKey++;
 
@@ -280,6 +357,7 @@ CompositeShape loadImage(const NSVGimage* image, Atlas& atlas, uint32_t& baseKey
 
 		layer.key = key;
 		layer.color = color;
+		layer.gradientId = gradientId;
 		layer.transform = transform;
 		// layer.scale is intentionally not set - world sizing is the caller's
 		// responsibility. layer.scale remains at its default of 1.0.
