@@ -80,6 +80,34 @@ static const std::string SVG_TRIANGLE = R"(
 </svg>
 )";
 
+// Square with a horizontal linear gradient (red→blue), 100x100 canvas.
+// gradient-units="objectBoundingBox" is SVG default; x1=0,y1=0,x2=1,y2=0
+// maps to left→right in pixel space.
+static const std::string SVG_LINEAR_GRADIENT = R"SVG(
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <linearGradient id="lg" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff0000"/>
+      <stop offset="1" stop-color="#0000ff"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="100" height="100" fill="url(#lg)"/>
+</svg>
+)SVG";
+
+// Square with a radial gradient (white center → black edge), 100x100 canvas.
+static const std::string SVG_RADIAL_GRADIENT = R"SVG(
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <radialGradient id="rg" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#000000"/>
+    </radialGradient>
+  </defs>
+  <rect x="0" y="0" width="100" height="100" fill="url(#rg)"/>
+</svg>
+)SVG";
+
 // Three triangles arranged diagonally, 300x300 canvas.
 // Mirrors test_CompositeShape() in slughorn-test-cairo.cpp.
 // Each triangle is offset by (i*100, i*100) in SVG space.
@@ -174,6 +202,79 @@ void test_Shape() {
     }
 
     nsvgDelete(image);
+}
+
+// =============================================================================
+// test_Gradients
+//
+// Verifies that linear and radial gradient fills are wired correctly:
+//   - layer.gradientId is non-zero
+//   - atlas.getGradients() has one entry
+//   - stop count and type are correct
+//   - gradient type discriminator matches request
+// =============================================================================
+
+void test_Gradients() {
+    std::cout << "\n=== test_Gradients (linear) ===" << std::endl;
+
+    {
+        slughorn::Atlas atlas;
+        uint32_t baseKey = 0;
+
+        auto composite = slughorn::nanosvg::loadString(SVG_LINEAR_GRADIENT, atlas, baseKey);
+
+        check("1 layer loaded",       composite.layers.size() == 1);
+        check("layer has gradientId", composite.layers.size() >= 1 &&
+                                      composite.layers[0].gradientId != 0);
+
+        atlas.build();
+
+        const auto& grads = atlas.getGradients();
+        check("one gradient registered", grads.size() == 1);
+
+        if(!grads.empty()) {
+            const auto& g = grads[0];
+            check("type == Linear",  g.type == slughorn::GradientInfo::Type::Linear);
+            check("2 stops",         g.stops.size() == 2);
+
+            if(g.stops.size() >= 2) {
+                // stop 0: red (#ff0000), offset 0
+                checkNear("stop[0].t == 0",   g.stops[0].t,       0.0_cv);
+                checkNear("stop[0].r == 1",   g.stops[0].color.r, 1.0_cv);
+                checkNear("stop[0].g == 0",   g.stops[0].color.g, 0.0_cv);
+                checkNear("stop[0].b == 0",   g.stops[0].color.b, 0.0_cv);
+                // stop 1: blue (#0000ff), offset 1
+                checkNear("stop[1].t == 1",   g.stops[1].t,       1.0_cv);
+                checkNear("stop[1].r == 0",   g.stops[1].color.r, 0.0_cv);
+                checkNear("stop[1].g == 0",   g.stops[1].color.g, 0.0_cv);
+                checkNear("stop[1].b == 1",   g.stops[1].color.b, 1.0_cv);
+            }
+        }
+    }
+
+    std::cout << "\n=== test_Gradients (radial) ===" << std::endl;
+
+    {
+        slughorn::Atlas atlas;
+        uint32_t baseKey = 0;
+
+        auto composite = slughorn::nanosvg::loadString(SVG_RADIAL_GRADIENT, atlas, baseKey);
+
+        check("1 layer loaded",       composite.layers.size() == 1);
+        check("layer has gradientId", composite.layers.size() >= 1 &&
+                                      composite.layers[0].gradientId != 0);
+
+        atlas.build();
+
+        const auto& grads = atlas.getGradients();
+        check("one gradient registered", grads.size() == 1);
+
+        if(!grads.empty()) {
+            const auto& g = grads[0];
+            check("type == Radial",  g.type == slughorn::GradientInfo::Type::Radial);
+            check("2 stops",         g.stops.size() == 2);
+        }
+    }
 }
 
 // =============================================================================
@@ -281,6 +382,7 @@ int main(int argc, char** argv) {
 
     // Unit test mode.
     test_Shape();
+    test_Gradients();
     test_CompositeShape();
 
     std::cout << "\n=== Results: "
