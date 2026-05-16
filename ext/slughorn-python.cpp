@@ -144,16 +144,17 @@ static std::string streamRepr(const T& v) {
 	return ss.str();
 }
 
-struct RenderSampleResult {
+struct Sample {
 	slug_t fill = 0_cv;
 	slug_t xcov = 0_cv;
 	slug_t ycov = 0_cv;
 	slug_t xwgt = 0_cv;
 	slug_t ywgt = 0_cv;
+
 	uint32_t iters = 0;
 };
 
-struct DecodedShape {
+struct Sampler {
 	slughorn::Atlas::Shape shape;
 	std::vector<slughorn::Atlas::Curve> curves;
 	std::vector<uint32_t> hbandOffsets;
@@ -284,8 +285,8 @@ struct DecodedShape {
 		return {outW, outH};
 	}
 
-	RenderSampleResult renderSample(slug_t rx, slug_t ry, slug_t ppeX, slug_t ppeY) const {
-		RenderSampleResult out;
+	Sample renderSample(slug_t rx, slug_t ry, slug_t ppeX, slug_t ppeY) const {
+		Sample out;
 
 		for(const auto& c : curves) {
 			out.iters++;
@@ -341,8 +342,8 @@ struct DecodedShape {
 		return out;
 	}
 
-	RenderSampleResult renderSampleBanded(slug_t rx, slug_t ry, slug_t ppeX, slug_t ppeY) const {
-		RenderSampleResult out;
+	Sample renderSampleBanded(slug_t rx, slug_t ry, slug_t ppeX, slug_t ppeY) const {
+		Sample out;
 
 		if(hbandOffsets.size() < 2 || vbandOffsets.size() < 2) return out;
 
@@ -466,7 +467,7 @@ struct DecodedShape {
 	}
 };
 
-static DecodedShape decodeShape(const slughorn::Atlas& atlas, const slughorn::Key& key) {
+static Sampler decodeShape(const slughorn::Atlas& atlas, const slughorn::Key& key) {
 	const auto* shape = atlas.getShape(key);
 
 	if(!shape) throw py::key_error("Key not found in atlas (or atlas not built yet)");
@@ -482,7 +483,7 @@ static DecodedShape decodeShape(const slughorn::Atlas& atlas, const slughorn::Ke
 		throw std::runtime_error("Unexpected band texture format")
 	;
 
-	DecodedShape out;
+	Sampler out;
 
 	out.shape = *shape;
 
@@ -1277,7 +1278,7 @@ PYBIND11_MODULE(slughorn, m) {
 			},
 			py::arg("key"),
 			"Decode a built shape into a Python-facing software-render view.\n"
-			"Returns a slughorn.render.DecodedShape."
+			"Returns a slughorn.render.Sampler."
 		)
 
 		.def_static("compute_adaptive_splits",
@@ -1372,18 +1373,18 @@ PYBIND11_MODULE(slughorn, m) {
 			"Provides a decoded per-shape view plus native reference and banded sample paths."
 		);
 
-		py::class_<RenderSampleResult>(render, "RenderSampleResult")
-			.def_readonly("fill", &RenderSampleResult::fill)
-			.def_readonly("xcov", &RenderSampleResult::xcov)
-			.def_readonly("ycov", &RenderSampleResult::ycov)
-			.def_readonly("xwgt", &RenderSampleResult::xwgt)
-			.def_readonly("ywgt", &RenderSampleResult::ywgt)
-			.def_readonly("iters", &RenderSampleResult::iters)
-			.def("__repr__", [](const RenderSampleResult& r) {
+		py::class_<Sample>(render, "Sample")
+			.def_readonly("fill", &Sample::fill)
+			.def_readonly("xcov", &Sample::xcov)
+			.def_readonly("ycov", &Sample::ycov)
+			.def_readonly("xwgt", &Sample::xwgt)
+			.def_readonly("ywgt", &Sample::ywgt)
+			.def_readonly("iters", &Sample::iters)
+			.def("__repr__", [](const Sample& r) {
 				std::ostringstream ss;
 
 				ss
-					<< "RenderSampleResult(fill=" << r.fill
+					<< "Sample(fill=" << r.fill
 					<< ", xcov=" << r.xcov
 					<< ", ycov=" << r.ycov
 					<< ", xwgt=" << r.xwgt
@@ -1395,31 +1396,31 @@ PYBIND11_MODULE(slughorn, m) {
 			})
 		;
 
-		py::class_<DecodedShape>(render, "DecodedShape")
-			.def_property_readonly("shape", [](const DecodedShape& d) { return d.shape; })
-			.def_property_readonly("curves", [](const DecodedShape& d) { return d.curves; })
-			.def_property_readonly("curve_buffer", [](const DecodedShape& d) {
+		py::class_<Sampler>(render, "Sampler")
+			.def_property_readonly("shape", [](const Sampler& d) { return d.shape; })
+			.def_property_readonly("curves", [](const Sampler& d) { return d.curves; })
+			.def_property_readonly("curve_buffer", [](const Sampler& d) {
 				return curveView2D(d.curves);
 			}, "2-D float32 memoryview of decoded curves with shape (num_curves, 6).")
-			.def_property_readonly("hband_offsets", [](const DecodedShape& d) {
+			.def_property_readonly("hband_offsets", [](const Sampler& d) {
 				return vectorView1D(d.hbandOffsets);
 			}, "CSR offsets for horizontal bands.")
-			.def_property_readonly("hband_indices", [](const DecodedShape& d) {
+			.def_property_readonly("hband_indices", [](const Sampler& d) {
 				return vectorView1D(d.hbandIndices);
 			}, "CSR payload for horizontal bands.")
-			.def_property_readonly("vband_offsets", [](const DecodedShape& d) {
+			.def_property_readonly("vband_offsets", [](const Sampler& d) {
 				return vectorView1D(d.vbandOffsets);
 			}, "CSR offsets for vertical bands.")
-			.def_property_readonly("vband_indices", [](const DecodedShape& d) {
+			.def_property_readonly("vband_indices", [](const Sampler& d) {
 				return vectorView1D(d.vbandIndices);
 			}, "CSR payload for vertical bands.")
-			.def_property_readonly("indir_y", [](const DecodedShape& d) {
+			.def_property_readonly("indir_y", [](const Sampler& d) {
 				return arrayView1D(d.indirY);
 			}, "Band indirection table for Y, length INDIRECTION_SIZE.")
-			.def_property_readonly("indir_x", [](const DecodedShape& d) {
+			.def_property_readonly("indir_x", [](const Sampler& d) {
 				return arrayView1D(d.indirX);
 			}, "Band indirection table for X, length INDIRECTION_SIZE.")
-			.def("get_hband", [](const DecodedShape& d, uint32_t i) {
+			.def("get_hband", [](const Sampler& d, uint32_t i) {
 				if(i + 1 >= d.hbandOffsets.size()) throw py::index_error("horizontal band out of range");
 
 				py::list out;
@@ -1429,7 +1430,7 @@ PYBIND11_MODULE(slughorn, m) {
 
 				return out;
 			}, py::arg("index"))
-			.def("get_vband", [](const DecodedShape& d, uint32_t i) {
+			.def("get_vband", [](const Sampler& d, uint32_t i) {
 				if(i + 1 >= d.vbandOffsets.size()) throw py::index_error("vertical band out of range");
 
 				py::list out;
@@ -1440,21 +1441,21 @@ PYBIND11_MODULE(slughorn, m) {
 				return out;
 			}, py::arg("index"))
 			.def("render_sample",
-				[](const DecodedShape& d, slug_t x, slug_t y, slug_t ppeX, slug_t ppeY) {
+				[](const Sampler& d, slug_t x, slug_t y, slug_t ppeX, slug_t ppeY) {
 					return d.renderSample(x, y, ppeX, ppeY);
 				},
 				py::arg("x"), py::arg("y"), py::arg("ppe_x"), py::arg("ppe_y"),
 				"Reference software sample using all decoded curves."
 			)
 			.def("render_sample_banded",
-				[](const DecodedShape& d, slug_t x, slug_t y, slug_t ppeX, slug_t ppeY) {
+				[](const Sampler& d, slug_t x, slug_t y, slug_t ppeX, slug_t ppeY) {
 					return d.renderSampleBanded(x, y, ppeX, ppeY);
 				},
 				py::arg("x"), py::arg("y"), py::arg("ppe_x"), py::arg("ppe_y"),
 				"Band-accelerated software sample mirroring the GPU shader path."
 			)
 			.def("render_grid",
-				[](const DecodedShape& d, uint32_t size, slug_t margin, bool banded) {
+				[](const Sampler& d, uint32_t size, slug_t margin, bool banded) {
 					return d.renderGrid(size, margin, banded);
 				},
 				py::arg("size") = 128,
@@ -1462,8 +1463,8 @@ PYBIND11_MODULE(slughorn, m) {
 				py::arg("banded") = true,
 				"Render a full grayscale coverage grid as a float32 NumPy-compatible array."
 			)
-			.def("__repr__", [](const DecodedShape& d) {
-				return "DecodedShape(curves=" + std::to_string(d.curves.size()) +
+			.def("__repr__", [](const Sampler& d) {
+				return "Sampler(curves=" + std::to_string(d.curves.size()) +
 					", hbands=" + std::to_string(
 						d.hbandOffsets.empty() ? 0 : d.hbandOffsets.size() - 1
 					) +
@@ -1478,7 +1479,7 @@ PYBIND11_MODULE(slughorn, m) {
 				return decodeShape(atlas, key);
 			},
 			py::arg("atlas"), py::arg("key"),
-			"Decode a built atlas shape into a slughorn.render.DecodedShape."
+			"Decode a built atlas shape into a slughorn.render.Sampler."
 		);
 	}
 
