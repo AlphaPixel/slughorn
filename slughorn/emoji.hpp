@@ -419,6 +419,7 @@ static const Entry TABLE[] = {
 	{ "fire", 0x1F525 }, // fire
 	{ "fire_engine", 0x1F692 }, // fire engine
 	{ "fire_extinguisher", 0x1F9EF }, // fire extinguisher
+	{ "fireworks", 0x1F386 }, // fire works
 	{ "first_quarter_moon", 0x1F313 }, // first quarter moon
 	{ "first_quarter_moon_face", 0x1F31B }, // first quarter moon face
 	{ "fish", 0x1F41F }, // fish
