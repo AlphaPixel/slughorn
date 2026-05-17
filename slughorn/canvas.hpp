@@ -62,6 +62,38 @@ namespace slughorn {
 namespace canvas {
 
 // ================================================================================================
+// detail::flattenCurve - shared by Canvas::strokePath and Canvas::Path::bake
+// ================================================================================================
+
+namespace detail {
+
+inline void flattenCurve(
+	slug_t p0x, slug_t p0y,
+	slug_t p1x, slug_t p1y,
+	slug_t p2x, slug_t p2y,
+	slug_t tol, int depth,
+	std::vector<std::pair<slug_t, slug_t>>& pts
+) {
+	const slug_t dx = p2x - p0x, dy = p2y - p0y;
+	const slug_t lenSq = dx * dx + dy * dy;
+	const slug_t cross = (p1x - p0x) * dy - (p1y - p0y) * dx;
+
+	if(lenSq < 1e-12_cv || (cross * cross) <= (tol * tol * lenSq) || depth >= 8) {
+		pts.push_back({p2x, p2y});
+		return;
+	}
+
+	const slug_t m01x = (p0x + p1x) * 0.5_cv, m01y = (p0y + p1y) * 0.5_cv;
+	const slug_t m12x = (p1x + p2x) * 0.5_cv, m12y = (p1y + p2y) * 0.5_cv;
+	const slug_t mx = (m01x + m12x) * 0.5_cv, my = (m01y + m12y) * 0.5_cv;
+
+	flattenCurve(p0x, p0y, m01x, m01y, mx, my, tol, depth + 1, pts);
+	flattenCurve(mx, my, m12x, m12y, p2x, p2y, tol, depth + 1, pts);
+}
+
+} // namespace detail
+
+// ================================================================================================
 // Canvas
 // ================================================================================================
 
@@ -90,6 +122,87 @@ public:
 
 	CurveDecomposer& decomposer() { return _decomposer; }
 	const CurveDecomposer& decomposer() const { return _decomposer; }
+
+	// -------------------------------------------------------------------------
+	// Path — arc-length-parameterised snapshot of the current path.
+	//
+	// Created via canvas.path(). Copies _activeCurves + _pendingCurves at call
+	// time (non-destructive), flattens them to a polyline, and builds a
+	// cumulative arc-length LUT — all at construction. After that it is a pure
+	// read-only value: no Atlas, no rendering, no state.
+	//
+	//     auto path  = canvas.path();
+	//     auto [x, y, angle] = path.sample(0.5); // midpoint by arc-length
+	//
+	// sample() t is normalised arc-length: 0 = start, 1 = end, 0.5 = midpoint.
+	// angle is the tangent direction in radians — the rotation needed for a
+	// Shape to face forward along the curve at that point.
+	// -------------------------------------------------------------------------
+
+	class Path {
+	public:
+		struct Sample { slug_t x, y, angle; };
+
+		friend std::ostream& operator<<(std::ostream& os, const Sample& s) {
+			return os << "Sample{ x=" << s.x << " y=" << s.y << " angle=" << s.angle << " }";
+		}
+
+		slug_t arcLength() const { return _totalLength; }
+
+		Sample sample(slug_t t) const {
+			if(_pts.size() < 2) return {};
+
+			const slug_t s = std::max(0.0_cv, std::min(1.0_cv, t)) * _totalLength;
+
+			auto it = std::lower_bound(_lut.begin(), _lut.end(), s);
+			size_t i = static_cast<size_t>(std::distance(_lut.begin(), it));
+
+			i = std::min(i, _pts.size() - 1);
+			if(i == 0) i = 1;
+
+			const slug_t segLen = _lut[i] - _lut[i - 1];
+			const slug_t frac = segLen > 1e-12_cv ? (s - _lut[i - 1]) / segLen : 0.0_cv;
+
+			const slug_t x = _pts[i-1].first  + frac * (_pts[i].first  - _pts[i-1].first);
+			const slug_t y = _pts[i-1].second + frac * (_pts[i].second - _pts[i-1].second);
+
+			const slug_t angle = std::atan2(
+				_pts[i].second - _pts[i-1].second,
+				_pts[i].first  - _pts[i-1].first
+			);
+
+			return { x, y, angle };
+		}
+
+	private:
+		friend class Canvas;
+
+		explicit Path(const Atlas::Curves& curves) {
+			if(curves.empty()) return;
+
+			const slug_t tol = TOLERANCE_BALANCED;
+
+			_pts.push_back({curves.front().x1, curves.front().y1});
+
+			for(const auto& c : curves)
+				detail::flattenCurve(c.x1, c.y1, c.x2, c.y2, c.x3, c.y3, tol, 0, _pts);
+
+			_lut.resize(_pts.size(), 0.0_cv);
+
+			for(size_t i = 1; i < _pts.size(); ++i) {
+				const slug_t dx = _pts[i].first  - _pts[i-1].first;
+				const slug_t dy = _pts[i].second - _pts[i-1].second;
+
+				_lut[i] = _lut[i-1] + std::sqrt(dx*dx + dy*dy);
+			}
+
+			_totalLength = _lut.empty() ? 0.0_cv : _lut.back();
+		}
+
+		std::vector<std::pair<slug_t, slug_t>> _pts;
+		std::vector<slug_t> _lut;
+		slug_t _totalLength = 0.0_cv;
+	};
 
 	// -------------------------------------------------------------------------
 	// Transform stack
@@ -581,7 +694,7 @@ public:
 
 		pts.push_back({centerline.front().x1, centerline.front().y1});
 
-		for(const auto& c : centerline) _flattenCurve(
+		for(const auto& c : centerline) detail::flattenCurve(
 			c.x1, c.y1,
 			c.x2, c.y2,
 			c.x3, c.y3,
@@ -881,6 +994,15 @@ public:
 	// True if there are any curves in either the active sub-path or the shape accumulator.
 	bool hasPendingPath() const { return !_pendingCurves.empty() || !_activeCurves.empty(); }
 
+	// Snapshot the current path as a queryable Path object. Copies (does not consume)
+	// both _pendingCurves and _activeCurves, flattens to a polyline, and bakes the
+	// arc-length LUT. The canvas path is left completely intact for fill/stroke as normal.
+	Path path() const {
+		Atlas::Curves merged = _pendingCurves;
+		for(const auto& c : _activeCurves) merged.push_back(c);
+		return Path(merged);
+	}
+
 private:
 	Key _fill(
 		Color color,
@@ -1030,34 +1152,6 @@ private:
 		_pendingCurves.clear();
 
 		return key;
-	}
-
-	// Flatten a quadratic Bezier to a polyline, appending only the endpoint of each flat piece. The
-	// caller must push the path start before the first call, and must NOT push it for subsequent
-	// curves in a chain (they share the prior endpoint).
-	static void _flattenCurve(
-		slug_t p0x, slug_t p0y,
-		slug_t p1x, slug_t p1y,
-		slug_t p2x, slug_t p2y,
-		slug_t tol, int depth,
-		std::vector<std::pair<slug_t, slug_t>>& pts
-	) {
-		const slug_t dx = p2x - p0x, dy = p2y - p0y;
-		const slug_t lenSq = dx * dx + dy * dy;
-		const slug_t cross = (p1x - p0x) * dy - (p1y - p0y) * dx;
-
-		if(lenSq < 1e-12_cv || (cross * cross) <= (tol * tol * lenSq) || depth >= 8) {
-			pts.push_back({p2x, p2y});
-
-			return;
-		}
-
-		const slug_t m01x = (p0x + p1x) * 0.5_cv, m01y = (p0y + p1y) * 0.5_cv;
-		const slug_t m12x = (p1x + p2x) * 0.5_cv, m12y = (p1y + p2y) * 0.5_cv;
-		const slug_t mx = (m01x + m12x) * 0.5_cv, my = (m01y + m12y) * 0.5_cv;
-
-		_flattenCurve(p0x, p0y, m01x, m01y, mx, my, tol, depth + 1, pts);
-		_flattenCurve(mx, my, m12x, m12y, p2x, p2y, tol, depth + 1, pts);
 	}
 
 	// Decompose a circular arc into cubic Bezier segments and emit via bezierTo().

@@ -536,6 +536,30 @@ int main(int argc, char** argv) {
 
 	// ============================================================================================
 
+	// ============================================================================================
+	// Pattern 16: Built a Path instance and sample it.
+	// ============================================================================================
+	{
+		canvas.beginPath(); // Maybe unnecessary, but safe?
+		canvas.moveTo(0_cv, 0_cv); // Also perhaps implicit, but still safe!
+		canvas.lineTo(0.5_cv, 0_cv);
+		canvas.quadTo(0.75_cv, 1_cv, 1_cv, 0_cv);
+
+		auto path = canvas.path();
+
+		for(slug_t s = 0_cv; s <= 1_cv; s += 0.1_cv) {
+			// auto [x, y, angle] = path.sample(s);
+			auto sample = path.sample(s);
+
+			std::cout << "sample @ " << s << " = " << sample << std::endl;
+		}
+
+		canvas.stroke(0.06_cv, WHITE); // auto-key?
+		canvas.finalize(Key::fromString("path_test"));
+	}
+
+	// ============================================================================================
+
 	atlas.build();
 
 	std::cerr << "PackingStats: " << atlas.getPackingStats() << std::endl;
