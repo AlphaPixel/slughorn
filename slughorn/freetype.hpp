@@ -707,8 +707,8 @@ static PaintResult traversePaint(
 		case FT_COLR_PAINTFORMAT_TRANSFORM: {
 			const FT_Affine23& a = paint.u.transform.affine;
 
-			if(!a.xx && !a.yy) {
-				// Zero/broken transform - skip and recurse with parent matrix.
+			if(!a.xx && !a.xy && !a.yx && !a.yy) {
+				// Zero/broken transform (FreeType root-transform quirk) - skip and recurse with parent matrix.
 				return traversePaint(
 					face, &paint.u.transform.paint, palette,
 					emScale, advance, parentMatrix,
