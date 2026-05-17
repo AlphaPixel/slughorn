@@ -63,7 +63,7 @@ namespace cairo {
 std::pair<Atlas::ShapeInfo, Matrix> decomposePath(
 	cairo_t* cr,
 	slug_t scale=1.0_cv,
-	Atlas::ShapeInfo::Origin origin=Atlas::ShapeInfo::Origin::Default
+	Atlas::ShapeInfo::Origin origin={}
 );
 
 // Decompose the current path on @p cr and register the result in @p atlas under @p key.
@@ -78,7 +78,7 @@ Matrix loadShape(
 	Key key,
 	slug_t scale=1.0_cv,
 	bool autoMetrics=true,
-	Atlas::ShapeInfo::Origin origin=Atlas::ShapeInfo::Origin::Default
+	Atlas::ShapeInfo::Origin origin={}
 );
 
 }
@@ -146,7 +146,7 @@ std::pair<Atlas::ShapeInfo, Matrix> decomposePath(cairo_t* cr, slug_t scale, Atl
 
 	Matrix transform = Matrix::identity();
 
-	if(origin == Atlas::ShapeInfo::Origin::Centered) {
+	if(origin.type == Atlas::ShapeInfo::Origin::Type::Centered) {
 		transform.dx = cv(x1 + x2) * 0.5_cv * scale;
 		transform.dy = cv(y1 + y2) * 0.5_cv * scale;
 	}

@@ -389,9 +389,9 @@ int main(int argc, char** argv) {
 			0.5_cv, 0.5_cv,
 			-PI * 0.75_cv, PI * 0.75_cv,
 			{
-				{0.0_cv, {0_cv, 1_cv, 0_cv, 1_cv}},   // green
-				{0.5_cv, {1_cv, 1_cv, 0_cv, 1_cv}},   // yellow
-				{1.0_cv, {1_cv, 0_cv, 0_cv, 1_cv}}    // red
+				{0.0_cv, {0_cv, 1_cv, 0_cv, 1_cv}}, // green
+				{0.5_cv, {1_cv, 1_cv, 0_cv, 1_cv}}, // yellow
+				{1.0_cv, {1_cv, 0_cv, 0_cv, 1_cv}} // red
 			}
 		);
 
@@ -422,8 +422,8 @@ int main(int argc, char** argv) {
 		const slug_t TICK_INNER = 0.36_cv;
 		const slug_t TICK_WIDTH = 0.025_cv;
 
-		const Color FACE_COLOR  = {0.95_cv, 0.92_cv, 0.82_cv, 1_cv};  // parchment
-		const Color TICK_COLOR  = {0.15_cv, 0.15_cv, 0.15_cv, 1_cv};  // near-black
+		const Color FACE_COLOR = {0.95_cv, 0.92_cv, 0.82_cv, 1_cv}; // parchment
+		const Color TICK_COLOR = {0.15_cv, 0.15_cv, 0.15_cv, 1_cv}; // near-black
 
 		// -- Clock face: filled circle (one Shape, one Layer) --------------------------------
 
@@ -455,6 +455,83 @@ int main(int argc, char** argv) {
 		canvas.fill(TICK_COLOR, 1_cv, Key::fromString("clock_ticks_shape"));
 
 		canvas.finalize(Key::fromString("clock_ticks_composite"));
+	}
+
+	// ============================================================================================
+	// Pattern 14: Origin(px, py) - explicit pivot for GPU-side rotation.
+	//
+	// A clock hand (a stroke from the pivot point to the tip) authored with Origin(cx, cy)
+	// so that Layer::transform.dx/dy == (cx, cy) in em-space. The GPU consumer can then rotate
+	// the shape around that exact point without any translate-rotate-translate gymnastics.
+	//
+	// Compare the three modes on an asymmetric shape like this hand:
+	//
+	// Origin{} - transform.dx/dy = bbox corner (wrong pivot)
+	// Origin(Centered) - transform.dx/dy = bbox center (wrong pivot, hand is asymmetric)
+	// Origin(cx, cy) - transform.dx/dy = hand base (correct pivot = clock centre)
+	// ============================================================================================
+
+	{
+		const slug_t CX = 0.5_cv, CY = 0.25_cv; // pivot = clock centre / hand base
+		const slug_t HAND_LENGTH = 0.45_cv;
+		const slug_t HAND_WIDTH = 0.03_cv;
+
+		const Color HAND_COLOR = {0.12_cv, 0.12_cv, 0.18_cv, 1.0_cv};
+
+		canvas.moveTo(CX, CY);
+		canvas.lineTo(CX, CY + HAND_LENGTH);
+
+		const Key handKey = canvas.stroke(
+			HAND_WIDTH,
+			HAND_COLOR,
+			1.0_cv,
+			slughorn::Atlas::ShapeInfo::Origin(CX, CY)
+		);
+
+		// Verify: the layer's transform.dx/dy should equal (CX, CY) - the caller-supplied pivot.
+		const auto hand = canvas.finalize();
+
+		if(!hand.layers.empty()) {
+			const auto& t = hand.layers.front().transform;
+			const bool pivotOk = std::abs(t.dx - CX) < 1e-5_cv && std::abs(t.dy - CY) < 1e-5_cv;
+
+			std::cerr
+				<< "Pattern 14: hand pivot = (" << t.dx << ", " << t.dy << ")"
+				<< " expected (" << CX << ", " << CY << ")"
+				<< (pivotOk ? " OK" : " MISMATCH") << "\n"
+			;
+		}
+
+		atlas.addCompositeShape(Key::fromString("clock_hand_composite"), hand);
+	}
+
+	// ============================================================================================
+	// Pattern 15: Same geometry, two different origins — for SVG debug visualization.
+	//
+	// The rectangle spans [0.1, 0.9] x [0.15, 0.85] in authoring space.
+	//
+	//   pivot_centered_shape : Origin::Centered  -> dot at geometric center (0.5, 0.5)
+	//   pivot_custom_shape   : Origin(0.2, 0.72) -> dot clearly off-center; obviously intentional
+	//
+	// CLI: `slughorn svg atlas.slug pivot_centered_shape`
+	//      `slughorn svg atlas.slug pivot_custom_shape`
+	//  The yellow dot should jump between the two positions.
+	// ============================================================================================
+
+	{
+		using Origin = slughorn::Atlas::ShapeInfo::Origin;
+
+		const Color PURPLE = {0.6_cv, 0_cv, 0.8_cv, 1_cv};
+
+		canvas.rect(0.1_cv, 0.15_cv, 0.8_cv, 0.7_cv);
+		canvas.fill(PURPLE, 1_cv, Key::fromString("pivot_centered_shape"), Origin(Origin::Type::Centered));
+
+		canvas.finalize(Key::fromString("pivot_centered_composite"));
+
+		canvas.rect(0.1_cv, 0.15_cv, 0.8_cv, 0.7_cv);
+		canvas.fill(PURPLE, 1_cv, Key::fromString("pivot_custom_shape"), Origin(0.2_cv, 0.72_cv));
+
+		canvas.finalize(Key::fromString("pivot_custom_composite"));
 	}
 
 	// ============================================================================================

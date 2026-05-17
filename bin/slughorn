@@ -262,6 +262,11 @@ def save_curves_svg(
 		x1, y1 = em_to_px(x, oy + sy)
 		line(x0, y0, x1, y1, "#FF0000", width=1)
 
+	ox_em = shape.bearing_x + shape.origin_x
+	oy_em = (shape.bearing_y - shape.height) + shape.origin_y
+	opx, opy = em_to_px(ox_em, oy_em)
+	circle(opx, opy, 5, fill="#FFD700", stroke="#FF8C00")
+
 	svg = " ".join((
 		'<svg xmlns="http://www.w3.org/2000/svg"',
 		f'width="{w}" height="{h}"',

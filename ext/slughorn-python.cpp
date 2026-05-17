@@ -59,6 +59,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
+#include <pybind11/stl_bind.h>
 #include <pybind11/functional.h>
 
 #include <array>
@@ -73,6 +74,8 @@ using namespace slughorn::literals;
 using slughorn::slug_t;
 
 namespace py = pybind11;
+
+PYBIND11_MAKE_OPAQUE(std::vector<slughorn::Layer>);
 
 // ================================================================================================
 // Internal helpers
@@ -916,9 +919,14 @@ PYBIND11_MODULE(slughorn, m) {
 	// ============================================================================================
 	// slughorn.CompositeShape
 	// ============================================================================================
+	py::bind_vector<std::vector<slughorn::Layer>>(m, "Layers");
+
 	py::class_<slughorn::CompositeShape>(m, "CompositeShape")
 		.def(py::init<>())
-		.def_readwrite("layers", &slughorn::CompositeShape::layers,
+		.def_readwrite(
+			"layers",
+			&slughorn::CompositeShape::layers,
+			py::return_value_policy::reference_internal,
 			"Ordered list of Layer objects drawn bottom-to-top."
 		)
 		.def_readwrite("advance", &slughorn::CompositeShape::advance,
@@ -1000,16 +1008,35 @@ PYBIND11_MODULE(slughorn, m) {
 			"Use Atlas.compute_adaptive_splits() / Atlas.compute_uniform_splits(), or set manually."
 		)
 		.def_readwrite("origin", &slughorn::Atlas::ShapeInfo::origin,
-			"Where the transform origin is placed relative to the shape geometry.\n"
-			"ShapeInfo.Origin.Default - origin at the shape's bottom-left corner (existing behavior).\n"
-			"ShapeInfo.Origin.Centered - origin at the geometric center (width/2, height/2);\n"
-			"  enables natural GPU-side rotation without translate-rotate-translate gymnastics."
+			"Where the transform origin (Layer.transform.dx/dy) is placed relative to the geometry.\n"
+			"Origin() = Default, Origin(Type) = type-only (e.g. Centered), Origin(x, y) = Custom."
 		)
 	;
 
-	py::enum_<slughorn::Atlas::ShapeInfo::Origin>(shapeinfo_, "Origin")
-		.value("Default", slughorn::Atlas::ShapeInfo::Origin::Default)
-		.value("Centered", slughorn::Atlas::ShapeInfo::Origin::Centered)
+	auto origin_ = py::class_<slughorn::Atlas::ShapeInfo::Origin>(shapeinfo_, "Origin")
+		.def(py::init<>(),
+			"Default origin: Layer.transform.dx/dy = bbox corner (existing behavior)."
+		)
+		.def(py::init<slughorn::Atlas::ShapeInfo::Origin::Type>(),
+			py::arg("type"),
+			"Type-only origin: pass Origin.Type.Centered (or any future named variant)."
+		)
+		.def(py::init<slughorn::slug_t, slughorn::slug_t>(),
+			py::arg("x"), py::arg("y"),
+			"Custom origin: authoring-space pivot. Unambiguously Custom - no other variant "
+			"takes coordinates. Layer.transform.dx/dy will equal (x, y) scaled to em-space."
+		)
+		.def_readwrite("type", &slughorn::Atlas::ShapeInfo::Origin::type)
+		.def_readwrite("x", &slughorn::Atlas::ShapeInfo::Origin::x)
+		.def_readwrite("y", &slughorn::Atlas::ShapeInfo::Origin::y)
+		.def("__eq__", &slughorn::Atlas::ShapeInfo::Origin::operator==)
+		.def("__ne__", &slughorn::Atlas::ShapeInfo::Origin::operator!=)
+	;
+
+	py::enum_<slughorn::Atlas::ShapeInfo::Origin::Type>(origin_, "Type")
+		.value("Default",  slughorn::Atlas::ShapeInfo::Origin::Type::Default)
+		.value("Centered", slughorn::Atlas::ShapeInfo::Origin::Type::Centered)
+		.value("Custom",   slughorn::Atlas::ShapeInfo::Origin::Type::Custom)
 		.export_values()
 	;
 
@@ -1585,7 +1612,7 @@ PYBIND11_MODULE(slughorn, m) {
 					return c.fill(color, scale, origin);
 				},
 				py::arg("color"), py::arg("scale") = 1.0f,
-				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin::Default,
+				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin{},
 				"Commit the current path as a new Layer with the given color.\n"
 				"Returns the auto-generated Key, or Key(0) if the path was empty."
 			)
@@ -1601,7 +1628,7 @@ PYBIND11_MODULE(slughorn, m) {
 					return c.fill(color, scale, key, origin);
 				},
 				py::arg("color"), py::arg("scale"), py::arg("key"),
-				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin::Default,
+				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin{},
 				"Commit the current path as a new Layer, registering the Shape under key.\n"
 				"Returns key, or Key(0) if the path was empty."
 			)
@@ -1615,7 +1642,7 @@ PYBIND11_MODULE(slughorn, m) {
 					return c.defineShape(key, scale, origin);
 				},
 				py::arg("key"), py::arg("scale") = 1.0f,
-				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin::Default,
+				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin{},
 				"Register the current path as a named Shape (geometry only, no Layer).\n"
 				"Returns False if the path was empty."
 			)
@@ -1644,7 +1671,7 @@ PYBIND11_MODULE(slughorn, m) {
 					return c.stroke(width, color, scale, origin);
 				},
 				py::arg("width"), py::arg("color"), py::arg("scale") = 1.0f,
-				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin::Default,
+				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin{},
 				"Expand the current path as a stroke outline and commit it as a colored Layer.\n"
 				"Equivalent to stroke_path(width) followed by fill(color, scale).\n"
 				"Returns the auto-generated Key, or Key(0) if the path was empty."
@@ -1662,7 +1689,7 @@ PYBIND11_MODULE(slughorn, m) {
 					return c.stroke(width, color, scale, key, origin);
 				},
 				py::arg("width"), py::arg("color"), py::arg("scale"), py::arg("key"),
-				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin::Default,
+				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin{},
 				"Expand the current path as a stroke outline and commit it under key.\n"
 				"Returns key, or Key(0) if the path was empty."
 			)
@@ -1698,7 +1725,7 @@ PYBIND11_MODULE(slughorn, m) {
 				},
 				py::arg("handle"),
 				py::arg("scale") = 1.0f,
-				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin::Default,
+				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin{},
 				"Commit the current path as a gradient-filled Layer.\n"
 				"Returns the auto-generated Key, or Key(0) if the path was empty."
 			)
@@ -1716,7 +1743,7 @@ PYBIND11_MODULE(slughorn, m) {
 				py::arg("handle"),
 				py::arg("scale"),
 				py::arg("key"),
-				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin::Default,
+				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin{},
 				"Commit the current path as a gradient-filled Layer, registering under key.\n"
 				"Returns key, or Key(0) if the path was empty."
 			)

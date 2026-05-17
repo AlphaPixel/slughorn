@@ -72,7 +72,7 @@ namespace skia {
 std::pair<Atlas::ShapeInfo, Matrix> decomposePath(
 	const SkPath& path,
 	slug_t scale=1.0_cv,
-	Atlas::ShapeInfo::Origin origin=Atlas::ShapeInfo::Origin::Default
+	Atlas::ShapeInfo::Origin origin={}
 );
 
 // ================================================================================================
@@ -111,7 +111,7 @@ Matrix loadShape(
 	uint32_t key,
 	slug_t scale=1.0_cv,
 	bool autoMetrics=true,
-	Atlas::ShapeInfo::Origin origin=Atlas::ShapeInfo::Origin::Default
+	Atlas::ShapeInfo::Origin origin={}
 );
 
 // Convenience: stroke-expand then load. Equivalent to: loadShape(strokeToFill(path, strokeWidth,
@@ -124,7 +124,7 @@ Matrix loadStrokedShape(
 	slug_t scale=1.0_cv,
 	SkPaint::Join join=SkPaint::kRound_Join,
 	SkPaint::Cap cap=SkPaint::kRound_Cap,
-	Atlas::ShapeInfo::Origin origin=Atlas::ShapeInfo::Origin::Default
+	Atlas::ShapeInfo::Origin origin={}
 );
 
 }
@@ -257,7 +257,7 @@ std::pair<Atlas::ShapeInfo, Matrix> decomposePath(const SkPath& path, slug_t sca
 
 	Matrix transform = Matrix::identity();
 
-	if(origin == Atlas::ShapeInfo::Origin::Centered) {
+	if(origin.type == Atlas::ShapeInfo::Origin::Type::Centered) {
 		transform.dx = cv(bounds.centerX()) * scale;
 		transform.dy = cv(bounds.centerY()) * scale;
 	}

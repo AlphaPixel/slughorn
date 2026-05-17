@@ -451,7 +451,7 @@ public:
 	Key fill(
 		Color color,
 		slug_t scale=1.0_cv,
-		Atlas::ShapeInfo::Origin origin=Atlas::ShapeInfo::Origin::Default
+		Atlas::ShapeInfo::Origin origin={}
 	) {
 		if(_pendingCurves.empty()) return Key(0u);
 
@@ -465,7 +465,7 @@ public:
 		Color color,
 		slug_t scale,
 		Key key,
-		Atlas::ShapeInfo::Origin origin=Atlas::ShapeInfo::Origin::Default
+		Atlas::ShapeInfo::Origin origin={}
 	) {
 		return _fill(color, scale, key, origin);
 	}
@@ -481,7 +481,7 @@ public:
 	bool defineShape(
 		Key key,
 		slug_t scale=1.0_cv,
-		Atlas::ShapeInfo::Origin origin=Atlas::ShapeInfo::Origin::Default
+		Atlas::ShapeInfo::Origin origin={}
 	) {
 		for(const auto& c : _activeCurves) _pendingCurves.push_back(c);
 
@@ -491,6 +491,22 @@ public:
 
 		Atlas::Curves scaled = _scaleCurves(_pendingCurves, scale);
 
+		// For Custom: convert authoring-space pivot to local-origin em-space for buildShapeBands.
+		Atlas::ShapeInfo::Origin infoOrigin = origin;
+
+		if(origin.type == Atlas::ShapeInfo::Origin::Type::Custom && !scaled.empty()) {
+			slug_t minX_em = std::numeric_limits<slug_t>::max();
+			slug_t minY_em = std::numeric_limits<slug_t>::max();
+
+			for(const auto& c : scaled) {
+				minX_em = std::min({minX_em, c.x1, c.x2, c.x3});
+				minY_em = std::min({minY_em, c.y1, c.y2, c.y3});
+			}
+
+			infoOrigin.x = origin.x * scale - minX_em;
+			infoOrigin.y = origin.y * scale - minY_em;
+		}
+
 		Atlas::Curves local = _toLocalOrigin(scaled).first;
 
 		if(local.empty()) return false;
@@ -499,7 +515,7 @@ public:
 
 		// info.autoMetrics = true;
 		info.curves = std::move(local);
-		info.origin = origin;
+		info.origin = infoOrigin;
 
 		_atlas.addShape(key, info);
 
@@ -543,12 +559,22 @@ public:
 	//
 	// Returns false if the active path is empty.
 	bool strokePath(slug_t width, bool ccw=true) {
-		if(_activeCurves.empty()) return false;
+		Atlas::Curves centerline;
 
-		Atlas::Curves centerline = std::move(_activeCurves);
+		// Shape helpers (roundedRect, rect, etc.) end with closePath(), which moves curves from
+		// _activeCurves into _pendingCurves. Fall back to _pendingCurves as the centerline so
+		// stroke() works symmetrically with fill() after any shape helper.
+		if(!_activeCurves.empty()) centerline = std::move(_activeCurves);
+		else if(!_pendingCurves.empty()) centerline = std::move(_pendingCurves);
+		else return false;
 
 		const slug_t h = width * 0.5_cv;
-		const slug_t tol = _decomposer.tolerance;
+		// TOLERANCE_EXACT is a sentinel for CurveDecomposer::cubicTo() meaning "always emit two
+		// leaves immediately" — it has no useful meaning for polyline flattening and produces
+		// extremely coarse stroke outlines. Fall back to a screen-quality default.
+		const slug_t tol = _decomposer.tolerance < TOLERANCE_EXACT
+			? _decomposer.tolerance
+			: TOLERANCE_BALANCED;
 
 		// Pass 1: flatten all centerline curves to a polyline.
 		std::vector<std::pair<slug_t, slug_t>> pts;
@@ -690,7 +716,7 @@ public:
 		slug_t width,
 		Color color,
 		slug_t scale=1.0_cv,
-		Atlas::ShapeInfo::Origin origin=Atlas::ShapeInfo::Origin::Default
+		Atlas::ShapeInfo::Origin origin={}
 	) {
 		if(!strokePath(width)) return Key(0u);
 
@@ -703,7 +729,7 @@ public:
 		Color color,
 		slug_t scale,
 		Key key,
-		Atlas::ShapeInfo::Origin origin=Atlas::ShapeInfo::Origin::Default
+		Atlas::ShapeInfo::Origin origin={}
 	) {
 		if(!strokePath(width)) return Key(0u);
 
@@ -764,7 +790,7 @@ public:
 	Key fillGradient(
 		const GradientHandle& handle,
 		slug_t scale=1.0_cv,
-		Atlas::ShapeInfo::Origin origin=Atlas::ShapeInfo::Origin::Default
+		Atlas::ShapeInfo::Origin origin={}
 	) {
 		if(_pendingCurves.empty() && _activeCurves.empty()) return Key(0u);
 
@@ -776,8 +802,34 @@ public:
 		const GradientHandle& handle,
 		slug_t scale,
 		Key key,
-		Atlas::ShapeInfo::Origin origin=Atlas::ShapeInfo::Origin::Default
+		Atlas::ShapeInfo::Origin origin={}
 	) {
+		return _fillGradient(handle, scale, key, origin);
+	}
+
+	// Expand the current path as a stroke outline and commit it with a gradient fill in one call.
+	// Equivalent to strokePath(width) followed by fillGradient(handle, scale), the common case.
+	Key strokeGradient(
+		slug_t width,
+		const GradientHandle& handle,
+		slug_t scale=1.0_cv,
+		Atlas::ShapeInfo::Origin origin={}
+	) {
+		if(!strokePath(width)) return Key(0u);
+
+		return _fillGradient(handle, scale, _key.next(), origin);
+	}
+
+	// Named variant: registers the gradient-stroked shape under @p key.
+	Key strokeGradient(
+		slug_t width,
+		const GradientHandle& handle,
+		slug_t scale,
+		Key key,
+		Atlas::ShapeInfo::Origin origin={}
+	) {
+		if(!strokePath(width)) return Key(0u);
+
 		return _fillGradient(handle, scale, key, origin);
 	}
 
@@ -834,7 +886,7 @@ private:
 		Color color,
 		slug_t scale,
 		Key key,
-		Atlas::ShapeInfo::Origin origin=Atlas::ShapeInfo::Origin::Default
+		Atlas::ShapeInfo::Origin origin={}
 	) {
 		for(const auto& c : _activeCurves) _pendingCurves.push_back(c);
 
@@ -844,14 +896,31 @@ private:
 
 		Atlas::Curves scaled = _scaleCurves(_pendingCurves, scale);
 
-		auto [local, transform] = _toLocalOrigin(scaled, origin);
+		// For Custom: convert authoring-space pivot to local-origin em-space so buildShapeBands
+		// can store it directly in Shape::originX/Y. The local-origin pivot = (pivot * scale) - bbox-min.
+		Atlas::ShapeInfo::Origin infoOrigin = origin;
+
+		if(origin.type == Atlas::ShapeInfo::Origin::Type::Custom && !scaled.empty()) {
+			slug_t minX_em = std::numeric_limits<slug_t>::max();
+			slug_t minY_em = std::numeric_limits<slug_t>::max();
+
+			for(const auto& c : scaled) {
+				minX_em = std::min({minX_em, c.x1, c.x2, c.x3});
+				minY_em = std::min({minY_em, c.y1, c.y2, c.y3});
+			}
+
+			infoOrigin.x = origin.x * scale - minX_em;
+			infoOrigin.y = origin.y * scale - minY_em;
+		}
+
+		auto [local, transform] = _toLocalOrigin(scaled, origin, scale);
 
 		if(local.empty()) return Key(0u);
 
 		Atlas::ShapeInfo info;
 
 		info.curves = std::move(local);
-		info.origin = origin;
+		info.origin = infoOrigin;
 
 		_atlas.addShape(key, info);
 
@@ -891,7 +960,15 @@ private:
 			minY = std::min({minY, c.y1, c.y2, c.y3});
 		}
 
-		auto [local, transform] = _toLocalOrigin(scaled, origin);
+		// For Custom: convert authoring-space pivot to local-origin em-space (reuse minX/minY).
+		Atlas::ShapeInfo::Origin infoOrigin = origin;
+
+		if(origin.type == Atlas::ShapeInfo::Origin::Type::Custom) {
+			infoOrigin.x = origin.x * scale - minX;
+			infoOrigin.y = origin.y * scale - minY;
+		}
+
+		auto [local, transform] = _toLocalOrigin(scaled, origin, scale);
 
 		if(local.empty()) return Key(0u);
 
@@ -936,7 +1013,7 @@ private:
 		Atlas::ShapeInfo shapeInfo;
 
 		shapeInfo.curves = std::move(local);
-		shapeInfo.origin = origin;
+		shapeInfo.origin = infoOrigin;
 
 		_atlas.addShape(key, shapeInfo);
 
@@ -1071,14 +1148,16 @@ private:
 	// and a Matrix (dx/dy only). Returns empty curves and an identity Matrix if @p src is empty or
 	// the bounding box is degenerate.
 	//
-	// The returned transform depends on @p origin:
+	// Curves are ALWAYS shifted to local origin regardless of origin mode (tight atlas packing).
+	// Only transform.dx/dy changes:
 	//
-	// Origin::Default - transform.dx/dy = bbox corner (minX, minY).
-	// Origin::Centered - transform.dx/dy = bbox center; computeQuad still places the quad at the
-	// correct canvas position, and the transform acts as a pivot point.
+	// Default - bbox corner (minX, minY).
+	// Centered - bbox center; computeQuad still places the quad at the correct canvas position.
+	// Custom - origin.x/y * scale (authoring-space pivot converted to em-space).
 	static std::pair<Atlas::Curves, Matrix> _toLocalOrigin(
 		const Atlas::Curves& src,
-		Atlas::ShapeInfo::Origin origin=Atlas::ShapeInfo::Origin::Default
+		Atlas::ShapeInfo::Origin origin={},
+		slug_t scale=1.0_cv
 	) {
 		if(src.empty()) return { {}, Matrix::identity() };
 
@@ -1098,9 +1177,14 @@ private:
 
 		Matrix transform = Matrix::identity();
 
-		if(origin == Atlas::ShapeInfo::Origin::Centered) {
+		if(origin.type == Atlas::ShapeInfo::Origin::Type::Centered) {
 			transform.dx = (minX + maxX) * 0.5_cv;
 			transform.dy = (minY + maxY) * 0.5_cv;
+		}
+
+		else if(origin.type == Atlas::ShapeInfo::Origin::Type::Custom) {
+			transform.dx = origin.x * scale;
+			transform.dy = origin.y * scale;
 		}
 
 		else {

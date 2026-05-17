@@ -109,7 +109,7 @@ inline Color colorFromNSVG(unsigned int packed) {
 std::pair<Atlas::ShapeInfo, Matrix> decomposePath(
 	const NSVGshape* shape,
 	slug_t scale=1.0_cv,
-	Atlas::ShapeInfo::Origin origin=Atlas::ShapeInfo::Origin::Default
+	Atlas::ShapeInfo::Origin origin={}
 );
 
 // ================================================================================================
@@ -127,7 +127,7 @@ Matrix loadShape(
 	Atlas& atlas,
 	Key key,
 	slug_t scale=1.0_cv,
-	Atlas::ShapeInfo::Origin origin=Atlas::ShapeInfo::Origin::Default
+	Atlas::ShapeInfo::Origin origin={}
 );
 
 // ================================================================================================
@@ -216,7 +216,7 @@ std::pair<Atlas::ShapeInfo, Matrix> decomposePath(const NSVGshape* shape, slug_t
 
 	Matrix transform = Matrix::identity();
 
-	if(origin == Atlas::ShapeInfo::Origin::Centered) {
+	if(origin.type == Atlas::ShapeInfo::Origin::Type::Centered) {
 		transform.dx = (minX + maxX) * 0.5_cv;
 		transform.dy = (minY + maxY) * 0.5_cv;
 	}

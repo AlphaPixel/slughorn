@@ -457,13 +457,33 @@ public:
 		// (sorted ascending). If non-empty, overrides numBandsY; resulting numBands = splitsY.size() + 1.
 		std::vector<slug_t> splitsY;
 
-		// Controls where the transform origin is placed relative to the shape geometry.
-		// Default: origin at the shape's bottom-left corner (existing behavior).
-		// Centered: origin at the geometric center (width/2, height/2) - enables natural
-		// GPU-side rotation (e.g. clock hands) without manual translate-rotate-translate.
-		enum class Origin { Default, Centered };
+		// Controls where the transform origin (Layer::transform.dx/dy) is placed relative to the
+		// shape geometry.
+		//
+		// Origin() - Default: bbox corner (existing behavior).
+		// Origin(Type) - type-only: Centered, or any future named variant (UpperLeft, etc.)
+		// that needs no explicit coordinates.
+		// Origin(px, py) - Custom: caller-specified pivot in authoring space; unambiguously
+		// Custom because no other variant takes coordinates.
+		// Layer::transform.dx/dy will equal (px, py) scaled to em-space,
+		// giving the GPU the correct rotation pivot.
+		struct Origin {
+			enum class Type { Default, Centered, Custom };
 
-		Origin origin = Origin::Default;
+			Type type;
+
+			// authoring-space pivot; meaningful only when type == Custom
+			slug_t x, y;
+
+			Origin(): type(Type::Default), x(0_cv), y(0_cv) {}
+			Origin(Type t): type(t), x(0_cv), y(0_cv) {}
+			Origin(slug_t px, slug_t py): type(Type::Custom), x(px), y(py) {}
+
+			bool operator==(const Origin& o) const { return type == o.type && x == o.x && y == o.y; }
+			bool operator!=(const Origin& o) const { return !(*this == o); }
+		};
+
+		Origin origin;
 	};
 
 	// Size of the per-shape indirection table (both axes). Each shape's band block begins with two
@@ -735,7 +755,7 @@ private:
 		uint32_t numBandsX,
 		uint32_t numBandsY,
 		bool overrideMetrics,
-		ShapeInfo::Origin origin=ShapeInfo::Origin::Default
+		ShapeInfo::Origin origin=ShapeInfo::Origin{}
 	);
 
 	void packTextures();
@@ -913,7 +933,7 @@ struct CurveDecomposer {
 	slug_t _sx = cv(0);
 	slug_t _sy = cv(0);
 
-	CurveDecomposer(Atlas::Curves& c) : curves(c) {}
+	CurveDecomposer(Atlas::Curves& c): curves(c) {}
 
 	void moveTo(slug_t x, slug_t y) {
 		_x = _sx = x;

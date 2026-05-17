@@ -462,12 +462,18 @@ void Atlas::buildShapeBands(
 		build.metrics.advance = rangeX;
 	}
 
-	// Origin offset: shifts the quad so transform.dx/dy points at the geometric center
-	// rather than the corner. Uses the actual curve bbox (rangeX/rangeY), not the metrics,
-	// so it is correct for both autoMetrics and overrideMetrics shapes.
-	if(origin == ShapeInfo::Origin::Centered) {
+	// Origin offset: shifts the quad so transform.dx/dy acts as the correct rotation pivot.
+	// For Centered: half the curve bbox (computed here, correct for both auto and override metrics).
+	// For Custom: the caller-supplied pivot, already converted to local-origin em-space by the
+	// backend (Canvas pre-subtracts bbox-min*scale before storing in info.origin.x/y).
+	if(origin.type == ShapeInfo::Origin::Type::Centered) {
 		build.metrics.originX = rangeX / 2_cv;
 		build.metrics.originY = rangeY / 2_cv;
+	}
+
+	else if(origin.type == ShapeInfo::Origin::Type::Custom) {
+		build.metrics.originX = origin.x;
+		build.metrics.originY = origin.y;
 	}
 
 	// --------------------------------------------------------------------------------------------
