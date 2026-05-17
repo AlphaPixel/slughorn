@@ -665,9 +665,9 @@ public:
 		}
 
 		// Append to the shape accumulator: forward = CCW (fills), reversed = CW (punch-out).
-		if(ccw) {
-			for(const auto& c : outline) _pendingCurves.push_back(c);
-		} else {
+		if(ccw) for(const auto& c : outline) _pendingCurves.push_back(c);
+
+		else {
 			for(size_t i = outline.size(); i-- > 0;) {
 				const auto& c = outline[i];
 
@@ -1101,7 +1101,9 @@ private:
 		if(origin == Atlas::ShapeInfo::Origin::Centered) {
 			transform.dx = (minX + maxX) * 0.5_cv;
 			transform.dy = (minY + maxY) * 0.5_cv;
-		} else {
+		}
+
+		else {
 			transform.dx = minX;
 			transform.dy = minY;
 		}

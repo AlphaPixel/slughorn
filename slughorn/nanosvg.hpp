@@ -219,7 +219,9 @@ std::pair<Atlas::ShapeInfo, Matrix> decomposePath(const NSVGshape* shape, slug_t
 	if(origin == Atlas::ShapeInfo::Origin::Centered) {
 		transform.dx = (minX + maxX) * 0.5_cv;
 		transform.dy = (minY + maxY) * 0.5_cv;
-	} else {
+	}
+
+	else {
 		transform.dx = minX;
 		transform.dy = minY;
 	}
@@ -290,13 +292,13 @@ CompositeShape loadImage(const NSVGimage* image, Atlas& atlas, uint32_t& baseKey
 				stops.push_back({ cv(g->stops[i].offset), colorFromNSVG(g->stops[i].color) });
 			}
 
-			// NanoSVG stores g->xform as the INVERSE of the gradient→pixel
-			// transform. nsvg__scaleToViewbox() builds the forward transform
-			// then inverts it for its software rasterizer. We invert back to
-			// get the forward transform so we can extract canonical endpoints.
+			// NanoSVG stores g->xform as the INVERSE of the gradient -> pixel transform.
+			// nsvg__scaleToViewbox() builds the forward transform then inverts it for its software
+			// rasterizer. We invert back to get the forward transform so we can extract canonical
+			// endpoints.
 			//
-			// Gradient endpoints are shifted into local em-space to match
-			// _toLocalOrigin() applied to the path curves in decomposePath.
+			// Gradient endpoints are shifted into local em-space to match _toLocalOrigin() applied
+			// to the path curves in decomposePath.
 			float fwd[6];
 			nsvg__xformInverse(fwd, g->xform);
 
@@ -308,7 +310,7 @@ CompositeShape loadImage(const NSVGimage* image, Atlas& atlas, uint32_t& baseKey
 
 			if(shape->fill.type == NSVG_PAINT_LINEAR_GRADIENT) {
 				// In NanoSVG's convention, the gradient t-axis is the second
-				// column of the forward transform: (0,0)→start, (0,1)→end.
+				// column of the forward transform: (0,0) -> start, (0,1) - end.
 				float px0, py0, px1, py1;
 
 				nsvg__xformPoint(&px0, &py0, 0.0f, 0.0f, fwd);
@@ -319,20 +321,65 @@ CompositeShape loadImage(const NSVGimage* image, Atlas& atlas, uint32_t& baseKey
 					cv(px0) * scale - minX_em, cv(py0) * scale - minY_em,
 					cv(px1) * scale - minX_em, cv(py1) * scale - minY_em
 				);
-			} else {
-				// Center is at the origin of the forward transform; radius is
-				// the scale factor of its first column.
+			}
+
+			else {
+				// Center is at the origin of the forward transform.
 				float pcx, pcy;
 
 				nsvg__xformPoint(&pcx, &pcy, 0.0f, 0.0f, fwd);
 
-				const float pr1 = std::sqrt(fwd[0]*fwd[0] + fwd[1]*fwd[1]);
+				// Extract the full 2x2 from fwd to support elliptical (non-square bbox) radials.
+				// fwd maps gradient-unit-space -> SVG-pixel-space; xformPoint convention:
+				//
+				// px = x*fwd[0] + y*fwd[2] + fwd[4]
+				// py = x*fwd[1] + y*fwd[3] + fwd[5]
+				//
+				// 2x2 matrix A (row-major): [[fwd[0], fwd[2]], [fwd[1], fwd[3]]]
+				// In em-space: A_em = A * scale_f
+				// B = A_em^{-1} maps em-space deltas to gradient space; length(B*d)=1 at outer ellipse.
+				const float scale_f = float(scale);
+				const float det = fwd[0] * fwd[3] - fwd[2] * fwd[1];
 
-				info.type = GradientInfo::Type::Radial;
-				info.transform = buildRadialGradientMatrix(
+				if(std::abs(det) < 1e-10f) {
+					std::cerr << "slughorn::nanosvg: degenerate radial gradient transform, skipping." << std::endl;
+					continue;
+				}
+
+				const float invSDet = 1.0f / (scale_f * det);
+
+				float b00 = fwd[3] * invSDet; // B[0,0]
+				float b01 = -fwd[2] * invSDet; // B[0,1]
+				float b10 = -fwd[1] * invSDet; // B[1,0]
+				float b11 = fwd[0] * invSDet; // B[1,1]
+
+				// Ensure b11 > 0 for the shader discriminator (w > 0 == radial).
+				// Negating the whole matrix is safe: length(B*d) == length(-B*d).
+				if(b11 < 0.0f) { b00=-b00; b01=-b01; b10=-b10; b11=-b11; }
+
+				// NanoSVG computes objectBoundingBox radial gradients with an isotropic
+				// radius sl = sqrt(pow(sw,2) + pow(sh, 2)) / sqrt(2) instead of separate
+				// rx= r * sw, ry = r * sh.
+				// Correct B_correct = diag(sl / sw, sl / sh) * B_current.
+				if(g->units == NSVG_OBJECT_SPACE) {
+					const float sw_px = shape->bounds[2] - shape->bounds[0];
+					const float sh_px = shape->bounds[3] - shape->bounds[1];
+
+					if(sw_px > 0.0f && sh_px > 0.0f) {
+						const float sl_px = sqrtf(sw_px * sw_px + sh_px * sh_px) / sqrtf(2.0f);
+						const float kx = sl_px / sw_px;
+						const float ky = sl_px / sh_px;
+
+						b00 *= kx; b01 *= kx;
+						b10 *= ky; b11 *= ky;
+					}
+				}
+
+				info.type = GradientInfo::Type::AffineRadial;
+				info.transform = buildAffineRadialGradientMatrix(
 					cv(pcx) * scale - minX_em,
 					cv(pcy) * scale - minY_em,
-					cv(pr1) * scale
+					cv(b00), cv(b01), cv(b10), cv(b11)
 				);
 				info.innerRadius = 0.0_cv;
 			}

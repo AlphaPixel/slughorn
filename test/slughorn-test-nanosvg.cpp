@@ -108,6 +108,42 @@ static const std::string SVG_RADIAL_GRADIENT = R"SVG(
 </svg>
 )SVG";
 
+// 400x200 SVG with a radial gradient using gradientUnits="objectBoundingBox" on a non-square rect.
+// NanoSVG collapses the radius to sl = sqrt(sw²+sh²)/sqrt(2) ≈ 316 for sw=400, sh=200.
+// The objectBoundingBox correction restores the correct anisotropic B: B = diag(sl/sw, sl/sh) * B_iso.
+// With cx="50%" cy="50%" r="50%": rx_em = 0.5*400/400 = 0.5, ry_em = 0.5*200/400 = 0.25,
+// → B[0,0] ≈ 2, B[1,1] ≈ 4, center = (0.5, 0.25).
+static const std::string SVG_RADIAL_OBB_NON_SQUARE = R"SVG(
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200">
+  <defs>
+    <radialGradient id="rg3" cx="50%" cy="50%" r="50%"
+                    gradientUnits="objectBoundingBox">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#000000"/>
+    </radialGradient>
+  </defs>
+  <rect x="0" y="0" width="400" height="200" fill="url(#rg3)"/>
+</svg>
+)SVG";
+
+// 400x200 SVG with an explicitly elliptical radial gradient via gradientTransform.
+// gradientTransform="matrix(200,0,0,100,200,100)" maps the unit circle to an ellipse
+// with x-radius=200 and y-radius=100 centered at (200,100) in SVG pixel space.
+// This produces an anisotropic B matrix (B[0,0] != B[1,1]).
+static const std::string SVG_RADIAL_NON_SQUARE = R"SVG(
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200">
+  <defs>
+    <radialGradient id="rg2" cx="0" cy="0" r="1"
+                    gradientUnits="userSpaceOnUse"
+                    gradientTransform="matrix(200,0,0,100,200,100)">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#000000"/>
+    </radialGradient>
+  </defs>
+  <rect x="0" y="0" width="400" height="200" fill="url(#rg2)"/>
+</svg>
+)SVG";
+
 // Three triangles arranged diagonally, 300x300 canvas.
 // Mirrors test_CompositeShape() in slughorn-test-cairo.cpp.
 // Each triangle is offset by (i*100, i*100) in SVG space.
@@ -252,7 +288,7 @@ void test_Gradients() {
         }
     }
 
-    std::cout << "\n=== test_Gradients (radial) ===" << std::endl;
+    std::cout << "\n=== test_Gradients (radial square) ===" << std::endl;
 
     {
         slughorn::Atlas atlas;
@@ -271,8 +307,87 @@ void test_Gradients() {
 
         if(!grads.empty()) {
             const auto& g = grads[0];
-            check("type == Radial",  g.type == slughorn::GradientInfo::Type::Radial);
-            check("2 stops",         g.stops.size() == 2);
+            check("type == AffineRadial", g.type == slughorn::GradientInfo::Type::AffineRadial);
+            check("2 stops",              g.stops.size() == 2);
+            // For a square bbox, B should be approximately scalar * I (b01 and b10 near 0).
+            checkNear("b01 ~= 0", g.transform.xy, 0.0_cv, 1e-3_cv);
+            checkNear("b10 ~= 0", g.transform.yx, 0.0_cv, 1e-3_cv);
+            // b00 and b11 should be equal (isotropic) and positive.
+            check("b00 > 0", g.transform.xx > 0.0_cv);
+            checkNear("b00 == b11", g.transform.xx, g.transform.yy, 1e-3_cv);
+        }
+    }
+
+    std::cout << "\n=== test_Gradients (radial non-square) ===" << std::endl;
+
+    {
+        slughorn::Atlas atlas;
+        uint32_t baseKey = 0;
+
+        auto composite = slughorn::nanosvg::loadString(SVG_RADIAL_NON_SQUARE, atlas, baseKey);
+
+        check("1 layer loaded",       composite.layers.size() == 1);
+        check("layer has gradientId", composite.layers.size() >= 1 &&
+                                      composite.layers[0].gradientId != 0);
+
+        atlas.build();
+
+        const auto& grads = atlas.getGradients();
+        check("one gradient registered", grads.size() == 1);
+
+        if(!grads.empty()) {
+            const auto& g = grads[0];
+            check("type == AffineRadial", g.type == slughorn::GradientInfo::Type::AffineRadial);
+            check("2 stops",              g.stops.size() == 2);
+            // gradientTransform="matrix(200,0,0,100,200,100)" → x-radius=200, y-radius=100 in SVG.
+            // In em-space (scale=1/400): B should be [[2,0],[0,4]] and center at (0.5, 0.25).
+            check("b11 > 0",                  g.transform.yy > 0.0_cv);
+            check("b00 != b11 (anisotropic)", std::abs(g.transform.xx - g.transform.yy) > 1e-3_cv);
+            checkNear("b00 ~= 2",             g.transform.xx, 2.0_cv, 0.01_cv);
+            checkNear("b11 ~= 4",             g.transform.yy, 4.0_cv, 0.01_cv);
+            checkNear("b01 ~= 0",             g.transform.xy, 0.0_cv, 1e-3_cv);
+            checkNear("b10 ~= 0",             g.transform.yx, 0.0_cv, 1e-3_cv);
+            checkNear("center.x ~= 0.5",      g.transform.dx, 0.5_cv, 0.01_cv);
+            checkNear("center.y ~= 0.25",     g.transform.dy, 0.25_cv, 0.01_cv);
+            std::cout << "  B = [" << g.transform.xx << ", " << g.transform.xy
+                      << "; " << g.transform.yx << ", " << g.transform.yy << "]" << std::endl;
+            std::cout << "  center = (" << g.transform.dx << ", " << g.transform.dy << ")" << std::endl;
+        }
+    }
+
+    std::cout << "\n=== test_Gradients (radial OBB non-square) ===" << std::endl;
+
+    {
+        slughorn::Atlas atlas;
+        uint32_t baseKey = 0;
+
+        auto composite = slughorn::nanosvg::loadString(SVG_RADIAL_OBB_NON_SQUARE, atlas, baseKey);
+
+        check("1 layer loaded",       composite.layers.size() == 1);
+        check("layer has gradientId", composite.layers.size() >= 1 &&
+                                      composite.layers[0].gradientId != 0);
+
+        atlas.build();
+
+        const auto& grads = atlas.getGradients();
+        check("one gradient registered", grads.size() == 1);
+
+        if(!grads.empty()) {
+            const auto& g = grads[0];
+            check("type == AffineRadial", g.type == slughorn::GradientInfo::Type::AffineRadial);
+            check("2 stops",              g.stops.size() == 2);
+            // objectBoundingBox on 400x200: sl/sw≈0.79, sl/sh≈1.58 → B = [[2,0],[0,4]], center=(0.5,0.25)
+            check("b11 > 0",                  g.transform.yy > 0.0_cv);
+            check("b00 != b11 (anisotropic)", std::abs(g.transform.xx - g.transform.yy) > 1e-3_cv);
+            checkNear("b00 ~= 2",             g.transform.xx, 2.0_cv, 0.05_cv);
+            checkNear("b11 ~= 4",             g.transform.yy, 4.0_cv, 0.05_cv);
+            checkNear("b01 ~= 0",             g.transform.xy, 0.0_cv, 1e-3_cv);
+            checkNear("b10 ~= 0",             g.transform.yx, 0.0_cv, 1e-3_cv);
+            checkNear("center.x ~= 0.5",      g.transform.dx, 0.5_cv, 0.01_cv);
+            checkNear("center.y ~= 0.25",     g.transform.dy, 0.25_cv, 0.01_cv);
+            std::cout << "  B = [" << g.transform.xx << ", " << g.transform.xy
+                      << "; " << g.transform.yx << ", " << g.transform.yy << "]" << std::endl;
+            std::cout << "  center = (" << g.transform.dx << ", " << g.transform.dy << ")" << std::endl;
         }
     }
 }

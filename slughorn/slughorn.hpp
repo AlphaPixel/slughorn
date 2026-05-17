@@ -134,10 +134,14 @@ struct Matrix {
 //
 // The transform matrix encodes gradient geometry in local em-space:
 //
-// Linear: t = m.xx * emX + m.xy * emY + m.dx (build with buildLinearGradientMatrix)
-// Radial: m.dx/dy = center; m.xx = outerRadius; innerRadius field = inner radius
-//         t = (length(emCoord - center) - innerRadius) / (outerRadius - innerRadius)
-//         (build with buildRadialGradientMatrix; set innerRadius separately)
+// Linear:       t = m.xx * emX + m.xy * emY + m.dx (build with buildLinearGradientMatrix)
+// Radial:       m.dx/dy = center; m.xx = outerRadius; innerRadius field = inner radius
+//               t = (length(emCoord - center) - innerRadius) / (outerRadius - innerRadius)
+//               (build with buildRadialGradientMatrix; set innerRadius separately)
+// AffineRadial: m.dx/dy = center; m.xx/xy/yx/yy = 2x2 inverse affine B matrix
+//               t = length(B * (emCoord - center)) - innerRadius  (innerRadius in B-space)
+//               (build with buildAffineRadialGradientMatrix; innerRadius usually 0)
+//               B maps em-space deltas back to normalized gradient space; length(B*d)=1 at outer ellipse.
 // ================================================================================================
 struct GradientStop {
 	// position along gradient axis [0, 1]
@@ -147,7 +151,7 @@ struct GradientStop {
 };
 
 struct GradientInfo {
-	enum class Type { Linear, Radial, Sweep };
+	enum class Type { Linear, Radial, Sweep, AffineRadial };
 
 	Type type = Type::Linear;
 
@@ -807,6 +811,34 @@ inline Matrix buildRadialGradientMatrix(slug_t cx, slug_t cy, slug_t r1) {
 	m.dx = cx;
 	m.dy = cy;
 	m.xx = r1;
+	return m;
+}
+
+// ================================================================================================
+// buildAffineRadialGradientMatrix
+//
+// Encodes a full 2x2 inverse affine B matrix for an elliptical radial gradient:
+//
+// m.dx = cx, m.dy = cy (center in local em-space)
+// m.xx = B[0,0], m.xy = B[0,1], m.yx = B[1,0], m.yy = B[1,1]
+//
+// B maps em-space deltas back to normalized gradient space.
+// length(B * (emCoord - center)) == 1 at the outer ellipse.
+//
+// Used by the NanoSVG backend where objectBoundingBox gradients are elliptical.
+// Canvas/FreeType circular radials continue to use buildRadialGradientMatrix.
+// ================================================================================================
+inline Matrix buildAffineRadialGradientMatrix(
+	slug_t cx, slug_t cy,
+	slug_t b00, slug_t b01,
+	slug_t b10, slug_t b11
+) {
+	Matrix m;
+
+	m.dx = cx; m.dy = cy;
+	m.xx = b00; m.xy = b01;
+	m.yx = b10; m.yy = b11;
+
 	return m;
 }
 

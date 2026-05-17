@@ -149,7 +149,9 @@ std::pair<Atlas::ShapeInfo, Matrix> decomposePath(cairo_t* cr, slug_t scale, Atl
 	if(origin == Atlas::ShapeInfo::Origin::Centered) {
 		transform.dx = cv(x1 + x2) * 0.5_cv * scale;
 		transform.dy = cv(y1 + y2) * 0.5_cv * scale;
-	} else {
+	}
+
+	else {
 		transform.dx = ox;
 		transform.dy = oy;
 	}

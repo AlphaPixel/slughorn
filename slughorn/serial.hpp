@@ -277,17 +277,19 @@ Atlas::PackingStats packingStatsFromJson(const json& j) {
 
 json gradientTypeToString(GradientInfo::Type t) {
 	switch(t) {
-		case GradientInfo::Type::Linear: return "linear";
-		case GradientInfo::Type::Radial: return "radial";
-		case GradientInfo::Type::Sweep: return "sweep";
+		case GradientInfo::Type::Linear:       return "linear";
+		case GradientInfo::Type::Radial:       return "radial";
+		case GradientInfo::Type::Sweep:        return "sweep";
+		case GradientInfo::Type::AffineRadial: return "affine_radial";
 	}
 
 	return "linear";
 }
 
 GradientInfo::Type gradientTypeFromString(const std::string& s) {
-	if(s == "radial") return GradientInfo::Type::Radial;
-	if(s == "sweep") return GradientInfo::Type::Sweep;
+	if(s == "radial")        return GradientInfo::Type::Radial;
+	if(s == "sweep")         return GradientInfo::Type::Sweep;
+	if(s == "affine_radial") return GradientInfo::Type::AffineRadial;
 
 	return GradientInfo::Type::Linear;
 }
@@ -335,7 +337,9 @@ json buildJson(
 		bv0["data"] = base64Encode(curve.bytes);
 		bv1["byteOffset"] = 0;
 		bv1["data"] = base64Encode(band.bytes);
-	} else {
+	}
+
+	else {
 		bv0["byteOffset"] = curveByteOffset;
 		bv1["byteOffset"] = bandByteOffset;
 	}

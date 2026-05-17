@@ -495,7 +495,9 @@ void Atlas::buildShapeBands(
 				const slug_t snapped = std::round(splitsY[i] * cv(INDIRECTION_SIZE)) / cv(INDIRECTION_SIZE);
 				hboundaries[i + 1] = minY + snapped * rangeY;
 			}
-		} else {
+		}
+
+		else {
 			for(uint32_t i = 1; i < numBandsY; i++) {
 				const slug_t snapped = std::round(cv(i) / cv(numBandsY) * cv(INDIRECTION_SIZE)) / cv(INDIRECTION_SIZE);
 				hboundaries[i] = minY + snapped * rangeY;
@@ -557,7 +559,9 @@ void Atlas::buildShapeBands(
 				const slug_t snapped = std::round(splitsX[i] * cv(INDIRECTION_SIZE)) / cv(INDIRECTION_SIZE);
 				vboundaries[i + 1] = minX + snapped * rangeX;
 			}
-		} else {
+		}
+
+		else {
 			for(uint32_t i = 1; i < numBandsX; i++) {
 				const slug_t snapped = std::round(cv(i) / cv(numBandsX) * cv(INDIRECTION_SIZE)) / cv(INDIRECTION_SIZE);
 				vboundaries[i] = minX + snapped * rangeX;

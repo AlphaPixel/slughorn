@@ -260,7 +260,9 @@ std::pair<Atlas::ShapeInfo, Matrix> decomposePath(const SkPath& path, slug_t sca
 	if(origin == Atlas::ShapeInfo::Origin::Centered) {
 		transform.dx = cv(bounds.centerX()) * scale;
 		transform.dy = cv(bounds.centerY()) * scale;
-	} else {
+	}
+
+	else {
 		transform.dx = cv(bounds.left()) * scale;
 		transform.dy = cv(bounds.top()) * scale;
 	}
