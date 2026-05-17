@@ -64,6 +64,7 @@
 using namespace slughorn::literals;
 using slughorn::Color;
 using slughorn::Key;
+using slughorn::slug_t;
 
 // All shapes authored in [0, 1] em-space; scale = 1.0 throughout.
 static const Color RED = {1_cv, 0_cv, 0_cv, 1_cv};
@@ -270,8 +271,8 @@ int main(int argc, char** argv) {
 		auto grad = canvas.createLinearGradient(
 			0_cv, 0_cv, 1_cv, 0_cv,
 			{
-				{0_cv, {1_cv, 0_cv, 0_cv, 1_cv}},  // red at t=0
-				{1_cv, {0_cv, 0_cv, 1_cv, 1_cv}}   // blue at t=1
+				{0_cv, {1_cv, 0_cv, 0_cv, 1_cv}}, // red at t=0
+				{1_cv, {0_cv, 0_cv, 1_cv, 1_cv}} // blue at t=1
 			}
 		);
 
@@ -287,8 +288,8 @@ int main(int argc, char** argv) {
 		auto grad = canvas.createLinearGradient(
 			0_cv, 0_cv, 1_cv, 1_cv,
 			{
-				{0_cv,  {1_cv, 0.8_cv, 0_cv, 1_cv}},  // gold at t=0
-				{1_cv,  {1_cv, 0.8_cv, 0_cv, 0_cv}}   // transparent gold at t=1
+				{0_cv, {1_cv, 0.8_cv, 0_cv, 1_cv}}, // gold at t=0
+				{1_cv, {1_cv, 0.8_cv, 0_cv, 0_cv}} // transparent gold at t=1
 			}
 		);
 
@@ -313,12 +314,12 @@ int main(int argc, char** argv) {
 	// Point-centre radial: red at centre, blue at the rim, over a circle.
 	{
 		auto grad = canvas.createRadialGradient(
-			0.5_cv, 0.5_cv,  // center
-			0_cv,            // inner radius (point centre)
-			0.5_cv,          // outer radius (reaches the circle edge)
+			0.5_cv, 0.5_cv, // center
+			0_cv, // inner radius (point centre)
+			0.5_cv, // outer radius (reaches the circle edge)
 			{
-				{0_cv, {1_cv, 0_cv, 0_cv, 1_cv}},  // red at t=0 (centre)
-				{1_cv, {0_cv, 0_cv, 1_cv, 1_cv}}   // blue at t=1 (rim)
+				{0_cv, {1_cv, 0_cv, 0_cv, 1_cv}}, // red at t=0 (centre)
+				{1_cv, {0_cv, 0_cv, 1_cv, 1_cv}} // blue at t=1 (rim)
 			}
 		);
 
@@ -332,11 +333,11 @@ int main(int argc, char** argv) {
 	{
 		auto grad = canvas.createRadialGradient(
 			0.5_cv, 0.5_cv,
-			0.2_cv,          // inner radius
-			0.45_cv,         // outer radius
+			0.2_cv, // inner radius
+			0.45_cv, // outer radius
 			{
-				{0_cv, {0_cv, 0.8_cv, 0_cv, 1_cv}},  // bright green at inner edge
-				{1_cv, {0_cv, 0.2_cv, 0_cv, 1_cv}}   // dark green at outer edge
+				{0_cv, {0_cv, 0.8_cv, 0_cv, 1_cv}}, // bright green at inner edge
+				{1_cv, {0_cv, 0.2_cv, 0_cv, 1_cv}} // dark green at outer edge
 			}
 		);
 
@@ -350,7 +351,7 @@ int main(int argc, char** argv) {
 	// Pattern 12: Sweep (conic) gradient fill.
 	//
 	// createSweepGradient() takes a center, startAngle and endAngle (radians, same convention as
-	// arc()). t=0 at startAngle, t=1 at endAngle. Using -π to +π gives a seam-free full circle
+	// arc()). t=0 at startAngle, t=1 at endAngle. Using -a to +a gives a seam-free full circle
 	// because atan2's output range exactly matches, so the first and last stops meet cleanly.
 	// ============================================================================================
 
@@ -359,16 +360,16 @@ int main(int argc, char** argv) {
 		const auto PI = cv(M_PI);
 
 		auto grad = canvas.createSweepGradient(
-			0.5_cv, 0.5_cv,  // center
-			-PI, PI,          // full circle, seam at -π/+π (left edge)
+			0.5_cv, 0.5_cv, // center
+			-PI, PI, // full circle, seam at -a/+a (left edge)
 			{
-				{0.000_cv, {1_cv, 0_cv, 0_cv, 1_cv}},  // red
-				{0.167_cv, {1_cv, 1_cv, 0_cv, 1_cv}},  // yellow
-				{0.333_cv, {0_cv, 1_cv, 0_cv, 1_cv}},  // green
-				{0.500_cv, {0_cv, 1_cv, 1_cv, 1_cv}},  // cyan
-				{0.667_cv, {0_cv, 0_cv, 1_cv, 1_cv}},  // blue
-				{0.833_cv, {1_cv, 0_cv, 1_cv, 1_cv}},  // magenta
-				{1.000_cv, {1_cv, 0_cv, 0_cv, 1_cv}}   // red (closes seam-free)
+				{0.000_cv, {1_cv, 0_cv, 0_cv, 1_cv}}, // red
+				{0.167_cv, {1_cv, 1_cv, 0_cv, 1_cv}}, // yellow
+				{0.333_cv, {0_cv, 1_cv, 0_cv, 1_cv}}, // green
+				{0.500_cv, {0_cv, 1_cv, 1_cv, 1_cv}}, // cyan
+				{0.667_cv, {0_cv, 0_cv, 1_cv, 1_cv}}, // blue
+				{0.833_cv, {1_cv, 0_cv, 1_cv, 1_cv}}, // magenta
+				{1.000_cv, {1_cv, 0_cv, 0_cv, 1_cv}} // red (closes seam-free)
 			}
 		);
 
@@ -379,7 +380,8 @@ int main(int argc, char** argv) {
 	}
 
 	// 270-degree progress gauge: green (start) -> yellow (mid) -> red (end).
-	// Sweep from -135° to +135° (bottom-left to bottom-right, leaving a gap at the bottom).
+	// Sweep from -135 degrees to +135 degrees (bottom-left to bottom-right, leaving a gap at the
+	// bottom).
 	{
 		const auto PI = cv(M_PI);
 
@@ -397,6 +399,62 @@ int main(int argc, char** argv) {
 		canvas.fillGradient(grad, 1_cv, Key::fromString("grad_sweep_gauge_shape"));
 
 		canvas.finalize(Key::fromString("grad_sweep_gauge_composite"));
+	}
+
+	// ============================================================================================
+	// Pattern 13: Transform stack - clock face with baked tick marks.
+	//
+	// Demonstrates save()/restore(), translate(), and rotate(). The outer circle arc and all
+	// 12 tick stroke outlines are accumulated as sub-paths and committed in a SINGLE fill()
+	// call, producing one atlas Shape. This works because closePath() and strokePath() both
+	// append to _pendingCurves without committing; fill() commits everything at once.
+	//
+	// The non-zero winding rule gives each sub-path its own filled region, so the ticks render
+	// as solid rectangles inset from the clock rim, all baked into a single atlas entry.
+	// ============================================================================================
+
+	{
+		const auto PI = cv(M_PI);
+
+		const slug_t CX = 0.5_cv, CY = 0.5_cv;
+		const slug_t FACE_R = 0.45_cv;
+		const slug_t TICK_OUTER = 0.43_cv;
+		const slug_t TICK_INNER = 0.36_cv;
+		const slug_t TICK_WIDTH = 0.025_cv;
+
+		const Color FACE_COLOR  = {0.95_cv, 0.92_cv, 0.82_cv, 1_cv};  // parchment
+		const Color TICK_COLOR  = {0.15_cv, 0.15_cv, 0.15_cv, 1_cv};  // near-black
+
+		// -- Clock face: filled circle (one Shape, one Layer) --------------------------------
+
+		canvas.circle(CX, CY, FACE_R);
+		canvas.fill(FACE_COLOR, 1_cv, Key::fromString("clock_face_shape"));
+
+		canvas.finalize(Key::fromString("clock_face_composite"));
+
+		// -- Tick marks: 12 stroked lines, all baked into ONE Shape -------------------------
+		//
+		// save()/restore() isolates each rotation so subsequent save()s start from the
+		// base CTM. The ticks are drawn along the +Y axis in local space; translate() moves
+		// the origin to the clock centre first.
+
+		canvas.beginPath();
+
+		for(int i = 0; i < 12; ++i) {
+			canvas.save();
+			canvas.translate(CX, CY);
+			canvas.rotate(cv(i * 2.0 * M_PI / 12.0));
+
+			canvas.moveTo(0_cv, TICK_INNER);
+			canvas.lineTo(0_cv, TICK_OUTER);
+			canvas.strokePath(TICK_WIDTH);
+
+			canvas.restore();
+		}
+
+		canvas.fill(TICK_COLOR, 1_cv, Key::fromString("clock_ticks_shape"));
+
+		canvas.finalize(Key::fromString("clock_ticks_composite"));
 	}
 
 	// ============================================================================================

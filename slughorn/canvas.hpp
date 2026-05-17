@@ -92,6 +92,68 @@ public:
 	const CurveDecomposer& decomposer() const { return _decomposer; }
 
 	// -------------------------------------------------------------------------
+	// Transform stack
+	//
+	// Maintains a current transform matrix (CTM) that maps from user (authoring)
+	// space to atlas space. All path commands (moveTo / lineTo / quadTo /
+	// bezierTo and the helpers that call them) are pre-multiplied by the CTM
+	// before the coordinates reach the decomposer. The geometry is therefore
+	// baked into the atlas in its final, transformed state.
+	//
+	// save() / restore() push and pop the entire CTM so callers can localise
+	// transform state without affecting surrounding path accumulation:
+	//
+	// for(int i = 0; i < 12; ++i) {
+	//     canvas.save();
+	//     canvas.translate(cx, cy);
+	//     canvas.rotate(i * (2*M_PI / 12));
+	//     canvas.moveTo(0, innerR);
+	//     canvas.lineTo(0, outerR);
+	//     canvas.strokePath(width); // tick outline baked at this rotation
+	//     canvas.restore();
+	// }
+	// canvas.fill(color); // all 12 ticks -> one Shape
+	//
+	// The CTM is independent of path state: beginPath() clears curves but does
+	// NOT reset the transform. resetTransform() / setTransform() do that explicitly.
+	// -------------------------------------------------------------------------
+
+	void save() { _ctmStack.push_back(_ctm); }
+
+	void restore() {
+		if(!_ctmStack.empty()) {
+			_ctm = _ctmStack.back();
+			_ctmStack.pop_back();
+		}
+	}
+
+	void resetTransform() { _ctm = Matrix::identity(); }
+	void setTransform(const Matrix& m) { _ctm = m; }
+
+	// Post-multiplies m onto the CTM (m is applied first in the draw order).
+	void transform(const Matrix& m) { _ctm = _ctm * m; }
+
+	void translate(slug_t tx, slug_t ty) {
+		Matrix m;
+		m.dx = tx; m.dy = ty;
+		_ctm = _ctm * m;
+	}
+
+	void rotate(slug_t angle) {
+		const slug_t c = std::cos(angle), s = std::sin(angle);
+		Matrix m;
+		m.xx = c; m.xy = -s;
+		m.yx = s; m.yy = c;
+		_ctm = _ctm * m;
+	}
+
+	void scale(slug_t sx, slug_t sy) {
+		Matrix m;
+		m.xx = sx; m.yy = sy;
+		_ctm = _ctm * m;
+	}
+
+	// -------------------------------------------------------------------------
 	// Path commands
 	//
 	// Call beginPath() to discard any accumulated path state and start fresh,
@@ -104,25 +166,39 @@ public:
 
 		_decomposer._x = _decomposer._y = 0.0_cv;
 		_decomposer._sx = _decomposer._sy = 0.0_cv;
+		_penX = _penY = 0.0_cv;
 	}
 
 	void moveTo(slug_t x, slug_t y) {
-		_decomposer.moveTo(x, y);
+		_penX = x; _penY = y;
+		slug_t tx, ty; _ctm.apply(x, y, tx, ty);
+		_decomposer.moveTo(tx, ty);
 	}
 
 	void lineTo(slug_t x, slug_t y) {
-		_decomposer.lineTo(x, y);
+		_penX = x; _penY = y;
+		slug_t tx, ty; _ctm.apply(x, y, tx, ty);
+		_decomposer.lineTo(tx, ty);
 	}
 
 	// Quadratic Bezier: current point -> (cx,cy) control -> (x,y) end.
 	void quadTo(slug_t cx, slug_t cy, slug_t x, slug_t y) {
-		_decomposer.quadTo(cx, cy, x, y);
+		_penX = x; _penY = y;
+		slug_t tcx, tcy, tx, ty;
+		_ctm.apply(cx, cy, tcx, tcy);
+		_ctm.apply(x, y, tx, ty);
+		_decomposer.quadTo(tcx, tcy, tx, ty);
 	}
 
 	// Cubic Bezier: current point -> (c1x,c1y) -> (c2x,c2y) -> (x,y).
 	// Adaptively subdivided into quadratics by CurveDecomposer::cubicTo.
 	void bezierTo(slug_t c1x, slug_t c1y, slug_t c2x, slug_t c2y, slug_t x, slug_t y) {
-		_decomposer.cubicTo(c1x, c1y, c2x, c2y, x, y);
+		_penX = x; _penY = y;
+		slug_t tc1x, tc1y, tc2x, tc2y, tx, ty;
+		_ctm.apply(c1x, c1y, tc1x, tc1y);
+		_ctm.apply(c2x, c2y, tc2x, tc2y);
+		_ctm.apply(x, y, tx, ty);
+		_decomposer.cubicTo(tc1x, tc1y, tc2x, tc2y, tx, ty);
 	}
 
 	void closePath() {
@@ -300,8 +376,10 @@ public:
 	void arcTo(slug_t x1, slug_t y1, slug_t x2, slug_t y2, slug_t r) {
 		if(r <= 0.0_cv) { lineTo(x1, y1); return; }
 
-		const slug_t p0x = _decomposer._x;
-		const slug_t p0y = _decomposer._y;
+		// _penX/_penY track the user-space current point; _decomposer._x/_y are
+		// in atlas space after CTM application so cannot be used here directly.
+		const slug_t p0x = _penX;
+		const slug_t p0y = _penY;
 
 		// Vectors from the corner point (x1,y1) toward p0 and toward p2.
 		const slug_t d0x = p0x - x1;
@@ -644,8 +722,8 @@ public:
 
 	struct GradientHandle {
 		GradientInfo::Type type = GradientInfo::Type::Linear;
-		// Linear: (x0,y0) -> (x1,y1) authoring-space endpoints.
-		// Radial: (x0,y0) = center; x1 = innerRadius, y1 = outerRadius.
+		// Linear: (x0, y0) -> (x1, y1) authoring-space endpoints.
+		// Radial: (x0, y0) = center; x1 = innerRadius, y1 = outerRadius.
 		slug_t x0 = 0, y0 = 0, x1 = 1, y1 = 0;
 
 		std::vector<GradientStop> stops;
@@ -957,10 +1035,10 @@ private:
 			if(i == 0 && _activeCurves.empty() && _pendingCurves.empty()) moveTo(p0x, p0y);
 
 			else if(i == 0) {
-				// Connect current position to arc start with a line (arc() callers that want a
-				// seamless join should ensure their current point is already at the arc start.)
-				const slug_t dx = p0x - _decomposer._x;
-				const slug_t dy = p0y - _decomposer._y;
+				// Connect current position to arc start with a line. Compare in user space
+				// (_penX/_penY) so the check is consistent regardless of the current CTM.
+				const slug_t dx = p0x - _penX;
+				const slug_t dy = p0y - _penY;
 
 				if(dx * dx + dy * dy > 1e-10_cv) lineTo(p0x, p0y);
 			}
@@ -1045,6 +1123,11 @@ private:
 
 	Atlas& _atlas;
 	KeyIterator _key;
+	Matrix _ctm = Matrix::identity();
+	std::vector<Matrix> _ctmStack;
+	// User-space pen position (before CTM). Parallel to _decomposer._x/_y which
+	// is in atlas space. Used by arcTo and _arcSegments for space-consistent comparisons.
+	slug_t _penX = 0_cv, _penY = 0_cv;
 	// current sub-path being drawn; consumed by closePath/strokePath
 	Atlas::Curves _activeCurves;
 	// accumulated closed sub-paths; submitted by fill/defineShape
