@@ -3,53 +3,41 @@
 // ================================================================================================
 // canvas.hpp - HTML Canvas-style drawing context for slughorn
 //
-// Provides a stateful 2-D path API (beginPath / moveTo / lineTo / quadTo / bezierTo / closePath)
-// plus arc primitives (arc, arcTo) and convenience shape helpers (rect, roundedRect, circle,
-// ellipse) that accumulate into a
-// CompositeShape - one Layer per fill() call - which can then be registered in an Atlas.
+// Two cooperating types:
 //
-// The API is modelled on the HTML Canvas / Web 2D Context drawing vocabulary, which is also shared
-// by NanoVG, Cairo, Skia, and most other 2-D vector drawing libraries. Anyone who has written
-// Canvas or SVG path code will feel immediately at home.
+// Path - owns all geometry state and authoring verbs (moveTo / lineTo / arc / strokePath / etc.)
+// plus the arc-length sampling API (sample / arcLength). Can be built standalone and passed
+// explicitly to Canvas commit verbs, or used implicitly through the Canvas forwarding API.
+// Equivalent to HTML Canvas Path2D.
 //
-// NOTE: This header has NO dependency on NanoVG or any other external drawing library. The naming
-// is purely about API familiarity. It is a slughorn-native drawing context.
+// Canvas - stateful CompositeShape builder. Holds one implicit Path internally and forwards the
+// full authoring API to it. Commit verbs (fill / stroke / defineShape / fillGradient) accept either
+// the implicit path or an explicit Path argument.
 //
-// RELATIONSHIP BETWEEN Shape, Layer, AND CompositeShape
-// ------------------------------------------------------
-// - Atlas::Shape - pure geometry (packed curve + band textures). Stateless. Identified by Key.
-// - Layer - one reference to a Shape + color + transform + scale + effectId.
-// - CompositeShape - an ordered stack of Layers (drawn back-to-front) plus an advance.
+// IMPLICIT PATH (existing style - unchanged from caller's perspective):
 //
-// Canvas is therefore a CompositeShape *builder* with a path accumulator on the side.
-// Each fill() call:
-// 1. Computes the bounding box of the pending curves.
-// 2. Shifts all curves to local origin (tight atlas bands, zero wasted band space).
-// 3. Stores the canvas-space offset in Layer::transform (dx/dy), matching the convention
-// used by slughorn/cairo.hpp and slughorn/nanosvg.hpp.
-// 4. Registers the geometry in the Atlas under an auto-generated Key.
-// 5. Pushes the resulting Layer onto the in-progress CompositeShape.
+// canvas.beginPath();
+// canvas.moveTo(...); canvas.lineTo(...);
+// canvas.fill(color);
 //
-// SCALE CONTRACT (matches every other slughorn backend)
-// -----------------------------------------------------
-// The `scale` parameter passed to fill() / defineShape() is the *backend normalization scale*;
-// it converts your authoring-space coordinates into slughorn's em-space [0,1]. It is NEVER stored
-// in Layer::scale. Layer::scale is reserved for FreeType2 font-size scaling and should be left
-// at its default (1.0) for all geometry authored through this backend.
+// EXPLICIT PATH (new Path2D style):
 //
-// CUBIC DECOMPOSITION
-// -------------------
-// bezierTo() routes through CurveDecomposer::cubicTo(), which uses adaptive De Casteljau
-// subdivision to produce high-quality quadratic approximations. The `tolerance` field on the
-// internal CurveDecomposer controls flatness; the default (1e-4) suits em-normalized [0,1]
-// geometry. Access it via canvas.decomposer().tolerance if you need to tune it.
+// slughorn::canvas::Path p;
+// p.moveTo(...); p.lineTo(...);
+// canvas.fill(p, color); // p is unchanged; can be reused
+// canvas.stroke(p, w, color);
 //
-// USAGE
-// -----
-// No implementation guard needed - this header is pure C++ with no external dependencies.
-// Just #include <slughorn/canvas.hpp> wherever you need it.
+// PATH SAMPLING:
 //
-// Refer to `test/slughorn-test-canvas.cpp` for examples.
+// auto s = p.sample(0.5); // Sample { x, y, angle } at arc-length midpoint
+// auto snap = canvas.path(); // copy of internal path; sample or continue building
+//
+// SCALE CONTRACT
+// The `scale` parameter to fill() / defineShape() is the backend normalization scale; it
+// converts authoring-space coordinates into slughorn em-space [0,1]. It is NEVER stored in
+// Layer::scale (reserved for FreeType2). Leave at 1.0 for all geometry authored here.
+//
+// No implementation guard needed. Pure C++ header, no external dependencies.
 // ================================================================================================
 
 #include "slughorn.hpp"
@@ -62,7 +50,7 @@ namespace slughorn {
 namespace canvas {
 
 // ================================================================================================
-// detail::flattenCurve - shared by Canvas::strokePath and Canvas::Path::bake
+// detail::flattenCurve - shared by Path::strokePath and Path::_rebuildLUT
 // ================================================================================================
 
 namespace detail {
@@ -94,141 +82,122 @@ inline void flattenCurve(
 } // namespace detail
 
 // ================================================================================================
-// Canvas
+// Path
 // ================================================================================================
 
-class Canvas {
+class Canvas;
+
+class Path {
 public:
-	// @p atlas - the Atlas to register shapes into (must outlive the Canvas).
-	// @p key - reference to a KeyIterator; incremented once per fill() / defineShape() call.
-	// Pass a fresh namespace per Canvas (e.g. 0xE0000) or share one across multiple Canvas
-	// instances that write to the same Atlas.
-	Canvas(Atlas& atlas, KeyIterator key=KeyIterator()):
-	_atlas(atlas),
-	_key(key),
+	struct Sample { slug_t x, y, angle; };
+
+	// TODO: MOVE THIS TO THE END OF THE FILE, and support as many OTHER classes as make sense!
+	friend std::ostream& operator<<(std::ostream& os, const Sample& s) {
+		return os << "Sample{ x=" << s.x << " y=" << s.y << " angle=" << s.angle << " }";
+	}
+
+	Path(): _decomposer(_activeCurves) {}
+
+	// Custom copy/move needed: CurveDecomposer.curves is a reference that must stay
+	// bound to THIS object's _activeCurves, not the source's.
+
+	Path(const Path& o):
+	_activeCurves(o._activeCurves),
+	_pendingCurves(o._pendingCurves),
+	_penX(o._penX), _penY(o._penY),
+	_ctm(o._ctm), _ctmStack(o._ctmStack),
 	_decomposer(_activeCurves) {
+		_decomposer.tolerance = o._decomposer.tolerance;
+		_decomposer._x = o._decomposer._x;
+		_decomposer._y = o._decomposer._y;
+		_decomposer._sx = o._decomposer._sx;
+		_decomposer._sy = o._decomposer._sy;
+	}
+
+	Path& operator=(const Path& o) {
+		if(this == &o) return *this;
+
+		_activeCurves = o._activeCurves;
+		_pendingCurves = o._pendingCurves;
+		_penX = o._penX; _penY = o._penY;
+		_ctm = o._ctm; _ctmStack = o._ctmStack;
+		_decomposer.tolerance = o._decomposer.tolerance;
+		_decomposer._x = o._decomposer._x;
+		_decomposer._y = o._decomposer._y;
+		_decomposer._sx = o._decomposer._sx;
+		_decomposer._sy = o._decomposer._sy;
+		_lutDirty = true;
+
+		return *this;
+	}
+
+	Path(Path&& o) noexcept:
+	_activeCurves(std::move(o._activeCurves)),
+	_pendingCurves(std::move(o._pendingCurves)),
+	_penX(o._penX), _penY(o._penY),
+	_ctm(o._ctm), _ctmStack(std::move(o._ctmStack)),
+	_decomposer(_activeCurves) {
+		_decomposer.tolerance = o._decomposer.tolerance;
+		_decomposer._x = o._decomposer._x;
+		_decomposer._y = o._decomposer._y;
+		_decomposer._sx = o._decomposer._sx;
+		_decomposer._sy = o._decomposer._sy;
+	}
+
+	Path& operator=(Path&& o) noexcept {
+		if(this == &o) return *this;
+
+		_activeCurves = std::move(o._activeCurves);
+		_pendingCurves = std::move(o._pendingCurves);
+		_penX = o._penX; _penY = o._penY;
+		_ctm = o._ctm; _ctmStack = std::move(o._ctmStack);
+		_decomposer.tolerance = o._decomposer.tolerance;
+		_decomposer._x = o._decomposer._x;
+		_decomposer._y = o._decomposer._y;
+		_decomposer._sx = o._decomposer._sx;
+		_decomposer._sy = o._decomposer._sy;
+		_lutDirty = true;
+
+		return *this;
 	}
 
 	// -------------------------------------------------------------------------
 	// CurveDecomposer access
-	//
-	// Exposes the internal decomposer so callers can tune `tolerance` for
-	// their coordinate space without rebuilding the Canvas.
-	//
-	// Example - 1000-unit em square authoring space:
-	//
-	// canvas.decomposer().tolerance = 0.1f;
 	// -------------------------------------------------------------------------
 
 	CurveDecomposer& decomposer() { return _decomposer; }
 	const CurveDecomposer& decomposer() const { return _decomposer; }
 
 	// -------------------------------------------------------------------------
-	// Path — arc-length-parameterised snapshot of the current path.
-	//
-	// Created via canvas.path(). Copies _activeCurves + _pendingCurves at call
-	// time (non-destructive), flattens them to a polyline, and builds a
-	// cumulative arc-length LUT — all at construction. After that it is a pure
-	// read-only value: no Atlas, no rendering, no state.
-	//
-	//     auto path  = canvas.path();
-	//     auto [x, y, angle] = path.sample(0.5); // midpoint by arc-length
-	//
-	// sample() t is normalised arc-length: 0 = start, 1 = end, 0.5 = midpoint.
-	// angle is the tangent direction in radians — the rotation needed for a
-	// Shape to face forward along the curve at that point.
+	// Path management
 	// -------------------------------------------------------------------------
 
-	class Path {
-	public:
-		struct Sample { slug_t x, y, angle; };
+	// Reset all geometry state. CTM is intentionally NOT cleared - matches HTML Canvas
+	// behavior where beginPath() does not affect the current transform.
+	void clear() {
+		_pendingCurves.clear();
+		_activeCurves.clear();
+		_decomposer._x = _decomposer._y = 0.0_cv;
+		_decomposer._sx = _decomposer._sy = 0.0_cv;
+		_penX = _penY = 0.0_cv;
+		_lutDirty = true;
+	}
 
-		friend std::ostream& operator<<(std::ostream& os, const Sample& s) {
-			return os << "Sample{ x=" << s.x << " y=" << s.y << " angle=" << s.angle << " }";
-		}
+	// Append all curves from @p other into this path's pending accumulator.
+	// Does not affect @p other.
+	void addPath(const Path& other) {
+		for(const auto& c : other._pendingCurves) _pendingCurves.push_back(c);
+		for(const auto& c : other._activeCurves) _pendingCurves.push_back(c);
 
-		slug_t arcLength() const { return _totalLength; }
-
-		Sample sample(slug_t t) const {
-			if(_pts.size() < 2) return {};
-
-			const slug_t s = std::max(0.0_cv, std::min(1.0_cv, t)) * _totalLength;
-
-			auto it = std::lower_bound(_lut.begin(), _lut.end(), s);
-			size_t i = static_cast<size_t>(std::distance(_lut.begin(), it));
-
-			i = std::min(i, _pts.size() - 1);
-			if(i == 0) i = 1;
-
-			const slug_t segLen = _lut[i] - _lut[i - 1];
-			const slug_t frac = segLen > 1e-12_cv ? (s - _lut[i - 1]) / segLen : 0.0_cv;
-
-			const slug_t x = _pts[i-1].first  + frac * (_pts[i].first  - _pts[i-1].first);
-			const slug_t y = _pts[i-1].second + frac * (_pts[i].second - _pts[i-1].second);
-
-			const slug_t angle = std::atan2(
-				_pts[i].second - _pts[i-1].second,
-				_pts[i].first  - _pts[i-1].first
-			);
-
-			return { x, y, angle };
-		}
-
-	private:
-		friend class Canvas;
-
-		explicit Path(const Atlas::Curves& curves) {
-			if(curves.empty()) return;
-
-			const slug_t tol = TOLERANCE_BALANCED;
-
-			_pts.push_back({curves.front().x1, curves.front().y1});
-
-			for(const auto& c : curves)
-				detail::flattenCurve(c.x1, c.y1, c.x2, c.y2, c.x3, c.y3, tol, 0, _pts);
-
-			_lut.resize(_pts.size(), 0.0_cv);
-
-			for(size_t i = 1; i < _pts.size(); ++i) {
-				const slug_t dx = _pts[i].first  - _pts[i-1].first;
-				const slug_t dy = _pts[i].second - _pts[i-1].second;
-
-				_lut[i] = _lut[i-1] + std::sqrt(dx*dx + dy*dy);
-			}
-
-			_totalLength = _lut.empty() ? 0.0_cv : _lut.back();
-		}
-
-		std::vector<std::pair<slug_t, slug_t>> _pts;
-		std::vector<slug_t> _lut;
-		slug_t _totalLength = 0.0_cv;
-	};
+		_lutDirty = true;
+	}
 
 	// -------------------------------------------------------------------------
 	// Transform stack
 	//
-	// Maintains a current transform matrix (CTM) that maps from user (authoring)
-	// space to atlas space. All path commands (moveTo / lineTo / quadTo /
-	// bezierTo and the helpers that call them) are pre-multiplied by the CTM
-	// before the coordinates reach the decomposer. The geometry is therefore
-	// baked into the atlas in its final, transformed state.
-	//
-	// save() / restore() push and pop the entire CTM so callers can localise
-	// transform state without affecting surrounding path accumulation:
-	//
-	// for(int i = 0; i < 12; ++i) {
-	//     canvas.save();
-	//     canvas.translate(cx, cy);
-	//     canvas.rotate(i * (2*M_PI / 12));
-	//     canvas.moveTo(0, innerR);
-	//     canvas.lineTo(0, outerR);
-	//     canvas.strokePath(width); // tick outline baked at this rotation
-	//     canvas.restore();
-	// }
-	// canvas.fill(color); // all 12 ticks -> one Shape
-	//
-	// The CTM is independent of path state: beginPath() clears curves but does
-	// NOT reset the transform. resetTransform() / setTransform() do that explicitly.
+	// CTM is applied to every path command (moveTo / lineTo / etc.) before
+	// coordinates reach the decomposer. Geometry is baked in its transformed
+	// state; the CTM does not affect already-accumulated curves.
 	// -------------------------------------------------------------------------
 
 	void save() { _ctmStack.push_back(_ctm); }
@@ -242,8 +211,6 @@ public:
 
 	void resetTransform() { _ctm = Matrix::identity(); }
 	void setTransform(const Matrix& m) { _ctm = m; }
-
-	// Post-multiplies m onto the CTM (m is applied first in the draw order).
 	void transform(const Matrix& m) { _ctm = _ctm * m; }
 
 	void translate(slug_t tx, slug_t ty) {
@@ -268,50 +235,57 @@ public:
 
 	// -------------------------------------------------------------------------
 	// Path commands
-	//
-	// Call beginPath() to discard any accumulated path state and start fresh,
-	// then issue path commands, then call fill() or defineShape() to commit.
 	// -------------------------------------------------------------------------
 
-	void beginPath() {
-		_pendingCurves.clear();
-		_activeCurves.clear();
-
-		_decomposer._x = _decomposer._y = 0.0_cv;
-		_decomposer._sx = _decomposer._sy = 0.0_cv;
-		_penX = _penY = 0.0_cv;
-	}
-
 	void moveTo(slug_t x, slug_t y) {
-		_penX = x; _penY = y;
-		slug_t tx, ty; _ctm.apply(x, y, tx, ty);
+		_penX = x;
+		_penY = y;
+
+		slug_t tx, ty;
+
+		_ctm.apply(x, y, tx, ty);
 		_decomposer.moveTo(tx, ty);
+
+		_lutDirty = true;
 	}
 
 	void lineTo(slug_t x, slug_t y) {
-		_penX = x; _penY = y;
-		slug_t tx, ty; _ctm.apply(x, y, tx, ty);
+		_penX = x;
+		_penY = y;
+
+		slug_t tx, ty;
+
+		_ctm.apply(x, y, tx, ty);
 		_decomposer.lineTo(tx, ty);
+
+		_lutDirty = true;
 	}
 
-	// Quadratic Bezier: current point -> (cx,cy) control -> (x,y) end.
 	void quadTo(slug_t cx, slug_t cy, slug_t x, slug_t y) {
-		_penX = x; _penY = y;
+		_penX = x;
+		_penY = y;
+
 		slug_t tcx, tcy, tx, ty;
+
 		_ctm.apply(cx, cy, tcx, tcy);
 		_ctm.apply(x, y, tx, ty);
 		_decomposer.quadTo(tcx, tcy, tx, ty);
+
+		_lutDirty = true;
 	}
 
-	// Cubic Bezier: current point -> (c1x,c1y) -> (c2x,c2y) -> (x,y).
-	// Adaptively subdivided into quadratics by CurveDecomposer::cubicTo.
 	void bezierTo(slug_t c1x, slug_t c1y, slug_t c2x, slug_t c2y, slug_t x, slug_t y) {
-		_penX = x; _penY = y;
+		_penX = x;
+		_penY = y;
+
 		slug_t tc1x, tc1y, tc2x, tc2y, tx, ty;
+
 		_ctm.apply(c1x, c1y, tc1x, tc1y);
 		_ctm.apply(c2x, c2y, tc2x, tc2y);
 		_ctm.apply(x, y, tx, ty);
 		_decomposer.cubicTo(tc1x, tc1y, tc2x, tc2y, tx, ty);
+
+		_lutDirty = true;
 	}
 
 	void closePath() {
@@ -320,142 +294,77 @@ public:
 		for(const auto& c : _activeCurves) _pendingCurves.push_back(c);
 
 		_activeCurves.clear();
+
+		_lutDirty = true;
 	}
 
 	// -------------------------------------------------------------------------
 	// Convenience shape helpers
 	//
-	// Each helper calls beginPath() implicitly - they are self-contained path
-	// descriptions that replace whatever path was previously being built.
-	//
-	// If you need multiple primitives in a single shape (e.g. a rect with a
-	// circular hole), call beginPath() manually and use the path commands above.
+	// Each calls clear() implicitly; they are self-contained path descriptions.
+	// For compound shapes (e.g. a rect with a hole) call clear() manually and
+	// use the path commands above.
 	// -------------------------------------------------------------------------
 
-	// Axis-aligned rectangle. Wound counter-clockwise (Y-up convention).
 	void rect(slug_t x, slug_t y, slug_t w, slug_t h) {
-		beginPath();
-
+		clear();
 		moveTo(x, y);
 		lineTo(x + w, y);
 		lineTo(x + w, y + h);
 		lineTo(x, y + h);
-
 		closePath();
 	}
 
-	// Rounded rectangle with uniform corner radius r.
-	// r is clamped to half the smaller dimension so it never exceeds the shape.
 	void roundedRect(slug_t x, slug_t y, slug_t w, slug_t h, slug_t r) {
 		r = std::min(r, std::min(w, h) * 0.5_cv);
 
 		if(r <= 0.0_cv) { rect(x, y, w, h); return; }
 
-		// Cubic approximation constant for a quarter-circle arc (= 4*(?2-1)/3).
 		const slug_t k = 0.5522847498_cv;
 		const slug_t kr = k * r;
 
-		beginPath();
+		clear();
 
-		// Bottom edge -> right
 		moveTo(x + r, y);
 		lineTo(x + w - r, y);
-
-		// Bottom-right corner
-		bezierTo(
-			x + w - r + kr, y,
-			x + w, y + r - kr,
-			x + w, y + r
-		);
-
-		// Right edge -> up
+		bezierTo(x + w - r + kr, y, x + w, y + r - kr, x + w, y + r);
 		lineTo(x + w, y + h - r);
-
-		// Top-right corner
-		bezierTo(
-			x + w, y + h - r + kr,
-			x + w - r + kr, y + h,
-			x + w - r, y + h
-		);
-
-		// Top edge -> left
+		bezierTo(x + w, y + h - r + kr, x + w - r + kr, y + h, x + w - r, y + h);
 		lineTo(x + r, y + h);
-
-		// Top-left corner
-		bezierTo(
-			x + r - kr, y + h,
-			x, y + h - r + kr,
-			x, y + h - r
-		);
-
-		// Left edge -> down
+		bezierTo(x + r - kr, y + h, x, y + h - r + kr, x, y + h - r);
 		lineTo(x, y + r);
-
-		// Bottom-left corner
-		bezierTo(
-			x, y + r - kr,
-			x + r - kr, y,
-			x + r, y
-		);
-
+		bezierTo(x, y + r - kr, x + r - kr, y, x + r, y);
 		closePath();
 	}
 
-	// Circle approximated by four cubic arcs.
-	void circle(slug_t cx, slug_t cy, slug_t r) {
-		ellipse(cx, cy, r, r);
-	}
+	void circle(slug_t cx, slug_t cy, slug_t r) { ellipse(cx, cy, r, r); }
 
-	// Ellipse approximated by four cubic arcs (Bezier constant k = 4*(?2-1)/3).
 	void ellipse(slug_t cx, slug_t cy, slug_t rx, slug_t ry) {
 		const slug_t k = 0.5522847498_cv;
 		const slug_t kx = k * rx;
 		const slug_t ky = k * ry;
 
-		beginPath();
+		clear();
 
-		moveTo (cx + rx, cy);
+		moveTo(cx + rx, cy);
 		bezierTo(cx + rx, cy + ky, cx + kx, cy + ry, cx, cy + ry);
 		bezierTo(cx - kx, cy + ry, cx - rx, cy + ky, cx - rx, cy);
 		bezierTo(cx - rx, cy - ky, cx - kx, cy - ry, cx, cy - ry);
 		bezierTo(cx + kx, cy - ry, cx + rx, cy - ky, cx + rx, cy);
-
 		closePath();
 	}
 
-	// Arc - circular arc centred at (cx,cy) with radius r, from startAngle to endAngle (radians,
-	// measured from the +X axis, Y-up convention).
-	//
-	// @p ccw - if true, sweep counter-clockwise; clockwise otherwise. Matches HTML Canvas arc()
-	// exactly.
-	//
-	// The arc is decomposed into segments of at most ?/2 (quarter-circle) each. Each segment is
-	// emitted as a cubic via bezierTo(), which routes through the adaptive CurveDecomposer - so
-	// quality scales automatically with curvature.
-	//
-	// arc() does NOT call beginPath(). It appends to the current path, so you can combine arcs with
-	// lineTo() to build pie slices, stadium shapes, etc. If you want a standalone arc shape, call
-	// beginPath() first.
-	//
-	// Example - a full circle arc (equivalent to circle(), but via arc()):
-	//
-	// canvas.beginPath();
-	// canvas.arc(cx, cy, r, 0, 2*M_PI);
-	// canvas.closePath();
-	// canvas.fill(color);
-	void arc(slug_t cx, slug_t cy, slug_t r, slug_t startAngle, slug_t endAngle, bool ccw = false) {
-		// Normalize the sweep so it is always positive and <= 2?. HTML Canvas semantics: if ccw,
-		// sweep is endAngle->startAngle going CCW.
+	// arc() does NOT call clear(). It appends to the current path, enabling composition
+	// with lineTo() for pie slices, stadium shapes, etc.
+	void arc(slug_t cx, slug_t cy, slug_t r, slug_t startAngle, slug_t endAngle, bool ccw=false) {
 		slug_t sweep;
 
 		if(ccw) {
-			// Swap so we always march from lower to higher angle, then negate to signal direction
-			// to _arcSegments.
 			sweep = startAngle - endAngle;
 
 			if(sweep < 0.0_cv) sweep += cv(2.0 * M_PI);
 
-			sweep = -sweep; // negative sweep = CCW
+			sweep = -sweep;
 		}
 
 		else {
@@ -467,144 +376,665 @@ public:
 		_arcSegments(cx, cy, r, startAngle, sweep);
 	}
 
-	// arcTo - tangential arc from the current point.
-	//
-	// Draws a circular arc of radius @p r that is tangent to both:
-	//
-	// - the line from the current point toward (x1, y1)
-	// - the line from (x1, y1) toward (x2, y2)
-	//
-	// Then draws a straight line from the current point to the arc start, and
-	// leaves the current point at the arc end - matching HTML Canvas arcTo().
-	//
-	// This is the natural primitive for manually-built rounded corners:
-	//
-	// canvas.beginPath();
-	// canvas.moveTo(x, y);
-	// canvas.arcTo(cornerX, cornerY, nextX, nextY, radius);
-	// ...
-	//
-	// Degenerate cases (zero-length tangent legs, r <= 0, collinear points):
-	// fall back to a plain lineTo(x1, y1) with no arc, matching Canvas spec.
 	void arcTo(slug_t x1, slug_t y1, slug_t x2, slug_t y2, slug_t r) {
 		if(r <= 0.0_cv) { lineTo(x1, y1); return; }
 
-		// _penX/_penY track the user-space current point; _decomposer._x/_y are
-		// in atlas space after CTM application so cannot be used here directly.
-		const slug_t p0x = _penX;
-		const slug_t p0y = _penY;
-
-		// Vectors from the corner point (x1,y1) toward p0 and toward p2.
-		const slug_t d0x = p0x - x1;
-		const slug_t d0y = p0y - y1;
-		const slug_t d1x = x2 - x1;
-		const slug_t d1y = y2 - y1;
+		const slug_t p0x = _penX, p0y = _penY;
+		const slug_t d0x = p0x - x1, d0y = p0y - y1;
+		const slug_t d1x = x2 - x1, d1y = y2 - y1;
 		const slug_t len0 = std::sqrt(d0x*d0x + d0y*d0y);
 		const slug_t len1 = std::sqrt(d1x*d1x + d1y*d1y);
 
-		// Degenerate: either leg has zero length.
 		if(len0 < 1e-6_cv || len1 < 1e-6_cv) { lineTo(x1, y1); return; }
 
-		// Unit vectors
 		const slug_t u0x = d0x / len0, u0y = d0y / len0;
 		const slug_t u1x = d1x / len1, u1y = d1y / len1;
-
-		// Cross product (sine of angle between the two legs).
 		const slug_t cross = u0x*u1y - u0y*u1x;
 
-		// Degenerate: legs are (nearly) collinear - no arc possible.
 		if(std::abs(cross) < 1e-6_cv) { lineTo(x1, y1); return; }
 
-		// Distance from corner to the two tangent points.
 		const slug_t dot = u0x*u1x + u0y*u1y;
 		const slug_t tanHalf = std::abs(cross) / (1.0_cv + dot);
 
 		if(tanHalf < 1e-6_cv) { lineTo(x1, y1); return; }
 
 		const slug_t tangentDist = r / tanHalf;
+		const slug_t t0x = x1 + u0x * tangentDist, t0y = y1 + u0y * tangentDist;
+		const slug_t t1x = x1 + u1x * tangentDist, t1y = y1 + u1y * tangentDist;
 
-		// Tangent points: step back from the corner along each leg.
-		const slug_t t0x = x1 + u0x * tangentDist; // arc start (on leg toward p0)
-		const slug_t t0y = y1 + u0y * tangentDist;
-		const slug_t t1x = x1 + u1x * tangentDist; // arc end (on leg toward p2)
-		const slug_t t1y = y1 + u1y * tangentDist;
-
-		// Centre of the arc: offset t0 by r perpendicular to u0, toward the inside of the turn.
-		// Rotating u0 inward: CCW turn (cross>0) -> (-u0y, u0x); CW turn (cross<0) -> (u0y, -u0x).
-		// Unified: (-sign*u0y, sign*u0x).
 		const slug_t sign = (cross > 0.0_cv) ? 1.0_cv : -1.0_cv;
 		const slug_t cenX = t0x - sign * u0y * r;
 		const slug_t cenY = t0y + sign * u0x * r;
 
-		// Angles from centre to the two tangent points.
 		const slug_t a0 = std::atan2(t0y - cenY, t0x - cenX);
 		const slug_t a1 = std::atan2(t1y - cenY, t1x - cenX);
 
-		// Line from current point to arc start tangent point.
 		lineTo(t0x, t0y);
-
-		// Arc from a0 to a1. Winding: if cross > 0 the arc goes CCW (Y-up).
 		arc(cenX, cenY, r, a0, a1, cross > 0.0_cv);
 	}
 
 	// -------------------------------------------------------------------------
-	// Commit the current path
+	// Stroke expansion
 	// -------------------------------------------------------------------------
 
-	// Commit the current path as a new Layer in the in-progress CompositeShape.
-	//
-	// @p color - fill color for the layer.
-	// @p scale - normalizes authoring-space coords into em-space (default 1.0). NEVER stored in
-	// Layer::scale; see Scale Contract in the file header.
-	//
-	// The curves are shifted to local origin (tight atlas bands); the canvas-space offset is stored
-	// in Layer::transform (dx/dy). An internal key is auto-generated and _key is incremented.
-	//
-	// Returns the auto-generated Key, or Key(0u) if the current path is empty.
-	Key fill(
-		Color color,
-		slug_t scale=1.0_cv,
-		Atlas::ShapeInfo::Origin origin={}
-	) {
-		if(_pendingCurves.empty()) return Key(0u);
+	// @p cw - if false (default) the outline is appended CCW (filled area). If true the outline
+	// is appended CW (subtracts coverage), enabling punch-outs when combined with a CCW outline
+	// in the same beginPath() session.
+	bool strokePath(slug_t width, bool cw=false) {
+		Atlas::Curves centerline;
 
-		return _fill(color, scale, _key.next(), origin);
+		if(!_activeCurves.empty()) centerline = std::move(_activeCurves);
+		else if(!_pendingCurves.empty()) centerline = std::move(_pendingCurves);
+		else return false;
+
+		const slug_t h = width * 0.5_cv;
+		const slug_t tol = _decomposer.tolerance < TOLERANCE_EXACT
+			? _decomposer.tolerance
+			: TOLERANCE_BALANCED;
+
+		// Pass 1: flatten centerline to polyline.
+		std::vector<std::pair<slug_t, slug_t>> pts;
+
+		pts.push_back({centerline.front().x1, centerline.front().y1});
+
+		for(const auto& c : centerline) detail::flattenCurve(
+			c.x1, c.y1,
+			c.x2, c.y2,
+			c.x3, c.y3,
+			tol,
+			0,
+			pts
+		);
+
+		if(pts.size() < 2) return false;
+
+		const size_t numSegs = pts.size() - 1;
+
+		// Pass 2a: per-segment perpendicular normals.
+		std::vector<std::pair<slug_t, slug_t>> segN(numSegs);
+
+		for(size_t i = 0; i < numSegs; ++i) {
+			const slug_t dx = pts[i + 1].first - pts[i].first;
+			const slug_t dy = pts[i + 1].second - pts[i].second;
+			const slug_t len = std::sqrt(dx * dx + dy * dy);
+
+			segN[i] = len > 1e-9_cv
+				? std::pair{-dy / len, dx / len}
+				: std::pair{0.0_cv, 1.0_cv}
+			;
+		}
+
+		// Pass 2b: per-point miter-corrected normals.
+		static constexpr slug_t MITER_LIMIT = 4.0_cv;
+
+		struct PN { slug_t nx, ny; };
+
+		std::vector<PN> pn(pts.size());
+
+		for(size_t i = 0; i < pts.size(); ++i) {
+			if(!i) pn[i] = {segN[0].first, segN[0].second};
+
+			else if(i == numSegs) pn[i] = {segN[numSegs-1].first, segN[numSegs-1].second};
+
+			else {
+				slug_t nx = segN[i-1].first + segN[i].first;
+				slug_t ny = segN[i-1].second + segN[i].second;
+				const slug_t len = std::sqrt(nx*nx + ny*ny);
+
+				if(len > 1e-6_cv) {
+					nx /= len; ny /= len;
+
+					const slug_t d = nx * segN[i].first + ny * segN[i].second;
+
+					if(d > 1e-3_cv) {
+						const slug_t m = 1.0_cv / d;
+						if(m <= MITER_LIMIT) { nx *= m; ny *= m; }
+						else { nx *= MITER_LIMIT; ny *= MITER_LIMIT; }
+					}
+				}
+
+				else {
+					nx = segN[i].first;
+					ny = segN[i].second;
+				}
+
+				pn[i] = {nx, ny};
+			}
+		}
+
+		// Pass 3: build lwall / rwall, then close.
+		Atlas::Curves lwall, rwall;
+
+		for(size_t i = 0; i < numSegs; ++i) {
+			const slug_t p0x = pts[i].first, p0y = pts[i].second;
+			const slug_t p2x = pts[i+1].first, p2y = pts[i+1].second;
+			const slug_t l0x = p0x + h*pn[i].nx, l0y = p0y + h*pn[i].ny;
+			const slug_t l2x = p2x + h*pn[i+1].nx, l2y = p2y + h*pn[i+1].ny;
+			const slug_t r0x = p0x - h*pn[i].nx, r0y = p0y - h*pn[i].ny;
+			const slug_t r2x = p2x - h*pn[i+1].nx, r2y = p2y - h*pn[i+1].ny;
+
+			lwall.push_back({l0x, l0y, (l0x+l2x)*0.5_cv, (l0y+l2y)*0.5_cv, l2x, l2y});
+			rwall.push_back({r0x, r0y, (r0x+r2x)*0.5_cv, (r0y+r2y)*0.5_cv, r2x, r2y});
+		}
+
+		if(lwall.empty()) return false;
+
+		Atlas::Curves outline;
+
+		for(const auto& r : rwall) outline.push_back(r);
+
+		{
+			const slug_t ax = rwall.back().x3, ay = rwall.back().y3;
+			const slug_t bx = lwall.back().x3, by = lwall.back().y3;
+
+			outline.push_back({ax, ay, (ax+bx)*0.5_cv, (ay+by)*0.5_cv, bx, by});
+		}
+
+		for(size_t i = lwall.size(); i-- > 0;) {
+			const auto& l = lwall[i];
+
+			outline.push_back({l.x3, l.y3, l.x2, l.y2, l.x1, l.y1});
+		}
+
+		{
+			const slug_t ax = lwall.front().x1, ay = lwall.front().y1;
+			const slug_t bx = rwall.front().x1, by = rwall.front().y1;
+
+			outline.push_back({ax, ay, (ax+bx)*0.5_cv, (ay+by)*0.5_cv, bx, by});
+		}
+
+		if(!cw) for(const auto& c : outline) _pendingCurves.push_back(c);
+
+		else for(size_t i = outline.size(); i-- > 0;) {
+			const auto& c = outline[i];
+			_pendingCurves.push_back({c.x3, c.y3, c.x2, c.y2, c.x1, c.y1});
+		}
+
+		_lutDirty = true;
+
+		return true;
 	}
 
-	// Named variant: registers the shape under @p key instead of an auto-generated key.
-	// Use when you need the shape directly addressable (e.g. from CLI tools or external systems)
-	// without going through the composite.
-	Key fill(
+	// -------------------------------------------------------------------------
+	// Accessors
+	// -------------------------------------------------------------------------
+
+	bool hasPendingPath() const { return !_pendingCurves.empty() || !_activeCurves.empty(); }
+
+	// -------------------------------------------------------------------------
+	// Arc-length sampling
+	//
+	// sample(t) returns the position and tangent direction at normalized arc-length
+	// t in the range [0, 1]. The LUT is rebuilt lazily whenever the path geometry changes.
+	// -------------------------------------------------------------------------
+
+	slug_t arcLength() const {
+		if(_lutDirty) _rebuildLUT();
+
+		return _totalLength;
+	}
+
+	Sample sample(slug_t t) const {
+		if(_lutDirty) _rebuildLUT();
+		if(_pts.size() < 2) return {};
+
+		const slug_t s = std::max(0.0_cv, std::min(1.0_cv, t)) * _totalLength;
+
+		auto it = std::lower_bound(_lut.begin(), _lut.end(), s);
+		size_t i = static_cast<size_t>(std::distance(_lut.begin(), it));
+
+		i = std::min(i, _pts.size() - 1);
+
+		if(i == 0) i = 1;
+
+		const slug_t segLen = _lut[i] - _lut[i-1];
+		const slug_t frac = segLen > 1e-12_cv ? (s - _lut[i-1]) / segLen : 0.0_cv;
+
+		const slug_t x = _pts[i-1].first + frac * (_pts[i].first - _pts[i-1].first);
+		const slug_t y = _pts[i-1].second + frac * (_pts[i].second - _pts[i-1].second);
+
+		const slug_t angle = std::atan2(
+			_pts[i].second - _pts[i-1].second,
+			_pts[i].first - _pts[i-1].first
+		);
+
+		return { x, y, angle };
+	}
+
+private:
+	friend class Canvas;
+
+	void _arcSegments(slug_t cx, slug_t cy, slug_t r, slug_t startAngle, slug_t sweep) {
+		if(r <= 0.0_cv || sweep == 0.0_cv) return;
+
+		const slug_t absSweep = std::abs(sweep);
+		const int nSegs = std::max(1, static_cast<int>(std::ceil(absSweep / cv(M_PI_2))));
+		const slug_t segSweep = sweep / cv(nSegs);
+
+		slug_t angle = startAngle;
+
+		for(int i = 0; i < nSegs; ++i) {
+			const slug_t a0 = angle, a1 = angle + segSweep;
+			const slug_t k = (4.0_cv / 3.0_cv) * std::tan(segSweep * 0.25_cv);
+			const slug_t cos0 = std::cos(a0), sin0 = std::sin(a0);
+			const slug_t cos1 = std::cos(a1), sin1 = std::sin(a1);
+
+			const slug_t p0x = cx + r*cos0, p0y = cy + r*sin0;
+			const slug_t p3x = cx + r*cos1, p3y = cy + r*sin1;
+			const slug_t p1x = p0x - k*r*sin0, p1y = p0y + k*r*cos0;
+			const slug_t p2x = p3x + k*r*sin1, p2y = p3y - k*r*cos1;
+
+			if(i == 0 && _activeCurves.empty() && _pendingCurves.empty()) moveTo(p0x, p0y);
+
+			else if(i == 0) {
+				const slug_t dx = p0x - _penX, dy = p0y - _penY;
+				if(dx*dx + dy*dy > 1e-10_cv) lineTo(p0x, p0y);
+			}
+
+			bezierTo(p1x, p1y, p2x, p2y, p3x, p3y);
+
+			angle = a1;
+		}
+	}
+
+	void _rebuildLUT() const {
+		_pts.clear();
+		_lut.clear();
+
+		_totalLength = 0.0_cv;
+
+		Atlas::Curves all = _pendingCurves;
+
+		for(const auto& c : _activeCurves) all.push_back(c);
+
+		if(!all.empty()) {
+			_pts.push_back({all.front().x1, all.front().y1});
+
+			for(const auto& c : all) detail::flattenCurve(
+				c.x1, c.y1,
+				c.x2, c.y2,
+				c.x3, c.y3,
+				TOLERANCE_BALANCED,
+				0,
+				_pts
+			);
+
+			_lut.resize(_pts.size(), 0.0_cv);
+
+			for(size_t i = 1; i < _pts.size(); ++i) {
+				const slug_t dx = _pts[i].first - _pts[i-1].first;
+				const slug_t dy = _pts[i].second - _pts[i-1].second;
+
+				_lut[i] = _lut[i-1] + std::sqrt(dx*dx + dy*dy);
+			}
+
+			_totalLength = _lut.back();
+		}
+
+		_lutDirty = false;
+	}
+
+	// _activeCurves MUST be declared before _decomposer (reference binding order).
+	Atlas::Curves _activeCurves;
+	Atlas::Curves _pendingCurves;
+	slug_t _penX = 0_cv, _penY = 0_cv;
+	Matrix _ctm = Matrix::identity();
+	std::vector<Matrix> _ctmStack;
+	CurveDecomposer _decomposer;
+
+	mutable std::vector<std::pair<slug_t, slug_t>> _pts;
+	mutable std::vector<slug_t> _lut;
+	mutable slug_t _totalLength = 0.0_cv;
+	mutable bool _lutDirty = true;
+};
+
+// ================================================================================================
+// Canvas
+// ================================================================================================
+
+class Canvas {
+public:
+	Canvas(Atlas& atlas, KeyIterator key=KeyIterator()):
+	_atlas(atlas),
+	_key(key) {}
+
+	// -------------------------------------------------------------------------
+	// CurveDecomposer access (forwarded to internal Path)
+	// -------------------------------------------------------------------------
+
+	CurveDecomposer& decomposer() { return _path.decomposer(); }
+	const CurveDecomposer& decomposer() const { return _path.decomposer(); }
+
+	// -------------------------------------------------------------------------
+	// Path snapshot
+	//
+	// Returns a copy of the internal path. The copy can be sampled, modified
+	// independently, or passed back to explicit-path commit verbs. The internal
+	// path is left completely intact.
+	// -------------------------------------------------------------------------
+
+	Path path() const { return _path; }
+
+	// -------------------------------------------------------------------------
+	// Transform stack (forwarded to internal Path)
+	// -------------------------------------------------------------------------
+
+	void save() { _path.save(); }
+	void restore() { _path.restore(); }
+	void resetTransform() { _path.resetTransform(); }
+	void setTransform(const Matrix& m) { _path.setTransform(m); }
+	void transform(const Matrix& m) { _path.transform(m); }
+	void translate(slug_t tx, slug_t ty) { _path.translate(tx, ty); }
+	void rotate(slug_t angle) { _path.rotate(angle); }
+	void scale(slug_t sx, slug_t sy) { _path.scale(sx, sy); }
+
+	// -------------------------------------------------------------------------
+	// Path commands (forwarded to internal Path)
+	// -------------------------------------------------------------------------
+
+	void beginPath() { _path.clear(); }
+	void moveTo(slug_t x, slug_t y) { _path.moveTo(x, y); }
+	void lineTo(slug_t x, slug_t y) { _path.lineTo(x, y); }
+	void quadTo(slug_t cx, slug_t cy, slug_t x, slug_t y) { _path.quadTo(cx, cy, x, y); }
+
+	void bezierTo(slug_t c1x, slug_t c1y, slug_t c2x, slug_t c2y, slug_t x, slug_t y) {
+		_path.bezierTo(c1x, c1y, c2x, c2y, x, y);
+	}
+
+	void closePath() { _path.closePath(); }
+	bool strokePath(slug_t width, bool cw=false) { return _path.strokePath(width, cw); }
+	bool hasPendingPath() const { return _path.hasPendingPath(); }
+
+	// -------------------------------------------------------------------------
+	// Shape helpers (forwarded to internal Path)
+	// -------------------------------------------------------------------------
+
+	void rect(slug_t x, slug_t y, slug_t w, slug_t h) { _path.rect(x, y, w, h); }
+	void roundedRect(slug_t x, slug_t y, slug_t w, slug_t h, slug_t r) { _path.roundedRect(x, y, w, h, r); }
+	void circle(slug_t cx, slug_t cy, slug_t r) { _path.circle(cx, cy, r); }
+	void ellipse(slug_t cx, slug_t cy, slug_t rx, slug_t ry) { _path.ellipse(cx, cy, rx, ry); }
+
+	void arc(slug_t cx, slug_t cy, slug_t r, slug_t startAngle, slug_t endAngle, bool ccw=false) {
+		_path.arc(cx, cy, r, startAngle, endAngle, ccw);
+	}
+
+	void arcTo(slug_t x1, slug_t y1, slug_t x2, slug_t y2, slug_t r) {
+		_path.arcTo(x1, y1, x2, y2, r);
+	}
+
+	// -------------------------------------------------------------------------
+	// Gradient factory
+	// -------------------------------------------------------------------------
+
+	struct GradientHandle {
+		GradientInfo::Type type = GradientInfo::Type::Linear;
+		slug_t x0 = 0, y0 = 0, x1 = 1, y1 = 0;
+		std::vector<GradientStop> stops;
+	};
+
+	GradientHandle createLinearGradient(
+		slug_t x0, slug_t y0,
+		slug_t x1, slug_t y1,
+		std::vector<GradientStop> stops
+	) {
+		return { GradientInfo::Type::Linear, x0, y0, x1, y1, std::move(stops) };
+	}
+
+	GradientHandle createRadialGradient(
+		slug_t cx, slug_t cy,
+		slug_t r0, slug_t r1,
+		std::vector<GradientStop> stops
+	) {
+		return { GradientInfo::Type::Radial, cx, cy, r0, r1, std::move(stops) };
+	}
+
+	GradientHandle createSweepGradient(
+		slug_t cx, slug_t cy,
+		slug_t startAngle, slug_t endAngle,
+		std::vector<GradientStop> stops
+	) {
+		return { GradientInfo::Type::Sweep, cx, cy, startAngle, endAngle, std::move(stops) };
+	}
+
+	// -------------------------------------------------------------------------
+	// Commit verbs - implicit path
+	//
+	// Operate on the Canvas's internal path. After fill() / stroke(), the
+	// accumulated curves remain in the path until the next beginPath() call.
+	// -------------------------------------------------------------------------
+
+	Key fill(Color color, slug_t scale=1.0_cv, Atlas::ShapeInfo::Origin origin={}) {
+		_consolidate();
+
+		if(_path._pendingCurves.empty()) return Key(0u);
+
+		return _commitFill(_path._pendingCurves, color, scale, _key.next(), origin);
+	}
+
+	Key fill(Color color, slug_t scale, Key key, Atlas::ShapeInfo::Origin origin={}) {
+		_consolidate();
+
+		if(_path._pendingCurves.empty()) return Key(0u);
+
+		return _commitFill(_path._pendingCurves, color, scale, key, origin);
+	}
+
+	bool defineShape(Key key, slug_t scale=1.0_cv, Atlas::ShapeInfo::Origin origin={}) {
+		_consolidate();
+
+		return _commitShape(_path._pendingCurves, key, scale, origin);
+	}
+
+	Key stroke(slug_t width, Color color, slug_t scale=1.0_cv, Atlas::ShapeInfo::Origin origin={}) {
+		if(!_path.strokePath(width)) return Key(0u);
+
+		return _commitFill(_path._pendingCurves, color, scale, _key.next(), origin);
+	}
+
+	Key stroke(slug_t width, Color color, slug_t scale, Key key, Atlas::ShapeInfo::Origin origin={}) {
+		if(!_path.strokePath(width)) return Key(0u);
+
+		return _commitFill(_path._pendingCurves, color, scale, key, origin);
+	}
+
+	Key fillGradient(const GradientHandle& handle, slug_t scale=1.0_cv, Atlas::ShapeInfo::Origin origin={}) {
+		_consolidate();
+
+		if(_path._pendingCurves.empty()) return Key(0u);
+
+		Key k = _commitGradient(_path._pendingCurves, handle, scale, _key.next(), origin);
+
+		_path._pendingCurves.clear();
+
+		return k;
+	}
+
+	Key fillGradient(const GradientHandle& handle, slug_t scale, Key key, Atlas::ShapeInfo::Origin origin={}) {
+		_consolidate();
+
+		if(_path._pendingCurves.empty()) return Key(0u);
+
+		Key k = _commitGradient(_path._pendingCurves, handle, scale, key, origin);
+
+		_path._pendingCurves.clear();
+
+		return k;
+	}
+
+	Key strokeGradient(slug_t width, const GradientHandle& handle, slug_t scale=1.0_cv, Atlas::ShapeInfo::Origin origin={}) {
+		if(!_path.strokePath(width)) return Key(0u);
+
+		Key k = _commitGradient(_path._pendingCurves, handle, scale, _key.next(), origin);
+
+		_path._pendingCurves.clear();
+
+		return k;
+	}
+
+	Key strokeGradient(slug_t width, const GradientHandle& handle, slug_t scale, Key key, Atlas::ShapeInfo::Origin origin={}) {
+		if(!_path.strokePath(width)) return Key(0u);
+
+		Key k = _commitGradient(_path._pendingCurves, handle, scale, key, origin);
+
+		_path._pendingCurves.clear();
+
+		return k;
+	}
+
+	// -------------------------------------------------------------------------
+	// Commit verbs - explicit Path
+	//
+	// Accept a standalone Path. The path is not modified by any of these calls.
+	// stroke() makes an internal copy to expand the stroke without altering @p p.
+	// -------------------------------------------------------------------------
+
+	Key fill(const Path& p, Color color, slug_t scale=1.0_cv, Atlas::ShapeInfo::Origin origin={}) {
+		if(!p.hasPendingPath()) return Key(0u);
+
+		return _commitFill(_merged(p), color, scale, _key.next(), origin);
+	}
+
+	Key fill(const Path& p, Color color, slug_t scale, Key key, Atlas::ShapeInfo::Origin origin={}) {
+		if(!p.hasPendingPath()) return Key(0u);
+
+		return _commitFill(_merged(p), color, scale, key, origin);
+	}
+
+	bool defineShape(const Path& p, Key key, slug_t scale=1.0_cv, Atlas::ShapeInfo::Origin origin={}) {
+		if(!p.hasPendingPath()) return false;
+
+		return _commitShape(_merged(p), key, scale, origin);
+	}
+
+	Key stroke(const Path& p, slug_t width, Color color, slug_t scale=1.0_cv, Atlas::ShapeInfo::Origin origin={}) {
+		Path copy = p;
+
+		if(!copy.strokePath(width)) return Key(0u);
+
+		return _commitFill(_merged(copy), color, scale, _key.next(), origin);
+	}
+
+	Key stroke(const Path& p, slug_t width, Color color, slug_t scale, Key key, Atlas::ShapeInfo::Origin origin={}) {
+		Path copy = p;
+
+		if(!copy.strokePath(width)) return Key(0u);
+
+		return _commitFill(_merged(copy), color, scale, key, origin);
+	}
+
+	Key fillGradient(const Path& p, const GradientHandle& handle, slug_t scale=1.0_cv, Atlas::ShapeInfo::Origin origin={}) {
+		if(!p.hasPendingPath()) return Key(0u);
+
+		return _commitGradient(_merged(p), handle, scale, _key.next(), origin);
+	}
+
+	Key fillGradient(const Path& p, const GradientHandle& handle, slug_t scale, Key key, Atlas::ShapeInfo::Origin origin={}) {
+		if(!p.hasPendingPath()) return Key(0u);
+
+		return _commitGradient(_merged(p), handle, scale, key, origin);
+	}
+
+	// -------------------------------------------------------------------------
+	// CompositeShape management
+	// -------------------------------------------------------------------------
+
+	void beginComposite() {
+		_composite = CompositeShape{};
+
+		beginPath();
+	}
+
+	void setAdvance(slug_t advance) { _composite.advance = advance; }
+
+	CompositeShape finalize() {
+		CompositeShape result = std::move(_composite);
+
+		beginComposite();
+
+		return result;
+	}
+
+	void finalize(Key key) { _atlas.addCompositeShape(key, finalize()); }
+
+	size_t layerCount() const { return _composite.layers.size(); }
+
+private:
+	// Merge _activeCurves into _pendingCurves on the internal path.
+	void _consolidate() {
+		for(const auto& c : _path._activeCurves) _path._pendingCurves.push_back(c);
+
+		_path._activeCurves.clear();
+	}
+
+	// Return a merged (active + pending) copy of @p p's curves without consuming them.
+	static Atlas::Curves _merged(const Path& p) {
+		Atlas::Curves out = p._pendingCurves;
+
+		for(const auto& c : p._activeCurves) out.push_back(c);
+
+		return out;
+	}
+
+	// Core fill commit: scale, apply origin, register in atlas, push Layer.
+	Key _commitFill(
+		const Atlas::Curves& curves,
 		Color color,
 		slug_t scale,
 		Key key,
-		Atlas::ShapeInfo::Origin origin={}
+		Atlas::ShapeInfo::Origin origin
 	) {
-		return _fill(color, scale, key, origin);
+		if(curves.empty()) return Key(0u);
+
+		Atlas::Curves scaled = _scaleCurves(curves, scale);
+
+		Atlas::ShapeInfo::Origin infoOrigin = origin;
+
+		if(origin.type == Atlas::ShapeInfo::Origin::Type::Custom && !scaled.empty()) {
+			slug_t minX_em = std::numeric_limits<slug_t>::max();
+			slug_t minY_em = std::numeric_limits<slug_t>::max();
+
+			for(const auto& c : scaled) {
+				minX_em = std::min({minX_em, c.x1, c.x2, c.x3});
+				minY_em = std::min({minY_em, c.y1, c.y2, c.y3});
+			}
+
+			infoOrigin.x = origin.x * scale - minX_em;
+			infoOrigin.y = origin.y * scale - minY_em;
+		}
+
+		auto [local, transform] = _toLocalOrigin(scaled, origin, scale);
+
+		if(local.empty()) return Key(0u);
+
+		Atlas::ShapeInfo info;
+
+		info.curves = std::move(local);
+		info.origin = infoOrigin;
+
+		_atlas.addShape(key, info);
+
+		Layer layer;
+
+		layer.key = key;
+		layer.color = color;
+		layer.transform = transform;
+
+		_composite.layers.push_back(layer);
+
+		return key;
 	}
 
-	// Register the current path as a named Shape (geometry only, no color or Layer).
-	//
-	// Use when you want to reference the same geometry from multiple Layers
-	// with different colors or transforms, managed by the caller.
-	//
-	// @p scale - same normalization convention as fill(). NOT stored on any Layer.
-	//
-	// Returns false and does nothing if the current path is empty.
-	bool defineShape(
+	// Shape-only commit: no Layer pushed, no color.
+	bool _commitShape(
+		const Atlas::Curves& curves,
 		Key key,
-		slug_t scale=1.0_cv,
-		Atlas::ShapeInfo::Origin origin={}
+		slug_t scale,
+		Atlas::ShapeInfo::Origin origin
 	) {
-		for(const auto& c : _activeCurves) _pendingCurves.push_back(c);
+		if(curves.empty()) return false;
 
-		_activeCurves.clear();
+		Atlas::Curves scaled = _scaleCurves(curves, scale);
 
-		if(_pendingCurves.empty()) return false;
-
-		Atlas::Curves scaled = _scaleCurves(_pendingCurves, scale);
-
-		// For Custom: convert authoring-space pivot to local-origin em-space for buildShapeBands.
 		Atlas::ShapeInfo::Origin infoOrigin = origin;
 
 		if(origin.type == Atlas::ShapeInfo::Origin::Type::Custom && !scaled.empty()) {
@@ -626,7 +1056,6 @@ public:
 
 		Atlas::ShapeInfo info;
 
-		// info.autoMetrics = true;
 		info.curves = std::move(local);
 		info.origin = infoOrigin;
 
@@ -635,445 +1064,18 @@ public:
 		return true;
 	}
 
-	// Expand the active sub-path (curves since the last moveTo or beginPath) as a constant-width
-	// stroke outline and append it to the accumulated shape buffer.
-	// The active sub-path is consumed.
-	//
-	// Multiple strokePath() calls (and closePath() calls) can be chained within one beginPath()
-	// session. Each appends another closed sub-path to the shape accumulator. Together they
-	// participate in the non-zero winding rule exactly like fill sub-paths do.
-	//
-	// @p ccw - if true (default) the outline is appended CCW (filled area). If false the outline
-	// is appended CW (subtracts coverage), enabling punch-outs when combined with a CCW outline
-	// in the same beginPath() session. The centerline itself does NOT need to be reversed; the
-	// ccw flag reverses the assembled output, not the input path.
-	//
-	// Hollow stroke pattern (same centerline, two widths):
-	//
-	// canvas.beginPath();
-	// canvas.moveTo(...); canvas.lineTo(...);
-	// canvas.strokePath(outerWidth); // CCW outer wall
-	// canvas.moveTo(...); canvas.lineTo(...); // same centerline
-	// canvas.strokePath(innerWidth, false); // CW inner wall -> punch-out
-	// canvas.fill(color);
-	//
-	// Use this when you need the raw outline geometry without color (e.g. to pass to defineShape()).
-	// For the common case of drawing a colored stroke, use stroke() instead.
-	//
-	// @p width - full stroke width in authoring-space units (half applied each side).
-	//
-	// Three-pass approach:
-	//
-	// 1. Flatten all centerline curves to a polyline (same De Casteljau tolerance).
-	// 2. Compute per-point miter-corrected normals so adjacent segments share an exact wall
-	//    intersection; no gaps or overlaps at joins. Miter limit 4x (SVG default) falls back to a
-	//    bevel at very sharp angles.
-	// 3. Build lwall/rwall from per-point normals, then close the outline.
-	//
-	// Returns false if the active path is empty.
-	bool strokePath(slug_t width, bool ccw=true) {
-		Atlas::Curves centerline;
-
-		// Shape helpers (roundedRect, rect, etc.) end with closePath(), which moves curves from
-		// _activeCurves into _pendingCurves. Fall back to _pendingCurves as the centerline so
-		// stroke() works symmetrically with fill() after any shape helper.
-		if(!_activeCurves.empty()) centerline = std::move(_activeCurves);
-		else if(!_pendingCurves.empty()) centerline = std::move(_pendingCurves);
-		else return false;
-
-		const slug_t h = width * 0.5_cv;
-		// TOLERANCE_EXACT is a sentinel for CurveDecomposer::cubicTo() meaning "always emit two
-		// leaves immediately" — it has no useful meaning for polyline flattening and produces
-		// extremely coarse stroke outlines. Fall back to a screen-quality default.
-		const slug_t tol = _decomposer.tolerance < TOLERANCE_EXACT
-			? _decomposer.tolerance
-			: TOLERANCE_BALANCED;
-
-		// Pass 1: flatten all centerline curves to a polyline.
-		std::vector<std::pair<slug_t, slug_t>> pts;
-
-		pts.push_back({centerline.front().x1, centerline.front().y1});
-
-		for(const auto& c : centerline) detail::flattenCurve(
-			c.x1, c.y1,
-			c.x2, c.y2,
-			c.x3, c.y3,
-			tol,
-			0,
-			pts
-		);
-
-		if(pts.size() < 2) return false;
-
-		const size_t numSegs = pts.size() - 1;
-
-		// Pass 2a: per-segment perpendicular normals (rotated 90 CCW from direction).
-		std::vector<std::pair<slug_t, slug_t>> segN(numSegs);
-
-		for(size_t i = 0; i < numSegs; ++i) {
-			const slug_t dx = pts[i + 1].first - pts[i].first;
-			const slug_t dy = pts[i + 1].second - pts[i].second;
-			const slug_t len = std::sqrt(dx * dx + dy * dy);
-
-			segN[i] = len > 1e-9_cv ? std::pair{-dy / len, dx / len} : std::pair{0.0_cv, 1.0_cv};
-		}
-
-		// Pass 2b: per-point miter-corrected normals.
-		static constexpr slug_t MITER_LIMIT = 4.0_cv;
-
-		struct PN { slug_t nx, ny; };
-
-		std::vector<PN> pn(pts.size());
-
-		for(size_t i = 0; i < pts.size(); ++i) {
-			if(!i) pn[i] = {segN[0].first, segN[0].second};
-
-			else if(i == numSegs) pn[i] = {segN[numSegs - 1].first, segN[numSegs - 1].second};
-
-			else {
-				slug_t nx = segN[i - 1].first + segN[i].first;
-				slug_t ny = segN[i - 1].second + segN[i].second;
-
-				const slug_t len = std::sqrt(nx * nx + ny * ny);
-
-				if(len > 1e-6_cv) {
-					nx /= len; ny /= len;
-
-					const slug_t d = nx * segN[i].first + ny * segN[i].second;
-
-					if(d > 1e-3_cv) {
-						const slug_t m = 1.0_cv / d;
-
-						if(m <= MITER_LIMIT) { nx *= m; ny *= m; }
-						else { nx *= MITER_LIMIT; ny *= MITER_LIMIT; }
-					}
-				}
-
-				else {
-					// Nearly opposite directions (hairpin): use incoming segment normal.
-					nx = segN[i].first;
-					ny = segN[i].second;
-				}
-
-				pn[i] = {nx, ny};
-			}
-		}
-
-		// Pass 3: build lwall / rwall using per-point normals.
-		Atlas::Curves lwall, rwall;
-
-		for(size_t i = 0; i < numSegs; ++i) {
-			const slug_t p0x = pts[i].first, p0y = pts[i].second;
-			const slug_t p2x = pts[i + 1].first, p2y = pts[i + 1].second;
-
-			const slug_t l0x = p0x + h * pn[i].nx, l0y = p0y + h * pn[i].ny;
-			const slug_t l2x = p2x + h * pn[i + 1].nx, l2y = p2y + h * pn[i + 1].ny;
-			const slug_t r0x = p0x - h * pn[i].nx, r0y = p0y - h * pn[i].ny;
-			const slug_t r2x = p2x - h * pn[i + 1].nx, r2y = p2y - h * pn[i + 1].ny;
-
-			lwall.push_back({l0x, l0y, (l0x + l2x) * 0.5_cv, (l0y + l2y) * 0.5_cv, l2x, l2y});
-			rwall.push_back({r0x, r0y, (r0x + r2x) * 0.5_cv, (r0y + r2y) * 0.5_cv, r2x, r2y});
-		}
-
-		if(lwall.empty()) return false;
-
-		// Assemble closed outline (CCW winding, Y-up) into a local buffer:
-		// R wall forward -> end cap -> L wall reversed -> start cap
-		Atlas::Curves outline;
-
-		for(const auto& r : rwall) outline.push_back(r);
-
-		{
-			const slug_t ax = rwall.back().x3, ay = rwall.back().y3;
-			const slug_t bx = lwall.back().x3, by = lwall.back().y3;
-
-			outline.push_back({ax, ay, (ax + bx) * 0.5_cv, (ay + by) * 0.5_cv, bx, by});
-		}
-
-		for(size_t i = lwall.size(); i-- > 0;) {
-			const auto& l = lwall[i];
-
-			outline.push_back({l.x3, l.y3, l.x2, l.y2, l.x1, l.y1});
-		}
-
-		{
-			const slug_t ax = lwall.front().x1, ay = lwall.front().y1;
-			const slug_t bx = rwall.front().x1, by = rwall.front().y1;
-
-			outline.push_back({ax, ay, (ax + bx) * 0.5_cv, (ay + by) * 0.5_cv, bx, by});
-		}
-
-		// Append to the shape accumulator: forward = CCW (fills), reversed = CW (punch-out).
-		if(ccw) for(const auto& c : outline) _pendingCurves.push_back(c);
-
-		else {
-			for(size_t i = outline.size(); i-- > 0;) {
-				const auto& c = outline[i];
-
-				_pendingCurves.push_back({c.x3, c.y3, c.x2, c.y2, c.x1, c.y1});
-			}
-		}
-
-		return true;
-	}
-
-	// Expand the current path as a stroke outline and commit it as a colored Layer in one call.
-	// Equivalent to strokePath(width) followed by fill(color, scale), the common case.
-	//
-	// @p width - full stroke width in authoring-space units.
-	// @p color - fill color for the stroked layer.
-	// @p scale - same convention as fill(). Default 1.0.
-	//
-	// Returns the auto-generated Key, or Key(0u) if the path is empty.
-	Key stroke(
-		slug_t width,
-		Color color,
-		slug_t scale=1.0_cv,
-		Atlas::ShapeInfo::Origin origin={}
-	) {
-		if(!strokePath(width)) return Key(0u);
-
-		return _fill(color, scale, _key.next(), origin);
-	}
-
-	// Named variant: registers the stroked shape under @p key.
-	Key stroke(
-		slug_t width,
-		Color color,
-		slug_t scale,
-		Key key,
-		Atlas::ShapeInfo::Origin origin={}
-	) {
-		if(!strokePath(width)) return Key(0u);
-
-		return _fill(color, scale, key, origin);
-	}
-
-	// -------------------------------------------------------------------------
-	// Gradient fills
-	//
-	// GradientHandle is a lightweight descriptor created by createLinearGradient(). Pass it to
-	// fillGradient() to commit the current path with a gradient instead of a flat color. The
-	// gradient endpoints are in the same authoring space as the path coordinates; the required
-	// em-space shift is applied automatically at fillGradient() time to match the local-origin
-	// shift applied to the curves.
-	// -------------------------------------------------------------------------
-
-	struct GradientHandle {
-		GradientInfo::Type type = GradientInfo::Type::Linear;
-		// Linear: (x0, y0) -> (x1, y1) authoring-space endpoints.
-		// Radial: (x0, y0) = center; x1 = innerRadius, y1 = outerRadius.
-		slug_t x0 = 0, y0 = 0, x1 = 1, y1 = 0;
-
-		std::vector<GradientStop> stops;
-	};
-
-	GradientHandle createLinearGradient(
-		slug_t x0, slug_t y0,
-		slug_t x1, slug_t y1,
-		std::vector<GradientStop> stops
-	) {
-		return { GradientInfo::Type::Linear, x0, y0, x1, y1, std::move(stops) };
-	}
-
-	// Concentric radial gradient centred at (cx, cy) with inner radius r0 and outer radius r1.
-	// r0 = 0 produces the common point-centre radial. Coordinates are in authoring space.
-	GradientHandle createRadialGradient(
-		slug_t cx, slug_t cy, slug_t r0, slug_t r1,
-		std::vector<GradientStop> stops
-	) {
-		return { GradientInfo::Type::Radial, cx, cy, r0, r1, std::move(stops) };
-	}
-
-	// Sweep (conic) gradient that rotates colour around (cx, cy) from startAngle to endAngle
-	// (radians, measured from the +X axis, Y-up convention; same as arc()).
-	//
-	// t = 0 at startAngle, t = 1 at endAngle. Angles outside [start, end] clamp to the nearest
-	// stop. For a seam-free full-circle colour wheel use startAngle = -a, endAngle = a.
-	GradientHandle createSweepGradient(
-		slug_t cx, slug_t cy,
-		slug_t startAngle, slug_t endAngle,
-		std::vector<GradientStop> stops
-	) {
-		return { GradientInfo::Type::Sweep, cx, cy, startAngle, endAngle, std::move(stops) };
-	}
-
-	// Commit the current path as a gradient-filled Layer. Equivalent to fill() but uses
-	// a gradient instead of a flat color. The gradient is registered with the atlas at call time.
-	Key fillGradient(
-		const GradientHandle& handle,
-		slug_t scale=1.0_cv,
-		Atlas::ShapeInfo::Origin origin={}
-	) {
-		if(_pendingCurves.empty() && _activeCurves.empty()) return Key(0u);
-
-		return _fillGradient(handle, scale, _key.next(), origin);
-	}
-
-	// Named variant: registers the shape under @p key.
-	Key fillGradient(
-		const GradientHandle& handle,
-		slug_t scale,
-		Key key,
-		Atlas::ShapeInfo::Origin origin={}
-	) {
-		return _fillGradient(handle, scale, key, origin);
-	}
-
-	// Expand the current path as a stroke outline and commit it with a gradient fill in one call.
-	// Equivalent to strokePath(width) followed by fillGradient(handle, scale), the common case.
-	Key strokeGradient(
-		slug_t width,
-		const GradientHandle& handle,
-		slug_t scale=1.0_cv,
-		Atlas::ShapeInfo::Origin origin={}
-	) {
-		if(!strokePath(width)) return Key(0u);
-
-		return _fillGradient(handle, scale, _key.next(), origin);
-	}
-
-	// Named variant: registers the gradient-stroked shape under @p key.
-	Key strokeGradient(
-		slug_t width,
-		const GradientHandle& handle,
-		slug_t scale,
-		Key key,
-		Atlas::ShapeInfo::Origin origin={}
-	) {
-		if(!strokePath(width)) return Key(0u);
-
-		return _fillGradient(handle, scale, key, origin);
-	}
-
-	// -------------------------------------------------------------------------
-	// CompositeShape management
-	// -------------------------------------------------------------------------
-
-	// Discard all accumulated layers and start a fresh composite.
-	// Any pending (uncommitted) path is also cleared.
-	void beginComposite() {
-		_composite = CompositeShape{};
-
-		beginPath();
-	}
-
-	// Set the advance (horizontal width hint) of the composite being built.
-	// Rarely needed for pure geometry scenes; more useful when integrating with
-	// text layout where advance drives cursor advancement.
-	void setAdvance(slug_t advance) {
-		_composite.advance = advance;
-	}
-
-	// Return the in-progress CompositeShape and reset internal state.
-	// The returned composite contains all Layers accumulated since the last
-	// beginComposite() call (or since construction).
-	CompositeShape finalize() {
-		CompositeShape result = std::move(_composite);
-
-		beginComposite();
-
-		return result;
-	}
-
-	// Register the in-progress CompositeShape in the Atlas under @p key and reset internal state.
-	// Equivalent to:
-	//
-	// atlas.addCompositeShape(key, canvas.finalize());
-	void finalize(Key key) {
-		_atlas.addCompositeShape(key, finalize());
-	}
-
-	// -------------------------------------------------------------------------
-	// Accessors
-	// -------------------------------------------------------------------------
-
-	// Number of Layers accumulated in the current composite.
-	size_t layerCount() const { return _composite.layers.size(); }
-
-	// True if there are any curves in either the active sub-path or the shape accumulator.
-	bool hasPendingPath() const { return !_pendingCurves.empty() || !_activeCurves.empty(); }
-
-	// Snapshot the current path as a queryable Path object. Copies (does not consume)
-	// both _pendingCurves and _activeCurves, flattens to a polyline, and bakes the
-	// arc-length LUT. The canvas path is left completely intact for fill/stroke as normal.
-	Path path() const {
-		Atlas::Curves merged = _pendingCurves;
-		for(const auto& c : _activeCurves) merged.push_back(c);
-		return Path(merged);
-	}
-
-private:
-	Key _fill(
-		Color color,
-		slug_t scale,
-		Key key,
-		Atlas::ShapeInfo::Origin origin={}
-	) {
-		for(const auto& c : _activeCurves) _pendingCurves.push_back(c);
-
-		_activeCurves.clear();
-
-		if(_pendingCurves.empty()) return Key(0u);
-
-		Atlas::Curves scaled = _scaleCurves(_pendingCurves, scale);
-
-		// For Custom: convert authoring-space pivot to local-origin em-space so buildShapeBands
-		// can store it directly in Shape::originX/Y. The local-origin pivot = (pivot * scale) - bbox-min.
-		Atlas::ShapeInfo::Origin infoOrigin = origin;
-
-		if(origin.type == Atlas::ShapeInfo::Origin::Type::Custom && !scaled.empty()) {
-			slug_t minX_em = std::numeric_limits<slug_t>::max();
-			slug_t minY_em = std::numeric_limits<slug_t>::max();
-
-			for(const auto& c : scaled) {
-				minX_em = std::min({minX_em, c.x1, c.x2, c.x3});
-				minY_em = std::min({minY_em, c.y1, c.y2, c.y3});
-			}
-
-			infoOrigin.x = origin.x * scale - minX_em;
-			infoOrigin.y = origin.y * scale - minY_em;
-		}
-
-		auto [local, transform] = _toLocalOrigin(scaled, origin, scale);
-
-		if(local.empty()) return Key(0u);
-
-		Atlas::ShapeInfo info;
-
-		info.curves = std::move(local);
-		info.origin = infoOrigin;
-
-		_atlas.addShape(key, info);
-
-		Layer layer;
-		layer.key = key;
-		layer.color = color;
-		layer.transform = transform;
-		// layer.scale intentionally left at 1.0 - see Scale Contract
-
-		_composite.layers.push_back(layer);
-
-		return key;
-	}
-
-	Key _fillGradient(
+	// Gradient fill commit.
+	Key _commitGradient(
+		const Atlas::Curves& curves,
 		const GradientHandle& handle,
 		slug_t scale,
 		Key key,
 		Atlas::ShapeInfo::Origin origin
 	) {
-		for(const auto& c : _activeCurves) _pendingCurves.push_back(c);
+		if(curves.empty()) return Key(0u);
 
-		_activeCurves.clear();
+		Atlas::Curves scaled = _scaleCurves(curves, scale);
 
-		if(_pendingCurves.empty()) return Key(0u);
-
-		Atlas::Curves scaled = _scaleCurves(_pendingCurves, scale);
-
-		// Compute the bounding-box minimum (minX, minY) before _toLocalOrigin shifts the curves.
-		// The gradient endpoints are in the same authoring space; they must be shifted by the
-		// same (minX, minY) so the gradient matrix operates in the same local em-space as v_emCoord.
 		slug_t minX = std::numeric_limits<slug_t>::max();
 		slug_t minY = std::numeric_limits<slug_t>::max();
 
@@ -1082,7 +1084,6 @@ private:
 			minY = std::min({minY, c.y1, c.y2, c.y3});
 		}
 
-		// For Custom: convert authoring-space pivot to local-origin em-space (reuse minX/minY).
 		Atlas::ShapeInfo::Origin infoOrigin = origin;
 
 		if(origin.type == Atlas::ShapeInfo::Origin::Type::Custom) {
@@ -1094,43 +1095,36 @@ private:
 
 		if(local.empty()) return Key(0u);
 
-		GradientInfo info;
+		GradientInfo ginfo;
 
-		info.type = handle.type;
-		info.stops = handle.stops;
+		ginfo.type = handle.type;
+		ginfo.stops = handle.stops;
 
 		if(handle.type == GradientInfo::Type::Radial) {
-			// Center is a position: shift by local origin. Radii are distances: scale only.
 			const slug_t cx = handle.x0 * scale - minX;
 			const slug_t cy = handle.y0 * scale - minY;
 			const slug_t r0 = handle.x1 * scale;
 			const slug_t r1 = handle.y1 * scale;
 
-			info.innerRadius = r0;
-			info.transform = buildRadialGradientMatrix(cx, cy, r1);
+			ginfo.innerRadius = r0;
+			ginfo.transform = buildRadialGradientMatrix(cx, cy, r1);
 		}
 
 		else if(handle.type == GradientInfo::Type::Sweep) {
-			// Center is a position: shift by local origin. Angles are raw radians: no transform.
 			const slug_t cx = handle.x0 * scale - minX;
 			const slug_t cy = handle.y0 * scale - minY;
-			const slug_t startAngle = handle.x1;
-			const slug_t arcSpan = handle.y1 - handle.x1;
 
-			info.transform = buildSweepGradientMatrix(cx, cy, startAngle, arcSpan);
+			ginfo.transform = buildSweepGradientMatrix(cx, cy, handle.x1, handle.y1 - handle.x1);
 		}
 
 		else {
-			// Linear: both endpoints are positions; shift by local origin.
-			const slug_t gx0 = handle.x0 * scale - minX;
-			const slug_t gy0 = handle.y0 * scale - minY;
-			const slug_t gx1 = handle.x1 * scale - minX;
-			const slug_t gy1 = handle.y1 * scale - minY;
-
-			info.transform = buildLinearGradientMatrix(gx0, gy0, gx1, gy1);
+			ginfo.transform = buildLinearGradientMatrix(
+				handle.x0 * scale - minX, handle.y0 * scale - minY,
+				handle.x1 * scale - minX, handle.y1 * scale - minY
+			);
 		}
 
-		const uint32_t gid = _atlas.addGradient(info);
+		const uint32_t gid = _atlas.addGradient(ginfo);
 
 		Atlas::ShapeInfo shapeInfo;
 
@@ -1142,86 +1136,15 @@ private:
 		Layer layer;
 
 		layer.key = key;
-		// rgb ignored when gradientId != 0; a=1 = full opacity
 		layer.color = {};
 		layer.transform = transform;
 		layer.gradientId = gid;
 
 		_composite.layers.push_back(layer);
 
-		_pendingCurves.clear();
-
 		return key;
 	}
 
-	// Decompose a circular arc into cubic Bezier segments and emit via bezierTo().
-	//
-	// @p sweep - signed total sweep in radians. Positive = clockwise (Y-up).
-	// Negative = counter-clockwise. Must not be zero.
-	//
-	// Splits the sweep into segments of at most ?/2 each (quarter-circle), which keeps the cubic
-	// approximation error below 0.00027% of r. Each segment is a single bezierTo() ->
-	// CurveDecomposer::cubicTo() -> adaptive subdivision.
-	//
-	// Does NOT call moveTo(). The caller (arc() / arcTo()) is responsible for ensuring the current
-	// point is at the arc start before calling this.
-	void _arcSegments(slug_t cx, slug_t cy, slug_t r, slug_t startAngle, slug_t sweep) {
-		if(r <= 0.0_cv || sweep == 0.0_cv) return;
-
-		// Number of segments: ceil(|sweep| / (?/2)), minimum 1.
-		const slug_t absSweep = std::abs(sweep);
-		const int nSegs = std::max(1, static_cast<int>(std::ceil(absSweep / cv(M_PI_2))));
-		const slug_t segSweep = sweep / cv(nSegs); // signed per-segment sweep
-
-		slug_t angle = startAngle;
-
-		for(int i = 0; i < nSegs; ++i) {
-			const slug_t a0 = angle;
-			const slug_t a1 = angle + segSweep;
-
-			// Cubic arc approximation for a segment of sweep segSweep.
-			// k = (4/3) * tan(segSweep/4)
-			const slug_t k = (4.0_cv / 3.0_cv) * std::tan(segSweep * 0.25_cv);
-
-			const slug_t cos0 = std::cos(a0), sin0 = std::sin(a0);
-			const slug_t cos1 = std::cos(a1), sin1 = std::sin(a1);
-
-			// Arc start point (should equal current point on first segment,
-			// and the end of the previous segment on subsequent ones).
-			const slug_t p0x = cx + r * cos0;
-			const slug_t p0y = cy + r * sin0;
-
-			// Arc end point.
-			const slug_t p3x = cx + r * cos1;
-			const slug_t p3y = cy + r * sin1;
-
-			// Control points: offset from start/end tangentially by k*r.
-			const slug_t p1x = p0x - k * r * sin0;
-			const slug_t p1y = p0y + k * r * cos0;
-			const slug_t p2x = p3x + k * r * sin1;
-			const slug_t p2y = p3y - k * r * cos1;
-
-			// On the very first segment, snap the start to a moveTo if the path is empty; otherwise
-			// emit a lineTo to connect cleanly.
-			if(i == 0 && _activeCurves.empty() && _pendingCurves.empty()) moveTo(p0x, p0y);
-
-			else if(i == 0) {
-				// Connect current position to arc start with a line. Compare in user space
-				// (_penX/_penY) so the check is consistent regardless of the current CTM.
-				const slug_t dx = p0x - _penX;
-				const slug_t dy = p0y - _penY;
-
-				if(dx * dx + dy * dy > 1e-10_cv) lineTo(p0x, p0y);
-			}
-
-			bezierTo(p1x, p1y, p2x, p2y, p3x, p3y);
-
-			angle = a1;
-		}
-	}
-
-	// Apply scale to every coordinate in a curve list. Fast-path returns src unchanged (no copy)
-	// when scale == 1.
 	static Atlas::Curves _scaleCurves(const Atlas::Curves& src, slug_t scale) {
 		if(scale == 1.0_cv) return src;
 
@@ -1238,16 +1161,6 @@ private:
 		return out;
 	}
 
-	// Shift curves to local origin (bounding-box minimum -> 0,0). Returns both the shifted curves
-	// and a Matrix (dx/dy only). Returns empty curves and an identity Matrix if @p src is empty or
-	// the bounding box is degenerate.
-	//
-	// Curves are ALWAYS shifted to local origin regardless of origin mode (tight atlas packing).
-	// Only transform.dx/dy changes:
-	//
-	// Default - bbox corner (minX, minY).
-	// Centered - bbox center; computeQuad still places the quad at the correct canvas position.
-	// Custom - origin.x/y * scale (authoring-space pivot converted to em-space).
 	static std::pair<Atlas::Curves, Matrix> _toLocalOrigin(
 		const Atlas::Curves& src,
 		Atlas::ShapeInfo::Origin origin={},
@@ -1290,29 +1203,18 @@ private:
 
 		out.reserve(src.size());
 
-		for(const auto& c : src) {
-			out.push_back({
-				c.x1 - minX, c.y1 - minY,
-				c.x2 - minX, c.y2 - minY,
-				c.x3 - minX, c.y3 - minY
-			});
-		}
+		for(const auto& c : src) out.push_back({
+			c.x1 - minX, c.y1 - minY,
+			c.x2 - minX, c.y2 - minY,
+			c.x3 - minX, c.y3 - minY
+		});
 
 		return { out, transform };
 	}
 
 	Atlas& _atlas;
 	KeyIterator _key;
-	Matrix _ctm = Matrix::identity();
-	std::vector<Matrix> _ctmStack;
-	// User-space pen position (before CTM). Parallel to _decomposer._x/_y which
-	// is in atlas space. Used by arcTo and _arcSegments for space-consistent comparisons.
-	slug_t _penX = 0_cv, _penY = 0_cv;
-	// current sub-path being drawn; consumed by closePath/strokePath
-	Atlas::Curves _activeCurves;
-	// accumulated closed sub-paths; submitted by fill/defineShape
-	Atlas::Curves _pendingCurves;
-	CurveDecomposer _decomposer;
+	Path _path;
 	CompositeShape _composite;
 };
 
