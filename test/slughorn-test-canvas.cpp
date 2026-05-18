@@ -506,7 +506,7 @@ int main(int argc, char** argv) {
 	}
 
 	// ============================================================================================
-	// Pattern 15: Same geometry, two different origins — for SVG debug visualization.
+	// Pattern 15: Same geometry, two different origins - for SVG debug visualization.
 	//
 	// The rectangle spans [0.1, 0.9] x [0.15, 0.85] in authoring space.
 	//
@@ -537,25 +537,36 @@ int main(int argc, char** argv) {
 	// ============================================================================================
 
 	// ============================================================================================
-	// Pattern 16: Built a Path instance and sample it.
+	// Pattern 16: Standalone Path - build, sample, and commit independently of Canvas.
+	//
+	// The path is constructed without any canvas involvement. sample() works directly on
+	// the standalone Path. canvas.stroke(p, ...) commits p's geometry without consuming it;
+	// p could be reused, transformed, or sampled again after the call.
 	// ============================================================================================
 	{
-		canvas.beginPath(); // Maybe unnecessary, but safe?
-		canvas.moveTo(0_cv, 0_cv); // Also perhaps implicit, but still safe!
-		canvas.lineTo(0.5_cv, 0_cv);
-		canvas.quadTo(0.75_cv, 1_cv, 1_cv, 0_cv);
+		slughorn::canvas::Path p;
 
-		auto path = canvas.path();
+		p.moveTo(0_cv, 0_cv);
+		p.lineTo(0.3_cv, 0_cv);
+		p.quadTo(0.5_cv, 1_cv, 0.7_cv, 0_cv);
+		p.lineTo(1_cv, 0_cv);
 
-		for(slug_t s = 0_cv; s <= 1_cv; s += 0.1_cv) {
-			// auto [x, y, angle] = path.sample(s);
-			auto sample = path.sample(s);
+		// for(slug_t s = 0_cv; s <= 1_cv; s += 0.1_cv) std::cout
+		for(size_t i = 0; i < 11; i++) {
+			const auto s = cv(i / 10_cv);
 
-			std::cout << "sample @ " << s << " = " << sample << std::endl;
+			std::cout << "sample @ " << s << " = " << p.sample(s) << std::endl;
 		}
 
-		canvas.stroke(0.06_cv, WHITE); // auto-key?
-		canvas.finalize(Key::fromString("path_test"));
+		// Commit via explicit-path overload - p is unchanged after this call.
+		canvas.stroke(p, 0.06_cv, WHITE);
+		canvas.finalize(Key::fromString("sample_path"));
+
+		// Verify: canvas.path() still returns the implicit path (unaffected by p).
+		std::cerr
+			<< "Pattern 16: internal path hasPendingPath="
+			<< canvas.hasPendingPath() << " (expected 0)\n"
+		;
 	}
 
 	// ============================================================================================

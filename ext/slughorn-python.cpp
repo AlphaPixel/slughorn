@@ -1544,18 +1544,142 @@ PYBIND11_MODULE(slughorn, m) {
 			})
 		;
 
+		// Path class ----------------------------------------------------------
+
+		{
+			using SlugPath = slughorn::canvas::Path;
+			using PathSample = slughorn::canvas::Path::Sample;
+
+			auto pyPath = py::class_<SlugPath>(canvas, "Path",
+				"Standalone geometry primitive (analogous to HTML Canvas Path2D).\n\n"
+				"Build geometry with move_to/line_to/bezier_to/etc, then pass the Path\n"
+				"to canvas.fill(path, color) or canvas.stroke(path, width, color).\n"
+				"Paths are copyable and reusable: fill/stroke do not consume them.\n\n"
+				"A Path can also be used standalone for arc-length sampling:\n"
+				"    p = slughorn.canvas.Path()\n"
+				"    p.move_to(0, 0); p.line_to(1, 0)\n"
+				"    s = p.sample(0.5)  # Path.Sample at midpoint"
+			);
+
+			py::class_<PathSample>(pyPath, "Sample",
+				"Position and tangent direction at a normalized arc-length parameter t.\n"
+				"Returned by Path.sample(t). Fields are read-only."
+			)
+				.def_readonly("x", &PathSample::x, "X coordinate.")
+				.def_readonly("y", &PathSample::y, "Y coordinate.")
+				.def_readonly("angle", &PathSample::angle, "Tangent angle in radians.")
+				.def("__repr__", [](const PathSample& s) {
+					std::ostringstream ss;
+					ss << "Path.Sample(x=" << s.x << ", y=" << s.y
+					   << ", angle=" << s.angle << ")";
+					return ss.str();
+				})
+			;
+
+			pyPath
+				.def(py::init<>(), "Create an empty path with identity transform.")
+
+				// Path management
+				.def("clear", &SlugPath::clear,
+					"Reset all geometry state. The CTM (transform) is NOT cleared,\n"
+					"matching HTML Canvas beginPath() semantics.")
+				.def("add_path", &SlugPath::addPath, py::arg("other"),
+					"Append all curves from other into this path's accumulator.\n"
+					"Does not affect other.")
+
+				// Transform stack
+				.def("save", &SlugPath::save, "Push the current transform onto the stack.")
+				.def("restore", &SlugPath::restore, "Pop the transform stack.")
+				.def("reset_transform", &SlugPath::resetTransform, "Set CTM to identity.")
+				.def("set_transform", &SlugPath::setTransform, py::arg("m"),
+					"Replace CTM with matrix m.")
+				.def("transform", py::overload_cast<const slughorn::Matrix&>(&SlugPath::transform),
+					py::arg("m"), "Post-multiply CTM by m.")
+				.def("translate", &SlugPath::translate, py::arg("tx"), py::arg("ty"))
+				.def("rotate", &SlugPath::rotate, py::arg("angle"), "Angle in radians.")
+				.def("scale", &SlugPath::scale, py::arg("sx"), py::arg("sy"))
+
+				// Path commands
+				.def("move_to", &SlugPath::moveTo, py::arg("x"), py::arg("y"))
+				.def("line_to", &SlugPath::lineTo, py::arg("x"), py::arg("y"))
+				.def("quad_to", &SlugPath::quadTo,
+					py::arg("cx"), py::arg("cy"), py::arg("x"), py::arg("y"))
+				.def("bezier_to", &SlugPath::bezierTo,
+					py::arg("c1x"), py::arg("c1y"), py::arg("c2x"), py::arg("c2y"),
+					py::arg("x"), py::arg("y"))
+				.def("close_path", &SlugPath::closePath)
+
+				// Shape helpers
+				.def("rect", &SlugPath::rect,
+					py::arg("x"), py::arg("y"), py::arg("w"), py::arg("h"))
+				.def("rounded_rect", &SlugPath::roundedRect,
+					py::arg("x"), py::arg("y"), py::arg("w"), py::arg("h"), py::arg("r"))
+				.def("circle", &SlugPath::circle, py::arg("cx"), py::arg("cy"), py::arg("r"))
+				.def("ellipse", &SlugPath::ellipse,
+					py::arg("cx"), py::arg("cy"), py::arg("rx"), py::arg("ry"))
+				.def("arc", &SlugPath::arc,
+					py::arg("cx"), py::arg("cy"), py::arg("r"),
+					py::arg("start_angle"), py::arg("end_angle"), py::arg("ccw") = false,
+					"Circular arc. Does NOT call clear(); appends to the current path.\n"
+					"Angles in radians from +X axis, Y-up convention.")
+				.def("arc_to", &SlugPath::arcTo,
+					py::arg("x1"), py::arg("y1"), py::arg("x2"), py::arg("y2"), py::arg("r"),
+					"Tangential arc. Matches HTML Canvas arcTo().")
+
+				// Stroke expansion
+				.def("stroke_path", &SlugPath::strokePath,
+					py::arg("width"), py::arg("cw") = false,
+					"Expand from centerline to constant-width stroke outline in place.\n"
+					"cw=True reverses the winding (CW, for punch-out effects with nonzero rule).\n"
+					"Returns False if the path was empty.")
+
+				// Decomposer
+				.def("decomposer",
+					py::overload_cast<>(&SlugPath::decomposer),
+					py::return_value_policy::reference_internal,
+					"Access the internal CurveDecomposer to tune tolerance.")
+
+				// Accessors
+				.def_property_readonly("has_pending_path", &SlugPath::hasPendingPath,
+					"True if the path has any accumulated curves.")
+				.def("arc_length", &SlugPath::arcLength,
+					"Total arc length of the path. Triggers LUT rebuild if geometry changed.")
+				.def("sample", &SlugPath::sample, py::arg("t"),
+					"Sample position and tangent at normalized arc-length t in [0,1].\n"
+					"Returns a Path.Sample(x, y, angle).")
+			;
+		}
+
+		// Canvas class --------------------------------------------------------
+
 		py::class_<slughorn::canvas::Canvas>(canvas, "Canvas")
 			.def(py::init<slughorn::Atlas&, slughorn::KeyIterator>(),
 				py::arg("atlas"), py::arg("key_iterator")=slughorn::KeyIterator(),
 				"Construct a Canvas writing into atlas, using key_iterator for auto-generated keys."
 			)
 
-			// CurveDecomposer access ------------------------------------------
+			// CurveDecomposer / path snapshot ---------------------------------
 
 			.def("decomposer", py::overload_cast<>(&slughorn::canvas::Canvas::decomposer),
 				py::return_value_policy::reference_internal,
 				"Access the internal CurveDecomposer to tune tolerance etc."
 			)
+			.def("path", &slughorn::canvas::Canvas::path,
+				"Return a copy of the internal path. Non-destructive: the canvas path is intact."
+			)
+
+			// Transform stack -------------------------------------------------
+
+			.def("save", &slughorn::canvas::Canvas::save, "Push the current transform.")
+			.def("restore", &slughorn::canvas::Canvas::restore, "Pop the transform stack.")
+			.def("reset_transform", &slughorn::canvas::Canvas::resetTransform)
+			.def("set_transform", &slughorn::canvas::Canvas::setTransform, py::arg("m"))
+			.def("transform",
+				py::overload_cast<const slughorn::Matrix&>(&slughorn::canvas::Canvas::transform),
+				py::arg("m"))
+			.def("translate", &slughorn::canvas::Canvas::translate, py::arg("tx"), py::arg("ty"))
+			.def("rotate", &slughorn::canvas::Canvas::rotate, py::arg("angle"))
+			.def("scale", &slughorn::canvas::Canvas::scale, py::arg("sx"), py::arg("sy"))
 
 			// Path commands ---------------------------------------------------
 
@@ -1599,9 +1723,9 @@ PYBIND11_MODULE(slughorn, m) {
 				"Tangential arc from current point. Matches HTML Canvas arcTo()."
 			)
 
-			// Commit ----------------------------------------------------------
+			// Commit — implicit path ------------------------------------------
 
-			// fill() - auto-key variant
+			// fill() - auto-key
 			.def("fill",
 				[](
 					slughorn::canvas::Canvas& c,
@@ -1616,7 +1740,7 @@ PYBIND11_MODULE(slughorn, m) {
 				"Commit the current path as a new Layer with the given color.\n"
 				"Returns the auto-generated Key, or Key(0) if the path was empty."
 			)
-			// fill() - named-key variant: shape is also addressable by key
+			// fill() - named-key
 			.def("fill",
 				[](
 					slughorn::canvas::Canvas& c,
@@ -1646,20 +1770,17 @@ PYBIND11_MODULE(slughorn, m) {
 				"Register the current path as a named Shape (geometry only, no Layer).\n"
 				"Returns False if the path was empty."
 			)
-			// stroke_path() - in-place path transformer (expand centerline -> filled outline)
+			// stroke_path() — in-place expand, then commit separately
 			.def("stroke_path",
-				[](slughorn::canvas::Canvas& c, slug_t width) {
-					return c.strokePath(width);
+				[](slughorn::canvas::Canvas& c, slug_t width, bool cw) {
+					return c.strokePath(width, cw);
 				},
-				py::arg("width"),
-				"Expand the current path from a centerline into a constant-width stroke outline\n"
-				"in place. The result replaces the pending path; call fill() or stroke() afterwards\n"
-				"to commit. Returns False if the path was empty.\n\n"
-				"Equivalent to the HTML Canvas / Cairo path-transformer concept: call\n"
-				"stroke_path(w) then fill(color) for explicit two-step control, or use\n"
-				"stroke(w, color) for the common one-call form."
+				py::arg("width"), py::arg("cw") = false,
+				"Expand the current path from a centerline into a stroke outline in place.\n"
+				"cw=True reverses the winding (CW, for punch-out effects).\n"
+				"Call fill() or stroke() afterwards to commit."
 			)
-			// stroke() - auto-key variant: stroke_path() + fill() in one call
+			// stroke() - auto-key
 			.def("stroke",
 				[](
 					slughorn::canvas::Canvas& c,
@@ -1672,11 +1793,9 @@ PYBIND11_MODULE(slughorn, m) {
 				},
 				py::arg("width"), py::arg("color"), py::arg("scale") = 1.0f,
 				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin{},
-				"Expand the current path as a stroke outline and commit it as a colored Layer.\n"
-				"Equivalent to stroke_path(width) followed by fill(color, scale).\n"
-				"Returns the auto-generated Key, or Key(0) if the path was empty."
+				"Expand the current path as a stroke outline and commit as a colored Layer."
 			)
-			// stroke() - named-key variant
+			// stroke() - named-key
 			.def("stroke",
 				[](
 					slughorn::canvas::Canvas& c,
@@ -1690,11 +1809,106 @@ PYBIND11_MODULE(slughorn, m) {
 				},
 				py::arg("width"), py::arg("color"), py::arg("scale"), py::arg("key"),
 				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin{},
-				"Expand the current path as a stroke outline and commit it under key.\n"
-				"Returns key, or Key(0) if the path was empty."
+				"Expand the current path as a stroke outline, registering under key."
 			)
 
-			// Gradient fills --------------------------------------------------
+			// Commit — explicit Path ------------------------------------------
+
+			// fill(path, color, ...) - auto-key
+			.def("fill",
+				[](
+					slughorn::canvas::Canvas& c,
+					const slughorn::canvas::Path& p,
+					slughorn::Color color,
+					slug_t scale,
+					slughorn::Atlas::ShapeInfo::Origin origin
+				) {
+					return c.fill(p, color, scale, origin);
+				},
+				py::arg("path"), py::arg("color"), py::arg("scale") = 1.0f,
+				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin{},
+				"Fill a standalone Path. path is not consumed or modified."
+			)
+			// fill(path, color, scale, key) - named-key
+			.def("fill",
+				[](
+					slughorn::canvas::Canvas& c,
+					const slughorn::canvas::Path& p,
+					slughorn::Color color,
+					slug_t scale,
+					slughorn::Key key,
+					slughorn::Atlas::ShapeInfo::Origin origin
+				) {
+					return c.fill(p, color, scale, key, origin);
+				},
+				py::arg("path"), py::arg("color"), py::arg("scale"), py::arg("key"),
+				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin{},
+				"Fill a standalone Path, registering under key. path is not consumed."
+			)
+			.def("define_shape",
+				[](
+					slughorn::canvas::Canvas& c,
+					const slughorn::canvas::Path& p,
+					slughorn::Key key,
+					slug_t scale,
+					slughorn::Atlas::ShapeInfo::Origin origin
+				) {
+					return c.defineShape(p, key, scale, origin);
+				},
+				py::arg("path"), py::arg("key"), py::arg("scale") = 1.0f,
+				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin{},
+				"Register a standalone Path as a named Shape (geometry only, no Layer)."
+			)
+			// stroke(path, ...) - auto-key
+			.def("stroke",
+				[](
+					slughorn::canvas::Canvas& c,
+					const slughorn::canvas::Path& p,
+					slug_t width,
+					slughorn::Color color,
+					slug_t scale,
+					slughorn::Atlas::ShapeInfo::Origin origin
+				) {
+					return c.stroke(p, width, color, scale, origin);
+				},
+				py::arg("path"), py::arg("width"), py::arg("color"), py::arg("scale") = 1.0f,
+				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin{},
+				"Stroke a standalone Path. path is not consumed or modified."
+			)
+			// stroke(path, ...) - named-key
+			.def("stroke",
+				[](
+					slughorn::canvas::Canvas& c,
+					const slughorn::canvas::Path& p,
+					slug_t width,
+					slughorn::Color color,
+					slug_t scale,
+					slughorn::Key key,
+					slughorn::Atlas::ShapeInfo::Origin origin
+				) {
+					return c.stroke(p, width, color, scale, key, origin);
+				},
+				py::arg("path"), py::arg("width"), py::arg("color"),
+				py::arg("scale"), py::arg("key"),
+				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin{},
+				"Stroke a standalone Path, registering under key."
+			)
+			.def("fill_gradient",
+				[](
+					slughorn::canvas::Canvas& c,
+					const slughorn::canvas::Path& p,
+					const slughorn::canvas::Canvas::GradientHandle& handle,
+					slug_t scale,
+					slughorn::Atlas::ShapeInfo::Origin origin
+				) {
+					return c.fillGradient(p, handle, scale, origin);
+				},
+				py::arg("path"), py::arg("handle"), py::arg("scale") = 1.0f,
+				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin{},
+				"Gradient-fill a standalone Path. path is not consumed."
+			)
+
+			// Gradient fills — implicit path ----------------------------------
 
 			.def("create_linear_gradient",
 				[](
@@ -1708,12 +1922,40 @@ PYBIND11_MODULE(slughorn, m) {
 				py::arg("x0"), py::arg("y0"),
 				py::arg("x1"), py::arg("y1"),
 				py::arg("stops"),
-				"Create a GradientHandle for a linear gradient from (x0,y0) to (x1,y1).\n"
-				"stops is a list of GradientStop objects.\n"
-				"Pass the handle to fill_gradient() to commit the current path."
+				"Create a GradientHandle for a linear gradient from (x0,y0) to (x1,y1)."
+			)
+			.def("create_radial_gradient",
+				[](
+					slughorn::canvas::Canvas& c,
+					slug_t cx, slug_t cy,
+					slug_t r0, slug_t r1,
+					std::vector<slughorn::GradientStop> stops
+				) {
+					return c.createRadialGradient(cx, cy, r0, r1, std::move(stops));
+				},
+				py::arg("cx"), py::arg("cy"),
+				py::arg("r0"), py::arg("r1"),
+				py::arg("stops"),
+				"Create a GradientHandle for a radial gradient centered at (cx,cy).\n"
+				"r0 is the inner radius, r1 is the outer radius."
+			)
+			.def("create_sweep_gradient",
+				[](
+					slughorn::canvas::Canvas& c,
+					slug_t cx, slug_t cy,
+					slug_t start_angle, slug_t end_angle,
+					std::vector<slughorn::GradientStop> stops
+				) {
+					return c.createSweepGradient(cx, cy, start_angle, end_angle, std::move(stops));
+				},
+				py::arg("cx"), py::arg("cy"),
+				py::arg("start_angle"), py::arg("end_angle"),
+				py::arg("stops"),
+				"Create a GradientHandle for a sweep (conic) gradient centered at (cx,cy).\n"
+				"Angles in radians."
 			)
 
-			// fill_gradient() - auto-key variant
+			// fill_gradient() - auto-key
 			.def("fill_gradient",
 				[](
 					slughorn::canvas::Canvas& c,
@@ -1726,10 +1968,9 @@ PYBIND11_MODULE(slughorn, m) {
 				py::arg("handle"),
 				py::arg("scale") = 1.0f,
 				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin{},
-				"Commit the current path as a gradient-filled Layer.\n"
-				"Returns the auto-generated Key, or Key(0) if the path was empty."
+				"Commit the current path as a gradient-filled Layer."
 			)
-			// fill_gradient() - named-key variant
+			// fill_gradient() - named-key
 			.def("fill_gradient",
 				[](
 					slughorn::canvas::Canvas& c,
@@ -1744,8 +1985,40 @@ PYBIND11_MODULE(slughorn, m) {
 				py::arg("scale"),
 				py::arg("key"),
 				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin{},
-				"Commit the current path as a gradient-filled Layer, registering under key.\n"
-				"Returns key, or Key(0) if the path was empty."
+				"Commit the current path as a gradient-filled Layer, registering under key."
+			)
+			// stroke_gradient() - auto-key
+			.def("stroke_gradient",
+				[](
+					slughorn::canvas::Canvas& c,
+					slug_t width,
+					const slughorn::canvas::Canvas::GradientHandle& handle,
+					slug_t scale,
+					slughorn::Atlas::ShapeInfo::Origin origin
+				) {
+					return c.strokeGradient(width, handle, scale, origin);
+				},
+				py::arg("width"), py::arg("handle"),
+				py::arg("scale") = 1.0f,
+				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin{},
+				"Expand the current path as a stroke outline and commit with a gradient fill."
+			)
+			// stroke_gradient() - named-key
+			.def("stroke_gradient",
+				[](
+					slughorn::canvas::Canvas& c,
+					slug_t width,
+					const slughorn::canvas::Canvas::GradientHandle& handle,
+					slug_t scale,
+					slughorn::Key key,
+					slughorn::Atlas::ShapeInfo::Origin origin
+				) {
+					return c.strokeGradient(width, handle, scale, key, origin);
+				},
+				py::arg("width"), py::arg("handle"),
+				py::arg("scale"), py::arg("key"),
+				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin{},
+				"Expand the current path as a stroke outline with a gradient, registering under key."
 			)
 
 			// CompositeShape management ---------------------------------------
