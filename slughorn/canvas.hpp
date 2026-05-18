@@ -91,10 +91,8 @@ class Path {
 public:
 	struct Sample { slug_t x, y, angle; };
 
-	// TODO: MOVE THIS TO THE END OF THE FILE, and support as many OTHER classes as make sense!
-	friend std::ostream& operator<<(std::ostream& os, const Sample& s) {
-		return os << "Sample{ x=" << s.x << " y=" << s.y << " angle=" << s.angle << " }";
-	}
+	friend std::ostream& operator<<(std::ostream& os, const Sample& s);
+	friend std::ostream& operator<<(std::ostream& os, const Path& p);
 
 	Path(): _decomposer(_activeCurves) {}
 
@@ -694,6 +692,8 @@ private:
 
 class Canvas {
 public:
+	friend std::ostream& operator<<(std::ostream& os, const Canvas& c);
+
 	Canvas(Atlas& atlas, KeyIterator key=KeyIterator()):
 	_atlas(atlas),
 	_key(key) {}
@@ -1217,6 +1217,43 @@ private:
 	Path _path;
 	CompositeShape _composite;
 };
+
+// ================================================================================================
+// Debugging Helpers
+// ================================================================================================
+
+inline std::ostream& operator<<(std::ostream& os, const Path::Sample& s) {
+	return os << "Sample(x=" << s.x << " y=" << s.y << " angle=" << s.angle << ")";
+}
+
+inline std::ostream& operator<<(std::ostream& os, const Path& p) {
+	return os
+		<< "Path(activeCurves=" << p._activeCurves.size()
+		<< " pendingCurves=" << p._pendingCurves.size()
+		<< " pen=(" << p._penX << "," << p._penY << ")"
+		<< " ctm=" << p._ctm
+		<< " ctmStack=" << p._ctmStack.size()
+		<< " lutDirty=" << p._lutDirty
+		<< " totalLength=" << p._totalLength << ")"
+	;
+}
+
+inline std::ostream& operator<<(std::ostream& os, const Canvas::GradientHandle& g) {
+	return os
+		<< "GradientHandle(type=" << g.type
+		<< " p0=(" << g.x0 << "," << g.y0 << ")"
+		<< " p1=(" << g.x1 << "," << g.y1 << ")"
+		<< " stops=" << g.stops.size() << ")"
+	;
+}
+
+inline std::ostream& operator<<(std::ostream& os, const Canvas& c) {
+	return os
+		<< "Canvas(key=" << c._key
+		<< " path=" << c._path
+		<< " composite=" << c._composite << ")"
+	;
+}
 
 }
 }

@@ -1133,6 +1133,32 @@ inline std::ostream& operator<<(std::ostream& os, const GradientStop& s) {
 	return os << "GradientStop(t=" << s.t << " color=" << s.color << ")";
 }
 
+inline std::ostream& operator<<(std::ostream& os, GradientInfo::Type type) {
+	switch(type) {
+		case GradientInfo::Type::Linear: return os << "Linear";
+		case GradientInfo::Type::Radial: return os << "Radial";
+		case GradientInfo::Type::Sweep: return os << "Sweep";
+		case GradientInfo::Type::AffineRadial: return os << "AffineRadial";
+	}
+
+	return os << "GradientInfo::Type(?)";
+}
+
+inline std::ostream& operator<<(std::ostream& os, const GradientInfo& g) {
+	return os
+		<< "GradientInfo(type=" << g.type
+		<< " stops=" << g.stops.size()
+		<< " transform=" << g.transform
+		<< " innerRadius=" << g.innerRadius
+		<< " startAngle=" << g.startAngle
+		<< " endAngle=" << g.endAngle << ")"
+	;
+}
+
+inline std::ostream& operator<<(std::ostream& os, const KeyIterator& k) {
+	return os << "KeyIterator(prefix=\"" << k.prefix << "\" counter=" << k.counter << ")";
+}
+
 inline std::ostream& operator<<(std::ostream& os, const Layer& l) {
 	return os
 		<< "Layer(" << l.key
@@ -1164,6 +1190,33 @@ inline std::ostream& operator<<(std::ostream& os, const Atlas::Curve& c) {
 	;
 }
 
+inline std::ostream& operator<<(std::ostream& os, Atlas::ShapeInfo::Origin::Type type) {
+	switch(type) {
+		case Atlas::ShapeInfo::Origin::Type::Default: return os << "Default";
+		case Atlas::ShapeInfo::Origin::Type::Centered: return os << "Centered";
+		case Atlas::ShapeInfo::Origin::Type::Custom: return os << "Custom";
+	}
+
+	return os << "Origin::Type(?)";
+}
+
+inline std::ostream& operator<<(std::ostream& os, const Atlas::ShapeInfo::Origin& origin) {
+	return os << "Origin(type=" << origin.type << " x=" << origin.x << " y=" << origin.y << ")";
+}
+
+inline std::ostream& operator<<(std::ostream& os, const Atlas::ShapeInfo& info) {
+	return os
+		<< "ShapeInfo(curves=" << info.curves.size()
+		<< " autoMetrics=" << info.autoMetrics
+		<< " bearing=" << info.bearingX << "/" << info.bearingY
+		<< " size=" << info.width << "x" << info.height
+		<< " advance=" << info.advance
+		<< " bands=" << info.numBandsX << "x" << info.numBandsY
+		<< " splits=" << info.splitsX.size() << "/" << info.splitsY.size()
+		<< " origin=" << info.origin << ")"
+	;
+}
+
 inline std::ostream& operator<<(std::ostream& os, const Atlas::PackingStats& p) {
 	return os
 		<< "PackingStats("
@@ -1183,6 +1236,29 @@ inline std::ostream& operator<<(std::ostream& os, const Atlas::PackingStats& p) 
 		<< " RGBA8, " << p.gradientTexelsTotal << " texels)"
 		<< ")"
 	;
+}
+
+inline std::ostream& operator<<(std::ostream& os, Atlas::TextureData::Format format) {
+	switch(format) {
+		case Atlas::TextureData::Format::RGBA32F: return os << "RGBA32F";
+		case Atlas::TextureData::Format::RGBA16UI: return os << "RGBA16UI";
+		case Atlas::TextureData::Format::RGBA8: return os << "RGBA8";
+	}
+
+	return os << "TextureData::Format(?)";
+}
+
+inline std::ostream& operator<<(std::ostream& os, const Atlas::TextureData& t) {
+	return os
+		<< "TextureData(width=" << t.width
+		<< " height=" << t.height
+		<< " format=" << t.format
+		<< " bytes=" << t.bytes.size() << ")"
+	;
+}
+
+inline std::ostream& operator<<(std::ostream& os, const CompositeShape& c) {
+	return os << "CompositeShape(layers=" << c.layers.size() << " advance=" << c.advance << ")";
 }
 
 }

@@ -1,3 +1,5 @@
+//vimrun! pytest -vs ../test/slughorn-test-python.py
+//
 // ================================================================================================
 // slughorn-python.cpp - pybind11 bindings for slughorn
 //
@@ -139,10 +141,10 @@ static py::memoryview curveView2D(const std::vector<slughorn::Atlas::Curve>& cur
 
 // Use the C++ operator<< to build a repr string for any type that has one.
 template<typename T>
-static std::string streamRepr(const T& v) {
+static std::string streamRepr(const T& v, const std::string& prefix="") {
 	std::ostringstream ss;
 
-	ss << v;
+	ss << prefix << "." << v;
 
 	return ss.str();
 }
@@ -531,6 +533,7 @@ static Sampler decodeShape(const slughorn::Atlas& atlas, const slughorn::Key& ke
 	}
 
 	std::vector<uint32_t> globalIndices;
+
 	globalIndices.reserve(64);
 
 	auto decodeBandList = [&](uint32_t headerIndex, std::vector<uint32_t>& offsets, std::vector<uint32_t>& indices) {
@@ -559,10 +562,13 @@ static Sampler decodeShape(const slughorn::Atlas& atlas, const slughorn::Key& ke
 	decodeBandList(numHBands, out.vbandOffsets, out.vbandIndices);
 
 	std::sort(globalIndices.begin(), globalIndices.end());
+
 	globalIndices.erase(std::unique(globalIndices.begin(), globalIndices.end()), globalIndices.end());
 
 	std::unordered_map<uint32_t, uint32_t> remap;
+
 	remap.reserve(globalIndices.size());
+
 	out.curves.reserve(globalIndices.size());
 
 	for(uint32_t globalIndex : globalIndices) {
@@ -617,6 +623,19 @@ struct PyCurveDecomposer {
 	slug_t getTolerance() const { return decomposer.tolerance; }
 	void setTolerance(slug_t tolerance) { decomposer.tolerance = tolerance; }
 	void clear() { curves.clear(); }
+};
+
+// Non-owning Python-facing view over a real slughorn::CurveDecomposer.
+// Used for Path.decomposer() / Canvas.decomposer(), where the underlying
+// C++ object already exists and should be mutated in place.
+struct CurveDecomposerRef {
+	slughorn::CurveDecomposer* decomposer = nullptr;
+
+	slug_t getTolerance() const { return decomposer ? decomposer->tolerance : 0_cv; }
+
+	void setTolerance(slug_t tolerance) {
+		if(decomposer) decomposer->tolerance = tolerance;
+	}
 };
 
 // ================================================================================================
@@ -704,11 +723,7 @@ PYBIND11_MODULE(slughorn, m) {
 		.def_readwrite("prefix", &slughorn::KeyIterator::prefix,
 			"Prefix string, or empty string for numeric mode."
 		)
-		.def("__repr__", [](const slughorn::KeyIterator& ki) {
-			if(ki.prefix.empty()) return "KeyIterator(counter=" + std::to_string(ki.counter) + ")";
-
-			return "KeyIterator(prefix='" + ki.prefix + "', counter=" + std::to_string(ki.counter) + ")";
-		})
+		.def("__repr__", [](const slughorn::KeyIterator& ki) { return streamRepr(ki); })
 	;
 
 	// ============================================================================================
@@ -933,12 +948,7 @@ PYBIND11_MODULE(slughorn, m) {
 			"Horizontal advance in em-space (used for text cursor / layout)."
 		)
 		.def("__len__", [](const slughorn::CompositeShape& g) { return g.layers.size(); })
-		.def("__repr__", [](const slughorn::CompositeShape& g) {
-			return
-				"CompositeShape(" + std::to_string(g.layers.size()) +
-				" layers, advance=" + std::to_string(g.advance) + ")"
-			;
-		})
+		.def("__repr__", [](const slughorn::CompositeShape& g) { return streamRepr(g); })
 	;
 
 	// ============================================================================================
@@ -965,13 +975,7 @@ PYBIND11_MODULE(slughorn, m) {
 		.def("to_tuple", [](const slughorn::Atlas::Curve& c) {
 			return py::make_tuple(c.x1, c.y1, c.x2, c.y2, c.x3, c.y3);
 		}, "Return (x1,y1, x2,y2, x3,y3) as a flat Python tuple.")
-		.def("__repr__", [](const slughorn::Atlas::Curve& c) {
-			return
-				"Curve(start=(" + std::to_string(c.x1) + ", " + std::to_string(c.y1) +
-				") ctrl=(" + std::to_string(c.x2) + ", " + std::to_string(c.y2) +
-				") end=(" + std::to_string(c.x3) + ", " + std::to_string(c.y3) + "))"
-			;
-		})
+		.def("__repr__", [](const slughorn::Atlas::Curve& c) { return streamRepr(c); })
 	;
 
 	// ============================================================================================
@@ -1011,6 +1015,7 @@ PYBIND11_MODULE(slughorn, m) {
 			"Where the transform origin (Layer.transform.dx/dy) is placed relative to the geometry.\n"
 			"Origin() = Default, Origin(Type) = type-only (e.g. Centered), Origin(x, y) = Custom."
 		)
+		.def("__repr__", [](const slughorn::Atlas::ShapeInfo& info) { return streamRepr(info); })
 	;
 
 	auto origin_ = py::class_<slughorn::Atlas::ShapeInfo::Origin>(shapeinfo_, "Origin")
@@ -1031,12 +1036,15 @@ PYBIND11_MODULE(slughorn, m) {
 		.def_readwrite("y", &slughorn::Atlas::ShapeInfo::Origin::y)
 		.def("__eq__", &slughorn::Atlas::ShapeInfo::Origin::operator==)
 		.def("__ne__", &slughorn::Atlas::ShapeInfo::Origin::operator!=)
+		.def("__repr__", [](const slughorn::Atlas::ShapeInfo::Origin& origin) {
+			return streamRepr(origin, "ShapeInfo");
+		})
 	;
 
 	py::enum_<slughorn::Atlas::ShapeInfo::Origin::Type>(origin_, "Type")
-		.value("Default",  slughorn::Atlas::ShapeInfo::Origin::Type::Default)
+		.value("Default", slughorn::Atlas::ShapeInfo::Origin::Type::Default)
 		.value("Centered", slughorn::Atlas::ShapeInfo::Origin::Type::Centered)
-		.value("Custom",   slughorn::Atlas::ShapeInfo::Origin::Type::Custom)
+		.value("Custom", slughorn::Atlas::ShapeInfo::Origin::Type::Custom)
 		.export_values()
 	;
 
@@ -1121,9 +1129,9 @@ PYBIND11_MODULE(slughorn, m) {
 		.def_readonly("height", &slughorn::Atlas::TextureData::height)
 		.def_property_readonly("format", [](const slughorn::Atlas::TextureData& td) -> const char* {
 			switch(td.format) {
-				case slughorn::Atlas::TextureData::Format::RGBA32F:  return "RGBA32F";
+				case slughorn::Atlas::TextureData::Format::RGBA32F: return "RGBA32F";
 				case slughorn::Atlas::TextureData::Format::RGBA16UI: return "RGBA16UI";
-				case slughorn::Atlas::TextureData::Format::RGBA8:    return "RGBA8";
+				case slughorn::Atlas::TextureData::Format::RGBA8: return "RGBA8";
 			}
 			return "unknown";
 		}, "String: 'RGBA32F' (curve texture), 'RGBA16UI' (band texture), or 'RGBA8' (gradient texture).")
@@ -1132,20 +1140,7 @@ PYBIND11_MODULE(slughorn, m) {
 		}, "Zero-copy memoryview of the raw pixel data (row-major). "
 			"Keep the Atlas alive for the duration of any view."
 		)
-		.def("__repr__", [](const slughorn::Atlas::TextureData& td) {
-			const char* fmt;
-			switch(td.format) {
-				case slughorn::Atlas::TextureData::Format::RGBA32F: fmt = "RGBA32F"; break;
-				case slughorn::Atlas::TextureData::Format::RGBA16UI: fmt = "RGBA16UI"; break;
-				case slughorn::Atlas::TextureData::Format::RGBA8: fmt = "RGBA8"; break;
-				default: fmt = "unknown"; break;
-			}
-
-			return "TextureData(" + std::to_string(td.width) + "x" +
-				std::to_string(td.height) + " " + fmt + " " +
-				std::to_string(td.bytes.size()) + " bytes)"
-			;
-		})
+		.def("__repr__", [](const slughorn::Atlas::TextureData& td) { return streamRepr(td); })
 	;
 
 	// ============================================================================================
@@ -1391,6 +1386,15 @@ PYBIND11_MODULE(slughorn, m) {
 		}, "Number of curves accumulated so far.")
 	;
 
+	py::class_<CurveDecomposerRef>(m, "_CurveDecomposerRef",
+		"Non-owning view over an internal CurveDecomposer.\n\n"
+		"Returned by canvas.Path.decomposer() and canvas.Canvas.decomposer() to expose\n"
+		"the underlying tolerance control without copying the decomposer state.")
+		.def_property("tolerance", &CurveDecomposerRef::getTolerance, &CurveDecomposerRef::setTolerance,
+			"Flatness threshold for cubic decomposition in curve-space units."
+		)
+	;
+
 	// =========================================================================
 	// slughorn.render submodule
 	// =========================================================================
@@ -1535,22 +1539,17 @@ PYBIND11_MODULE(slughorn, m) {
 				"List of GradientStop objects."
 			)
 			.def("__repr__", [](const slughorn::canvas::Canvas::GradientHandle& h) {
-				std::ostringstream ss;
-				ss << "GradientHandle("
-					<< h.x0 << "," << h.y0 << " -> "
-					<< h.x1 << "," << h.y1
-					<< " stops=" << h.stops.size() << ")";
-				return ss.str();
+				return streamRepr(h, "Canvas");
 			})
 		;
 
 		// Path class ----------------------------------------------------------
 
 		{
-			using SlugPath = slughorn::canvas::Path;
+			using Path = slughorn::canvas::Path;
 			using PathSample = slughorn::canvas::Path::Sample;
 
-			auto pyPath = py::class_<SlugPath>(canvas, "Path",
+			auto path = py::class_<Path>(canvas, "Path",
 				"Standalone geometry primitive (analogous to HTML Canvas Path2D).\n\n"
 				"Build geometry with move_to/line_to/bezier_to/etc, then pass the Path\n"
 				"to canvas.fill(path, color) or canvas.stroke(path, width, color).\n"
@@ -1558,76 +1557,71 @@ PYBIND11_MODULE(slughorn, m) {
 				"A Path can also be used standalone for arc-length sampling:\n"
 				"    p = slughorn.canvas.Path()\n"
 				"    p.move_to(0, 0); p.line_to(1, 0)\n"
-				"    s = p.sample(0.5)  # Path.Sample at midpoint"
+				"    s = p.sample(0.5) # Path.Sample at midpoint"
 			);
 
-			py::class_<PathSample>(pyPath, "Sample",
+			py::class_<PathSample>(path, "Sample",
 				"Position and tangent direction at a normalized arc-length parameter t.\n"
 				"Returned by Path.sample(t). Fields are read-only."
 			)
 				.def_readonly("x", &PathSample::x, "X coordinate.")
 				.def_readonly("y", &PathSample::y, "Y coordinate.")
 				.def_readonly("angle", &PathSample::angle, "Tangent angle in radians.")
-				.def("__repr__", [](const PathSample& s) {
-					std::ostringstream ss;
-					ss << "Path.Sample(x=" << s.x << ", y=" << s.y
-					   << ", angle=" << s.angle << ")";
-					return ss.str();
-				})
+				.def("__repr__", [](const PathSample& s) { return streamRepr(s, "Path"); })
 			;
 
-			pyPath
+			path
 				.def(py::init<>(), "Create an empty path with identity transform.")
 
 				// Path management
-				.def("clear", &SlugPath::clear,
+				.def("clear", &Path::clear,
 					"Reset all geometry state. The CTM (transform) is NOT cleared,\n"
 					"matching HTML Canvas beginPath() semantics.")
-				.def("add_path", &SlugPath::addPath, py::arg("other"),
+				.def("add_path", &Path::addPath, py::arg("other"),
 					"Append all curves from other into this path's accumulator.\n"
 					"Does not affect other.")
 
 				// Transform stack
-				.def("save", &SlugPath::save, "Push the current transform onto the stack.")
-				.def("restore", &SlugPath::restore, "Pop the transform stack.")
-				.def("reset_transform", &SlugPath::resetTransform, "Set CTM to identity.")
-				.def("set_transform", &SlugPath::setTransform, py::arg("m"),
+				.def("save", &Path::save, "Push the current transform onto the stack.")
+				.def("restore", &Path::restore, "Pop the transform stack.")
+				.def("reset_transform", &Path::resetTransform, "Set CTM to identity.")
+				.def("set_transform", &Path::setTransform, py::arg("m"),
 					"Replace CTM with matrix m.")
-				.def("transform", py::overload_cast<const slughorn::Matrix&>(&SlugPath::transform),
+				.def("transform", py::overload_cast<const slughorn::Matrix&>(&Path::transform),
 					py::arg("m"), "Post-multiply CTM by m.")
-				.def("translate", &SlugPath::translate, py::arg("tx"), py::arg("ty"))
-				.def("rotate", &SlugPath::rotate, py::arg("angle"), "Angle in radians.")
-				.def("scale", &SlugPath::scale, py::arg("sx"), py::arg("sy"))
+				.def("translate", &Path::translate, py::arg("tx"), py::arg("ty"))
+				.def("rotate", &Path::rotate, py::arg("angle"), "Angle in radians.")
+				.def("scale", &Path::scale, py::arg("sx"), py::arg("sy"))
 
 				// Path commands
-				.def("move_to", &SlugPath::moveTo, py::arg("x"), py::arg("y"))
-				.def("line_to", &SlugPath::lineTo, py::arg("x"), py::arg("y"))
-				.def("quad_to", &SlugPath::quadTo,
+				.def("move_to", &Path::moveTo, py::arg("x"), py::arg("y"))
+				.def("line_to", &Path::lineTo, py::arg("x"), py::arg("y"))
+				.def("quad_to", &Path::quadTo,
 					py::arg("cx"), py::arg("cy"), py::arg("x"), py::arg("y"))
-				.def("bezier_to", &SlugPath::bezierTo,
+				.def("bezier_to", &Path::bezierTo,
 					py::arg("c1x"), py::arg("c1y"), py::arg("c2x"), py::arg("c2y"),
 					py::arg("x"), py::arg("y"))
-				.def("close_path", &SlugPath::closePath)
+				.def("close_path", &Path::closePath)
 
 				// Shape helpers
-				.def("rect", &SlugPath::rect,
+				.def("rect", &Path::rect,
 					py::arg("x"), py::arg("y"), py::arg("w"), py::arg("h"))
-				.def("rounded_rect", &SlugPath::roundedRect,
+				.def("rounded_rect", &Path::roundedRect,
 					py::arg("x"), py::arg("y"), py::arg("w"), py::arg("h"), py::arg("r"))
-				.def("circle", &SlugPath::circle, py::arg("cx"), py::arg("cy"), py::arg("r"))
-				.def("ellipse", &SlugPath::ellipse,
+				.def("circle", &Path::circle, py::arg("cx"), py::arg("cy"), py::arg("r"))
+				.def("ellipse", &Path::ellipse,
 					py::arg("cx"), py::arg("cy"), py::arg("rx"), py::arg("ry"))
-				.def("arc", &SlugPath::arc,
+				.def("arc", &Path::arc,
 					py::arg("cx"), py::arg("cy"), py::arg("r"),
 					py::arg("start_angle"), py::arg("end_angle"), py::arg("ccw") = false,
 					"Circular arc. Does NOT call clear(); appends to the current path.\n"
 					"Angles in radians from +X axis, Y-up convention.")
-				.def("arc_to", &SlugPath::arcTo,
+				.def("arc_to", &Path::arcTo,
 					py::arg("x1"), py::arg("y1"), py::arg("x2"), py::arg("y2"), py::arg("r"),
 					"Tangential arc. Matches HTML Canvas arcTo().")
 
 				// Stroke expansion
-				.def("stroke_path", &SlugPath::strokePath,
+				.def("stroke_path", &Path::strokePath,
 					py::arg("width"), py::arg("cw") = false,
 					"Expand from centerline to constant-width stroke outline in place.\n"
 					"cw=True reverses the winding (CW, for punch-out effects with nonzero rule).\n"
@@ -1635,18 +1629,20 @@ PYBIND11_MODULE(slughorn, m) {
 
 				// Decomposer
 				.def("decomposer",
-					py::overload_cast<>(&SlugPath::decomposer),
-					py::return_value_policy::reference_internal,
+					[](Path& p) {
+						return CurveDecomposerRef{&p.decomposer()};
+					},
 					"Access the internal CurveDecomposer to tune tolerance.")
 
 				// Accessors
-				.def_property_readonly("has_pending_path", &SlugPath::hasPendingPath,
+				.def_property_readonly("has_pending_path", &Path::hasPendingPath,
 					"True if the path has any accumulated curves.")
-				.def("arc_length", &SlugPath::arcLength,
+				.def("arc_length", &Path::arcLength,
 					"Total arc length of the path. Triggers LUT rebuild if geometry changed.")
-				.def("sample", &SlugPath::sample, py::arg("t"),
+				.def("sample", &Path::sample, py::arg("t"),
 					"Sample position and tangent at normalized arc-length t in [0,1].\n"
 					"Returns a Path.Sample(x, y, angle).")
+				.def("__repr__", [](const Path& p) { return streamRepr(p); })
 			;
 		}
 
@@ -1660,8 +1656,10 @@ PYBIND11_MODULE(slughorn, m) {
 
 			// CurveDecomposer / path snapshot ---------------------------------
 
-			.def("decomposer", py::overload_cast<>(&slughorn::canvas::Canvas::decomposer),
-				py::return_value_policy::reference_internal,
+			.def("decomposer",
+				[](slughorn::canvas::Canvas& c) {
+					return CurveDecomposerRef{&c.decomposer()};
+				},
 				"Access the internal CurveDecomposer to tune tolerance etc."
 			)
 			.def("path", &slughorn::canvas::Canvas::path,
@@ -1723,7 +1721,7 @@ PYBIND11_MODULE(slughorn, m) {
 				"Tangential arc from current point. Matches HTML Canvas arcTo()."
 			)
 
-			// Commit — implicit path ------------------------------------------
+			// Commit / implicit path ------------------------------------------
 
 			// fill() - auto-key
 			.def("fill",
@@ -1770,7 +1768,7 @@ PYBIND11_MODULE(slughorn, m) {
 				"Register the current path as a named Shape (geometry only, no Layer).\n"
 				"Returns False if the path was empty."
 			)
-			// stroke_path() — in-place expand, then commit separately
+			// stroke_path() / in-place expand, then commit separately
 			.def("stroke_path",
 				[](slughorn::canvas::Canvas& c, slug_t width, bool cw) {
 					return c.strokePath(width, cw);
@@ -1812,7 +1810,7 @@ PYBIND11_MODULE(slughorn, m) {
 				"Expand the current path as a stroke outline, registering under key."
 			)
 
-			// Commit — explicit Path ------------------------------------------
+			// Commit / explicit Path ------------------------------------------
 
 			// fill(path, color, ...) - auto-key
 			.def("fill",
@@ -1908,7 +1906,7 @@ PYBIND11_MODULE(slughorn, m) {
 				"Gradient-fill a standalone Path. path is not consumed."
 			)
 
-			// Gradient fills — implicit path ----------------------------------
+			// Gradient fills / implicit path ----------------------------------
 
 			.def("create_linear_gradient",
 				[](
@@ -2048,6 +2046,7 @@ PYBIND11_MODULE(slughorn, m) {
 			.def_property_readonly("has_pending_path", &slughorn::canvas::Canvas::hasPendingPath,
 				"True if the pending path has any curves."
 			)
+			.def("__repr__", [](const slughorn::canvas::Canvas& c) { return streamRepr(c); })
 		;
 	}
 
