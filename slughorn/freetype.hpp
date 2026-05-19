@@ -34,6 +34,7 @@
 #include <vector>
 #include <cstdint>
 #include <iostream>
+#include <optional>
 #include <utility>
 
 // FreeType headers are needed wherever you pass FT_Face / FT_Color* directly.
@@ -42,6 +43,7 @@
 #include FT_FREETYPE_H
 #include FT_OUTLINE_H
 #include FT_COLOR_H
+#include FT_TRUETYPE_TABLES_H
 
 namespace slughorn {
 namespace freetype {
@@ -59,6 +61,44 @@ using LogCallback = std::function<void(int level, const std::string& msg)>;
 // Set the log callback used by all ft2 functions in this translation unit. Thread-safety: set once
 // before any calls; not synchronized.
 void setLogCallback(LogCallback cb);
+
+// =============================================================================
+// Font metrics
+// =============================================================================
+
+// Dimensionless em-space ratios for a typeface. All ratio fields are in [0, 1] and are fractions of
+// the em-square. Multiply by fontSize (em-size in world units) to get world-space distances at any
+// render size.
+//
+// DPI is deliberately absent; slughorn is display-agnostic.
+struct FontMetrics {
+	// raw em units (e.g. 1000 or 2048); not a ratio
+	slug_t unitsPerEM = 0_cv;
+
+	// OS/2 sCapHeight / unitsPerEM (~0.72 for Latin)
+	slug_t capHeightRatio = 0_cv;
+
+	// OS/2 sxHeight / unitsPerEM (~0.53)
+	slug_t xHeightRatio = 0_cv;
+
+	// ascender / unitsPerEM (~0.80)
+	slug_t ascenderRatio = 0_cv;
+
+	// |descender| / unitsPerEM (~0.20)
+	slug_t descenderRatio = 0_cv;
+
+	// recommended line gap / unitsPerEM (0 if none)
+	// lineHeight = fontSize * (1 + lineGapRatio)
+	slug_t lineGapRatio = 0_cv;
+};
+
+// Read metrics from an already-open FT_Face. Safe to call immediately after
+// FT_New_Face / FT_Open_Face, before any glyph is loaded.
+FontMetrics readFontMetrics(FT_Face face);
+
+// Open the font at fontPath, read its metrics, and close it. Returns nullopt
+// if the font cannot be opened.
+std::optional<FontMetrics> loadFontMetrics(const std::string& fontPath);
 
 // =============================================================================
 // Core decomposition
@@ -344,6 +384,17 @@ static size_t countCharmap(FT_Face face, F&& fn) {
 	}
 
 	return count;
+}
+
+// Returns glyph height / unitsPerEM for codepoint, or 0 if not found.
+// Used as fallback when OS/2 sCapHeight / sxHeight fields are absent.
+static slug_t measureGlyphHeight(FT_Face face, uint32_t codepoint) {
+	const FT_UInt gi = FT_Get_Char_Index(face, codepoint);
+
+	if(!gi) return 0_cv;
+	if(FT_Load_Glyph(face, gi, FT_LOAD_NO_SCALE)) return 0_cv;
+
+	return cv(face->glyph->metrics.height) / cv(face->units_per_EM);
 }
 
 static FT_Color* selectPalette(FT_Face face) {
@@ -993,6 +1044,51 @@ static void processColorGlyphV1(
 // =============================================================================
 // Public API implementation
 // =============================================================================
+
+FontMetrics readFontMetrics(FT_Face face) {
+	FontMetrics m;
+
+	m.unitsPerEM = cv(face->units_per_EM);
+
+	const slug_t upm = m.unitsPerEM;
+
+	m.ascenderRatio = cv(face->ascender) / upm;
+	m.descenderRatio = cv(std::abs(static_cast<long>(face->descender))) / upm;
+
+	// face->height is the recommended line height; subtract the natural cap to get gap.
+	const long lineGapRaw =
+		static_cast<long>(face->height) -
+		static_cast<long>(face->ascender) +
+		static_cast<long>(face->descender) // descender is negative
+	;
+
+	m.lineGapRatio = lineGapRaw > 0 ? cv(lineGapRaw) / upm : 0_cv;
+
+	TT_OS2* os2 = static_cast<TT_OS2*>(FT_Get_Sfnt_Table(face, FT_SFNT_OS2));
+
+	m.capHeightRatio = (os2 && os2->sCapHeight > 0)
+		? cv(os2->sCapHeight) / upm
+		: detail::measureGlyphHeight(face, 'H')
+	;
+
+	m.xHeightRatio = (os2 && os2->sxHeight > 0)
+		? cv(os2->sxHeight) / upm
+		: detail::measureGlyphHeight(face, 'x')
+	;
+
+	return m;
+}
+
+std::optional<FontMetrics> loadFontMetrics(const std::string& fontPath) {
+	return detail::withFace(
+		fontPath,
+		"loadFontMetrics",
+		std::optional<FontMetrics>{},
+		[](FT_Face face) -> std::optional<FontMetrics> {
+			return readFontMetrics(face);
+		}
+	);
+}
 
 bool decomposeGlyph(
 	FT_Face face,
