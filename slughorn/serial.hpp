@@ -234,8 +234,8 @@ json keyToJson(const Key& k) {
 Key keyFromJson(const json& j) {
 	const std::string type = j.at("type");
 
-	if(type == "codepoint") return Key::fromCodepoint(j.at("value").get<uint32_t>());
-	if(type == "name") return Key::fromString(j.at("value").get<std::string>());
+	if(type == "codepoint") return Key(j.at("value").get<uint32_t>());
+	if(type == "name") return Key(j.at("value").get<std::string>());
 
 	throw std::runtime_error("slughorn-serial: unknown key type '" + type + "'");
 }

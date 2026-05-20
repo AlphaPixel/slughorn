@@ -733,6 +733,7 @@ public:
 	// -------------------------------------------------------------------------
 
 	void beginPath() { _path.clear(); }
+	void addPath(const Path& other) { _path.addPath(other); }
 	void moveTo(slug_t x, slug_t y) { _path.moveTo(x, y); }
 	void lineTo(slug_t x, slug_t y) { _path.lineTo(x, y); }
 	void quadTo(slug_t cx, slug_t cy, slug_t x, slug_t y) { _path.quadTo(cx, cy, x, y); }

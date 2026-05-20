@@ -670,14 +670,6 @@ PYBIND11_MODULE(slughorn, m) {
 			"Construct a named key from a string (e.g. Key('logo'))."
 		)
 
-		// Static factories
-		.def_static("from_codepoint", &slughorn::Key::fromCodepoint, py::arg("codepoint"),
-			"Construct a Codepoint key. Equivalent to Key(codepoint)."
-		)
-		.def_static("from_string", &slughorn::Key::fromString, py::arg("name"),
-			"Construct a named key (e.g. Key.from_string('logo'))."
-		)
-
 		// Accessors
 		.def_property_readonly("type", &slughorn::Key::type,
 			"KeyType.Codepoint or KeyType.Name."
@@ -1683,6 +1675,9 @@ PYBIND11_MODULE(slughorn, m) {
 
 			.def("begin_path", &slughorn::canvas::Canvas::beginPath,
 				"Discard any accumulated path state and start fresh."
+			)
+			.def("add_path", &slughorn::canvas::Canvas::addPath, py::arg("other"),
+				"Append all curves from an explicit Path into the canvas's internal path."
 			)
 			.def("move_to", &slughorn::canvas::Canvas::moveTo, py::arg("x"), py::arg("y"))
 			.def("line_to", &slughorn::canvas::Canvas::lineTo, py::arg("x"), py::arg("y"))

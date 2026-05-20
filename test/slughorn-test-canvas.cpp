@@ -100,7 +100,7 @@ int main(int argc, char** argv) {
 	canvas.closePath();
 	canvas.fill(RED);
 
-	// canvas.finalize(Key::fromString("tri_composite"));
+	// canvas.finalize(Key("tri_composite"));
 	canvas.finalize("tri_composite");
 
 	// ============================================================================================
@@ -112,9 +112,9 @@ int main(int argc, char** argv) {
 	// ============================================================================================
 
 	canvas.circle(0.5_cv, 0.5_cv, 0.4_cv);
-	canvas.fill(BLUE, 1.0_cv, Key::fromString("circle_shape"));
+	canvas.fill(BLUE, 1.0_cv, Key("circle_shape"));
 
-	canvas.finalize(Key::fromString("circle_composite"));
+	canvas.finalize(Key("circle_composite"));
 
 	// ============================================================================================
 	// Pattern 3: Multi-layer composite with auto-key shapes.
@@ -133,7 +133,7 @@ int main(int argc, char** argv) {
 	canvas.roundedRect(0.25_cv, 0.25_cv, 0.5_cv, 0.5_cv, 0.08_cv);
 	canvas.fill(GREEN); // "s_4"
 
-	canvas.finalize(Key::fromString("three_layer"));
+	canvas.finalize(Key("three_layer"));
 
 	// ============================================================================================
 	// Pattern 4: Multi-layer composite with named shapes.
@@ -144,12 +144,12 @@ int main(int argc, char** argv) {
 	// ============================================================================================
 
 	canvas.ellipse(0.5_cv, 0.5_cv, 0.45_cv, 0.28_cv);
-	canvas.fill(CYAN, 1.0_cv, Key::fromString("badge_bg"));
+	canvas.fill(CYAN, 1.0_cv, Key("badge_bg"));
 
 	canvas.roundedRect(0.15_cv, 0.35_cv, 0.7_cv, 0.3_cv, 0.12_cv);
-	canvas.fill(GOLD, 1.0_cv, Key::fromString("badge_bar"));
+	canvas.fill(GOLD, 1.0_cv, Key("badge_bar"));
 
-	canvas.finalize(Key::fromString("badge_composite"));
+	canvas.finalize(Key("badge_composite"));
 
 	// ============================================================================================
 	// Pattern 5: defineShape(key) geometry only, no color, no Layer.
@@ -163,7 +163,7 @@ int main(int argc, char** argv) {
 	// ============================================================================================
 
 	canvas.roundedRect(0.1_cv, 0.1_cv, 0.8_cv, 0.8_cv, 0.15_cv);
-	canvas.defineShape(Key::fromString("rrect_geom"));
+	canvas.defineShape(Key("rrect_geom"));
 
 	// ============================================================================================
 	// Pattern 6: stroke(width, color) stroke as commit verb, auto-key.
@@ -179,7 +179,7 @@ int main(int argc, char** argv) {
 	canvas.quadTo(0.75_cv, 0.95_cv, 0.9_cv, 0.5_cv);
 	canvas.stroke(0.06_cv, WHITE); // auto-key "s_5"
 
-	canvas.finalize(Key::fromString("scurve_stroke_composite"));
+	canvas.finalize(Key("scurve_stroke_composite"));
 
 	// ============================================================================================
 	// Pattern 7: stroke(width, color, scale, key) named stroke commit.
@@ -201,7 +201,7 @@ int main(int argc, char** argv) {
 	canvas.lineTo(0.8_cv, 0.0_cv);
 	canvas.lineTo(0.9_cv, 0.5_cv);
 	canvas.lineTo(1.0_cv, 0.0_cv);
-	canvas.stroke(0.04_cv, CYAN, 1.0_cv, Key::fromString("zigzag_stroke"));
+	canvas.stroke(0.04_cv, CYAN, 1.0_cv, Key("zigzag_stroke"));
 	// stroke() with an explicit key registers the shape AND queues a Layer in the
 	// composite accumulator, just like fill(). If you only want the named shape
 	// and not the composite wrapper, clear the accumulator explicitly.
@@ -220,7 +220,7 @@ int main(int argc, char** argv) {
 	canvas.quadTo(0.1_cv, 0.5_cv, 0.5_cv, 0.5_cv);
 	canvas.quadTo(0.9_cv, 0.5_cv, 0.8_cv, 0.15_cv);
 	canvas.strokePath(0.08_cv);
-	canvas.defineShape(Key::fromString("scurve_outline_geom"));
+	canvas.defineShape(Key("scurve_outline_geom"));
 
 	// ============================================================================================
 	// Pattern 9: arcTo() rounded corners, stadium shape.
@@ -237,9 +237,9 @@ int main(int argc, char** argv) {
 	canvas.arcTo(0.2_cv, 0.7_cv, 0.2_cv, 0.3_cv, 0.1_cv);
 	canvas.arcTo(0.2_cv, 0.3_cv, 0.8_cv, 0.3_cv, 0.1_cv);
 	canvas.closePath();
-	canvas.fill(GREEN, 1.0_cv, Key::fromString("stadium_arcto"));
+	canvas.fill(GREEN, 1.0_cv, Key("stadium_arcto"));
 
-	canvas.finalize(Key::fromString("stadium_composite"));
+	canvas.finalize(Key("stadium_composite"));
 
 	canvas.beginPath();
 	canvas.moveTo(0_cv, 0_cv);
@@ -254,7 +254,7 @@ int main(int argc, char** argv) {
 	canvas.lineTo(45_cv, 0_cv);
 	canvas.lineTo(50_cv, 0_cv);
 	canvas.strokePath(2_cv);
-	canvas.defineShape(slughorn::Key::fromString("stroke_test"), 1_cv / 50_cv);
+	canvas.defineShape(slughorn::Key("stroke_test"), 1_cv / 50_cv);
 
 	// ============================================================================================
 	// Pattern 10: Linear gradient fill.
@@ -278,9 +278,9 @@ int main(int argc, char** argv) {
 
 		canvas.beginPath();
 		canvas.rect(0.1_cv, 0.1_cv, 0.8_cv, 0.8_cv);
-		canvas.fillGradient(grad, 1_cv, Key::fromString("grad_rect_shape"));
+		canvas.fillGradient(grad, 1_cv, Key("grad_rect_shape"));
 
-		canvas.finalize(Key::fromString("grad_rect_composite"));
+		canvas.finalize(Key("grad_rect_composite"));
 	}
 
 	// Diagonal yellow -> transparent gradient over a triangle.
@@ -298,9 +298,9 @@ int main(int argc, char** argv) {
 		canvas.lineTo(0.1_cv, 0.1_cv);
 		canvas.lineTo(0.9_cv, 0.1_cv);
 		canvas.closePath();
-		canvas.fillGradient(grad, 1_cv, Key::fromString("grad_tri_shape"));
+		canvas.fillGradient(grad, 1_cv, Key("grad_tri_shape"));
 
-		canvas.finalize(Key::fromString("grad_tri_composite"));
+		canvas.finalize(Key("grad_tri_composite"));
 	}
 
 	// ============================================================================================
@@ -324,9 +324,9 @@ int main(int argc, char** argv) {
 		);
 
 		canvas.circle(0.5_cv, 0.5_cv, 0.45_cv);
-		canvas.fillGradient(grad, 1_cv, Key::fromString("grad_radial_circle_shape"));
+		canvas.fillGradient(grad, 1_cv, Key("grad_radial_circle_shape"));
 
-		canvas.finalize(Key::fromString("grad_radial_circle_composite"));
+		canvas.finalize(Key("grad_radial_circle_composite"));
 	}
 
 	// Annular radial: green ring (inner radius 0.2, outer 0.45) over a circle.
@@ -342,9 +342,9 @@ int main(int argc, char** argv) {
 		);
 
 		canvas.circle(0.5_cv, 0.5_cv, 0.45_cv);
-		canvas.fillGradient(grad, 1_cv, Key::fromString("grad_radial_ring_shape"));
+		canvas.fillGradient(grad, 1_cv, Key("grad_radial_ring_shape"));
 
-		canvas.finalize(Key::fromString("grad_radial_ring_composite"));
+		canvas.finalize(Key("grad_radial_ring_composite"));
 	}
 
 	// ============================================================================================
@@ -374,9 +374,9 @@ int main(int argc, char** argv) {
 		);
 
 		canvas.circle(0.5_cv, 0.5_cv, 0.45_cv);
-		canvas.fillGradient(grad, 1_cv, Key::fromString("grad_sweep_wheel_shape"));
+		canvas.fillGradient(grad, 1_cv, Key("grad_sweep_wheel_shape"));
 
-		canvas.finalize(Key::fromString("grad_sweep_wheel_composite"));
+		canvas.finalize(Key("grad_sweep_wheel_composite"));
 	}
 
 	// 270-degree progress gauge: green (start) -> yellow (mid) -> red (end).
@@ -396,9 +396,9 @@ int main(int argc, char** argv) {
 		);
 
 		canvas.circle(0.5_cv, 0.5_cv, 0.45_cv);
-		canvas.fillGradient(grad, 1_cv, Key::fromString("grad_sweep_gauge_shape"));
+		canvas.fillGradient(grad, 1_cv, Key("grad_sweep_gauge_shape"));
 
-		canvas.finalize(Key::fromString("grad_sweep_gauge_composite"));
+		canvas.finalize(Key("grad_sweep_gauge_composite"));
 	}
 
 	// ============================================================================================
@@ -425,12 +425,14 @@ int main(int argc, char** argv) {
 		const Color FACE_COLOR = {0.95_cv, 0.92_cv, 0.82_cv, 1_cv}; // parchment
 		const Color TICK_COLOR = {0.15_cv, 0.15_cv, 0.15_cv, 1_cv}; // near-black
 
+		using Origin = slughorn::Atlas::ShapeInfo::Origin;
+
 		// -- Clock face: filled circle (one Shape, one Layer) --------------------------------
 
 		canvas.circle(CX, CY, FACE_R);
-		canvas.fill(FACE_COLOR, 1_cv, Key::fromString("clock_face_shape"));
+		canvas.fill(FACE_COLOR, 1_cv, Key("clock_face_shape"), Origin(Origin::Type::Centered));
 
-		canvas.finalize(Key::fromString("clock_face_composite"));
+		canvas.finalize(Key("clock_face_composite"));
 
 		// -- Tick marks: 12 stroked lines, all baked into ONE Shape -------------------------
 		//
@@ -452,9 +454,9 @@ int main(int argc, char** argv) {
 			canvas.restore();
 		}
 
-		canvas.fill(TICK_COLOR, 1_cv, Key::fromString("clock_ticks_shape"));
+		canvas.fill(TICK_COLOR, 1_cv, Key("clock_ticks_shape"), Origin(Origin::Type::Centered));
 
-		canvas.finalize(Key::fromString("clock_ticks_composite"));
+		canvas.finalize(Key("clock_ticks_composite"));
 	}
 
 	// ============================================================================================
@@ -502,7 +504,7 @@ int main(int argc, char** argv) {
 			;
 		}
 
-		atlas.addCompositeShape(Key::fromString("clock_hand_composite"), hand);
+		atlas.addCompositeShape(Key("clock_hand_composite"), hand);
 	}
 
 	// ============================================================================================
@@ -524,14 +526,14 @@ int main(int argc, char** argv) {
 		const Color PURPLE = {0.6_cv, 0_cv, 0.8_cv, 1_cv};
 
 		canvas.rect(0.1_cv, 0.15_cv, 0.8_cv, 0.7_cv);
-		canvas.fill(PURPLE, 1_cv, Key::fromString("pivot_centered_shape"), Origin(Origin::Type::Centered));
+		canvas.fill(PURPLE, 1_cv, Key("pivot_centered_shape"), Origin(Origin::Type::Centered));
 
-		canvas.finalize(Key::fromString("pivot_centered_composite"));
+		canvas.finalize(Key("pivot_centered_composite"));
 
 		canvas.rect(0.1_cv, 0.15_cv, 0.8_cv, 0.7_cv);
-		canvas.fill(PURPLE, 1_cv, Key::fromString("pivot_custom_shape"), Origin(0.2_cv, 0.72_cv));
+		canvas.fill(PURPLE, 1_cv, Key("pivot_custom_shape"), Origin(0.2_cv, 0.72_cv));
 
-		canvas.finalize(Key::fromString("pivot_custom_composite"));
+		canvas.finalize(Key("pivot_custom_composite"));
 	}
 
 	// ============================================================================================
@@ -560,7 +562,7 @@ int main(int argc, char** argv) {
 
 		// Commit via explicit-path overload - p is unchanged after this call.
 		canvas.stroke(p, 0.06_cv, WHITE);
-		canvas.finalize(Key::fromString("sample_path"));
+		canvas.finalize(Key("sample_path"));
 
 		// Verify: canvas.path() still returns the implicit path (unaffected by p).
 		std::cerr

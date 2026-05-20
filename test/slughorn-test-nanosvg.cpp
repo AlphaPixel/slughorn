@@ -469,7 +469,7 @@ void dumpSVGFile(const std::string& path) {
 	uint32_t baseKey = 0;
 	auto composite = slughorn::nanosvg::loadFile(path, atlas, baseKey);
 
-	atlas.addCompositeShape(slughorn::Key::fromString("composite"), composite);
+	atlas.addCompositeShape(slughorn::Key("composite"), composite);
 
 	atlas.build();
 
