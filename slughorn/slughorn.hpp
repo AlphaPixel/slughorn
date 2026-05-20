@@ -188,10 +188,9 @@ class Atlas;
 //
 // Discriminated union identifying a shape or composite shape in the Atlas. Two flavors:
 //
-// Key::fromCodepoint(cp) - a Unicode codepoint (or any uint32_t ID). Implicitly constructible from
-// uint32_t for backwards compatibility with existing call sites.
-//
-// Key::fromString(name) - a named shape / composite ("logo", "axolotl", ...)
+// Key(uint32_t cp)         - a Unicode codepoint (or any uint32_t ID).
+// Key(const std::string&)  - a named shape / composite ("logo", "axolotl", ...)
+// Key(const char*)         - string-literal convenience overload.
 //
 // The hash is computed once at construction and stored; KeyHash just returns it. operator== uses
 // the hash as a fast pre-check, then falls back to value comparison. The two namespaces are kept
@@ -204,22 +203,9 @@ struct Key {
 	// With this in the public section:
 	Key(): _type(Type::Codepoint), _codepoint(0), _hash(_hashCp(0)) {}
 
-	// TODO: Do these make the static helpers below unnecessary?!
 	Key(uint32_t cp): _type(Type::Codepoint), _codepoint(cp), _hash(_hashCp(cp)) {}
 	Key(const std::string& name): _type(Type::Name), _name(name), _hash(_hashStr(name)) {}
 	Key(const char* name): _type(Type::Name), _name(name), _hash(_hashStr(name)) {}
-
-	static Key fromCodepoint(uint32_t cp) { return Key(cp); }
-
-	static Key fromString(std::string name) {
-		Key k;
-
-		k._type = Type::Name;
-		k._name = std::move(name);
-		k._hash = _hashStr(k._name);
-
-		return k;
-	}
 
 	// Accessors
 
@@ -281,9 +267,9 @@ struct KeyIterator {
 	KeyIterator(std::string _prefix): prefix(std::move(_prefix)) {}
 
 	Key next() {
-		if(prefix.empty()) return Key::fromCodepoint(counter++);
+		if(prefix.empty()) return Key(counter++);
 
-		return Key::fromString(prefix + "_" + std::to_string(counter++));
+		return Key(prefix + "_" + std::to_string(counter++));
 	}
 
 	std::string prefix;
