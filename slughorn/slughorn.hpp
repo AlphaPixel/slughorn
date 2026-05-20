@@ -559,6 +559,46 @@ public:
 	};
 
 	// --------------------------------------------------------------------------------------------
+	// Split position constants
+	//
+	// The indirection table has INDIRECTION_SIZE (32) slots per axis. Valid interior split
+	// positions are multiples of 1/32; any other value is snapped to the nearest slot edge.
+	// SPLIT_01 through SPLIT_31 name every meaningful position. 0.0 and 1.0 are the implicit
+	// band boundaries and must not be passed as splits.
+	// --------------------------------------------------------------------------------------------
+	static constexpr slug_t SPLIT_01 = 0.03125_cv;
+	static constexpr slug_t SPLIT_02 = 0.06250_cv;
+	static constexpr slug_t SPLIT_03 = 0.09375_cv;
+	static constexpr slug_t SPLIT_04 = 0.12500_cv;
+	static constexpr slug_t SPLIT_05 = 0.15625_cv;
+	static constexpr slug_t SPLIT_06 = 0.18750_cv;
+	static constexpr slug_t SPLIT_07 = 0.21875_cv;
+	static constexpr slug_t SPLIT_08 = 0.25000_cv;
+	static constexpr slug_t SPLIT_09 = 0.28125_cv;
+	static constexpr slug_t SPLIT_10 = 0.31250_cv;
+	static constexpr slug_t SPLIT_11 = 0.34375_cv;
+	static constexpr slug_t SPLIT_12 = 0.37500_cv;
+	static constexpr slug_t SPLIT_13 = 0.40625_cv;
+	static constexpr slug_t SPLIT_14 = 0.43750_cv;
+	static constexpr slug_t SPLIT_15 = 0.46875_cv;
+	static constexpr slug_t SPLIT_16 = 0.50000_cv;
+	static constexpr slug_t SPLIT_17 = 0.53125_cv;
+	static constexpr slug_t SPLIT_18 = 0.56250_cv;
+	static constexpr slug_t SPLIT_19 = 0.59375_cv;
+	static constexpr slug_t SPLIT_20 = 0.62500_cv;
+	static constexpr slug_t SPLIT_21 = 0.65625_cv;
+	static constexpr slug_t SPLIT_22 = 0.68750_cv;
+	static constexpr slug_t SPLIT_23 = 0.71875_cv;
+	static constexpr slug_t SPLIT_24 = 0.75000_cv;
+	static constexpr slug_t SPLIT_25 = 0.78125_cv;
+	static constexpr slug_t SPLIT_26 = 0.81250_cv;
+	static constexpr slug_t SPLIT_27 = 0.84375_cv;
+	static constexpr slug_t SPLIT_28 = 0.87500_cv;
+	static constexpr slug_t SPLIT_29 = 0.90625_cv;
+	static constexpr slug_t SPLIT_30 = 0.93750_cv;
+	static constexpr slug_t SPLIT_31 = 0.96875_cv;
+
+	// --------------------------------------------------------------------------------------------
 	// SplitStrategy
 	//
 	// A callable that accepts the shape's curves and returns {splitsX, splitsY} as normalized

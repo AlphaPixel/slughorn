@@ -213,21 +213,28 @@ public:
 
 	void translate(slug_t tx, slug_t ty) {
 		Matrix m;
+
 		m.dx = tx; m.dy = ty;
+
 		_ctm = _ctm * m;
 	}
 
 	void rotate(slug_t angle) {
 		const slug_t c = std::cos(angle), s = std::sin(angle);
+
 		Matrix m;
+
 		m.xx = c; m.xy = -s;
 		m.yx = s; m.yy = c;
+
 		_ctm = _ctm * m;
 	}
 
 	void scale(slug_t sx, slug_t sy) {
 		Matrix m;
+
 		m.xx = sx; m.yy = sy;
+
 		_ctm = _ctm * m;
 	}
 
@@ -242,6 +249,7 @@ public:
 		slug_t tx, ty;
 
 		_ctm.apply(x, y, tx, ty);
+
 		_decomposer.moveTo(tx, ty);
 
 		_lutDirty = true;
@@ -267,6 +275,7 @@ public:
 
 		_ctm.apply(cx, cy, tcx, tcy);
 		_ctm.apply(x, y, tx, ty);
+
 		_decomposer.quadTo(tcx, tcy, tx, ty);
 
 		_lutDirty = true;
@@ -281,6 +290,7 @@ public:
 		_ctm.apply(c1x, c1y, tc1x, tc1y);
 		_ctm.apply(c2x, c2y, tc2x, tc2y);
 		_ctm.apply(x, y, tx, ty);
+
 		_decomposer.cubicTo(tc1x, tc1y, tc2x, tc2y, tx, ty);
 
 		_lutDirty = true;
@@ -798,6 +808,32 @@ public:
 	}
 
 	// -------------------------------------------------------------------------
+	// Band split state (persists like fillStyle - applies to subsequent commits)
+	//
+	// setSplits()         - explicit normalized [0,1] fractions; clears any strategy
+	// setSplitStrategy()  - callable computed from curves at commit time; clears explicit splits
+	// clearSplits()       - revert to default auto-band behavior
+	// -------------------------------------------------------------------------
+
+	void setSplits(std::vector<slug_t> splitsX, std::vector<slug_t> splitsY) {
+		_splitsX = std::move(splitsX);
+		_splitsY = std::move(splitsY);
+		_splitStrategy = {};
+	}
+
+	void setSplitStrategy(Atlas::SplitStrategy strategy) {
+		_splitStrategy = std::move(strategy);
+		_splitsX.clear();
+		_splitsY.clear();
+	}
+
+	void clearSplits() {
+		_splitsX.clear();
+		_splitsY.clear();
+		_splitStrategy = {};
+	}
+
+	// -------------------------------------------------------------------------
 	// Commit verbs - implicit path
 	//
 	// Operate on the Canvas's internal path. After fill() / stroke(), the
@@ -1012,6 +1048,7 @@ private:
 		info.curves = std::move(local);
 		info.origin = infoOrigin;
 
+		_applySplits(info);
 		_atlas.addShape(key, info);
 
 		Layer layer;
@@ -1060,6 +1097,7 @@ private:
 		info.curves = std::move(local);
 		info.origin = infoOrigin;
 
+		_applySplits(info);
 		_atlas.addShape(key, info);
 
 		return true;
@@ -1127,12 +1165,13 @@ private:
 
 		const uint32_t gid = _atlas.addGradient(ginfo);
 
-		Atlas::ShapeInfo shapeInfo;
+		Atlas::ShapeInfo info;
 
-		shapeInfo.curves = std::move(local);
-		shapeInfo.origin = infoOrigin;
+		info.curves = std::move(local);
+		info.origin = infoOrigin;
 
-		_atlas.addShape(key, shapeInfo);
+		_applySplits(info);
+		_atlas.addShape(key, info);
 
 		Layer layer;
 
@@ -1144,6 +1183,18 @@ private:
 		_composite.layers.push_back(layer);
 
 		return key;
+	}
+
+	void _applySplits(Atlas::ShapeInfo& info) const {
+		if(_splitStrategy) {
+			auto [sx, sy] = _splitStrategy(info.curves);
+			info.splitsX = std::move(sx);
+			info.splitsY = std::move(sy);
+		}
+		else {
+			info.splitsX = _splitsX;
+			info.splitsY = _splitsY;
+		}
 	}
 
 	static Atlas::Curves _scaleCurves(const Atlas::Curves& src, slug_t scale) {
@@ -1217,6 +1268,9 @@ private:
 	KeyIterator _key;
 	Path _path;
 	CompositeShape _composite;
+	std::vector<slug_t> _splitsX;
+	std::vector<slug_t> _splitsY;
+	Atlas::SplitStrategy _splitStrategy;
 };
 
 // ================================================================================================

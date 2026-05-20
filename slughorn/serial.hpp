@@ -614,7 +614,7 @@ Atlas atlasFromJson(
 // -----------------------------------------------------------------------------
 
 static constexpr uint32_t SLUG_MAGIC = 0x47554C53; // "SLUG"
-static constexpr uint32_t SLUG_VERISON = 1;
+static constexpr uint32_t SLUG_VERSION = 1;
 static constexpr uint32_t SLUG_CHUNK_TYPE_JSON = 0x4E4F534A; // "JSON"
 static constexpr uint32_t SLUG_CHUNK_TYPE_BIN = 0x004E4942; // "BIN\0"
 
@@ -713,7 +713,7 @@ void writeBinary(const Atlas& atlas, std::ostream& out) {
 
 	// Write file header
 	writeU32LE(out, SLUG_MAGIC);
-	writeU32LE(out, SLUG_VERISON);
+	writeU32LE(out, SLUG_VERSION);
 	writeU32LE(out, totalLength);
 
 	// Write JSON chunk
@@ -774,7 +774,7 @@ Atlas read(std::istream& in) {
 			std::runtime_error("slughorn-serial: not a .slugb file (bad magic)")
 		;
 
-		if(version != SLUG_VERISON) throw
+		if(version != SLUG_VERSION) throw
 			std::runtime_error("slughorn-serial: unsupported .slugb version " +
 			std::to_string(version))
 		;
