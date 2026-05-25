@@ -294,3 +294,142 @@ def test_canvas_commit_paths_gradients_and_composites():
 
 	assert len(gradients) == 2
 	assert atlas.gradient_texture.width > 0
+
+# =============================================================================
+# NanoSVG backend
+# =============================================================================
+
+_SVG_DIR = Path(__file__).resolve().parent
+
+# Minimal inline SVGs used for controlled unit tests.
+_SVG_ONE_SOLID = """\
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <rect x="10" y="10" width="80" height="80" fill="#ff0000"/>
+</svg>
+"""
+
+_SVG_TWO_SOLIDS = """\
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100">
+  <rect x="0"   y="0" width="100" height="100" fill="#00ff00"/>
+  <rect x="100" y="0" width="100" height="100" fill="#0000ff"/>
+</svg>
+"""
+
+def _nanosvg_available():
+	return hasattr(slughorn, "nanosvg")
+
+def test_nanosvg_load_string_single_solid():
+	if not _nanosvg_available():
+		pytest.skip("slughorn.nanosvg not available (build without SLUGHORN_NANOSVG)")
+
+	atlas = slughorn.Atlas()
+	composite, next_key = slughorn.nanosvg.load_string(_SVG_ONE_SOLID, atlas)
+
+	assert next_key == 1, "one shape -> next_key must be 1"
+	assert len(composite) == 1, "one rect -> one layer"
+
+	layer = composite.layers[0]
+
+	# colorFromNSVG unpacks 0xAABBGGRR; #ff0000 => R=1, G=0, B=0, A=1
+	assert layer.color.r == pytest.approx(1.0, abs=1e-3)
+	assert layer.color.g == pytest.approx(0.0, abs=1e-3)
+	assert layer.color.b == pytest.approx(0.0, abs=1e-3)
+	assert layer.color.a == pytest.approx(1.0, abs=1e-3)
+
+	atlas.build()
+
+	assert atlas.get_shape(layer.key) is not None
+
+def test_nanosvg_load_string_two_solids():
+	if not _nanosvg_available():
+		pytest.skip("slughorn.nanosvg not available (build without SLUGHORN_NANOSVG)")
+
+	atlas = slughorn.Atlas()
+	composite, next_key = slughorn.nanosvg.load_string(_SVG_TWO_SOLIDS, atlas)
+
+	assert next_key == 2, "two shapes -> next_key must be 2"
+	assert len(composite) == 2
+
+def test_nanosvg_load_file_gradient():
+	if not _nanosvg_available():
+		pytest.skip("slughorn.nanosvg not available (build without SLUGHORN_NANOSVG)")
+
+	svg_path = _SVG_DIR / "gradient-test.svg"
+
+	atlas = slughorn.Atlas()
+	composite, next_key = slughorn.nanosvg.load_file(str(svg_path), atlas)
+
+	# gradient-test.svg has 3 rects: 2 linear + 1 radial gradient
+	assert next_key == 3, "gradient-test.svg has 3 shapes"
+	assert len(composite) == 3
+
+	atlas.build()
+
+	for layer in composite.layers:
+		assert atlas.get_shape(layer.key) is not None
+
+def test_nanosvg_load_file_inkscape():
+	if not _nanosvg_available():
+		pytest.skip("slughorn.nanosvg not available (build without SLUGHORN_NANOSVG)")
+
+	svg_path = _SVG_DIR / "inkscape-test.svg"
+
+	atlas = slughorn.Atlas()
+	composite, next_key = slughorn.nanosvg.load_file(str(svg_path), atlas)
+
+	# inkscape-test.svg has 1 ellipse with a linear gradient
+	assert next_key == 1, "inkscape-test.svg has 1 shape"
+	assert len(composite) == 1
+
+def test_nanosvg_key_chaining():
+	if not _nanosvg_available():
+		pytest.skip("slughorn.nanosvg not available (build without SLUGHORN_NANOSVG)")
+
+	atlas = slughorn.Atlas()
+
+	composite_a, k = slughorn.nanosvg.load_string(_SVG_TWO_SOLIDS, atlas, base_key=0)
+	composite_b, k = slughorn.nanosvg.load_string(_SVG_ONE_SOLID,   atlas, base_key=k)
+
+	assert k == 3, "2 + 1 shapes = next_key 3"
+	assert len(composite_a) == 2
+	assert len(composite_b) == 1
+
+	# Keys must not overlap
+	keys_a = {layer.key for layer in composite_a.layers}
+	keys_b = {layer.key for layer in composite_b.layers}
+
+	assert keys_a.isdisjoint(keys_b), "chained loads must not share keys"
+
+	atlas.build()
+
+	for layer in list(composite_a.layers) + list(composite_b.layers):
+		assert atlas.get_shape(layer.key) is not None
+
+def test_nanosvg_renderable():
+	if not _nanosvg_available():
+		pytest.skip("slughorn.nanosvg not available (build without SLUGHORN_NANOSVG)")
+
+	atlas = slughorn.Atlas()
+	composite, _ = slughorn.nanosvg.load_string(_SVG_ONE_SOLID, atlas)
+
+	atlas.build()
+
+	layer = composite.layers[0]
+	sampler = atlas.decode(layer.key)
+
+	grid = sampler.render_grid(32, 0.0, True)
+
+	assert tuple(grid.shape) == (32, 32)
+	assert float(grid.max()) > 0.5, "solid filled rect must have high coverage at centre"
+	assert float(grid.min()) >= 0.0
+
+def test_nanosvg_bad_path_returns_empty():
+	if not _nanosvg_available():
+		pytest.skip("slughorn.nanosvg not available (build without SLUGHORN_NANOSVG)")
+
+	atlas = slughorn.Atlas()
+	composite, next_key = slughorn.nanosvg.load_file("/nonexistent/path.svg", atlas)
+
+	# NanoSVG returns an empty CompositeShape on parse failure; next_key unchanged
+	assert next_key == 0
+	assert len(composite) == 0

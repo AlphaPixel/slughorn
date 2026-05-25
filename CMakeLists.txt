@@ -133,7 +133,11 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
 
 	set_target_properties(slughorn_python PROPERTIES OUTPUT_NAME "slughorn")
 
-	target_link_libraries(slughorn_python PRIVATE slughorn pybind11::module)
+	target_link_libraries(slughorn_python PRIVATE
+		slughorn
+		pybind11::module
+		nlohmann_json::nlohmann_json
+	)
 	target_compile_features(slughorn_python PUBLIC cxx_std_20)
 	target_compile_options(slughorn_python PRIVATE ${SLUGHORN_COMPILE_OPTIONS})
 	set_target_properties(slughorn_python PROPERTIES POSITION_INDEPENDENT_CODE ON)

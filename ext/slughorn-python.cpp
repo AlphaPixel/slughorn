@@ -58,6 +58,10 @@
 #include "slughorn/freetype.hpp"
 #endif
 
+#ifdef SLUGHORN_HAS_NANOSVG
+#include "slughorn/nanosvg.hpp"
+#endif
+
 #include <pybind11/pybind11.h>
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
@@ -144,7 +148,9 @@ template<typename T>
 static std::string streamRepr(const T& v, const std::string& prefix="") {
 	std::ostringstream ss;
 
-	ss << prefix << "." << v;
+	if(!prefix.empty()) ss << prefix << ".";
+
+	ss << v;
 
 	return ss.str();
 }
@@ -2226,7 +2232,10 @@ PYBIND11_MODULE(slughorn, m) {
 		std::map<uint32_t, slughorn::CompositeShape> colorGlyphs;
 
 		slughorn::freetype::loadEmojiFont(
-			fontPath, codepoints, atlas, colorGlyphs,
+			fontPath,
+			codepoints,
+			atlas,
+			colorGlyphs,
 			strategy ? *strategy : slughorn::Atlas::SplitStrategy{}
 		);
 
@@ -2248,6 +2257,47 @@ PYBIND11_MODULE(slughorn, m) {
 		"Returns a dict mapping codepoint (int) -> CompositeShape "
 		"for each successfully loaded glyph."
 	);
+#endif
+
+#ifdef SLUGHORN_HAS_NANOSVG
+	{
+		py::module_ nanosvg = m.def_submodule("nanosvg",
+			"NanoSVG backend - parse SVG files or strings into Atlas shapes.\n\n"
+			"Produces a CompositeShape with one Layer per filled SVG shape, "
+			"back-to-front order preserved.\n\n"
+			"Both functions return a (CompositeShape, next_key) tuple. "
+			"Pass next_key as base_key to a subsequent call to pack multiple "
+			"SVGs into the same atlas without key collisions."
+		);
+
+		nanosvg.def("load_file",
+			[](const std::string& path, slughorn::Atlas& atlas, uint32_t baseKey, float dpi) {
+				slughorn::CompositeShape cs = slughorn::nanosvg::loadFile(path, atlas, baseKey, dpi);
+				return py::make_tuple(std::move(cs), baseKey);
+			},
+			py::arg("path"),
+			py::arg("atlas"),
+			py::arg("base_key") = 0,
+			py::arg("dpi") = 96.0f,
+			"Parse an SVG file and pack every filled shape into atlas.\n"
+			"Returns (CompositeShape, next_key). next_key is the first key not used\n"
+			"by this call; pass it as base_key to subsequent pack calls on the same atlas."
+		);
+
+		nanosvg.def("load_string",
+			[](const std::string& svg, slughorn::Atlas& atlas, uint32_t baseKey, float dpi) {
+				slughorn::CompositeShape cs = slughorn::nanosvg::loadString(svg, atlas, baseKey, dpi);
+				return py::make_tuple(std::move(cs), baseKey);
+			},
+			py::arg("svg"),
+			py::arg("atlas"),
+			py::arg("base_key") = 0,
+			py::arg("dpi") = 96.0f,
+			"Parse an SVG string and pack every filled shape into atlas.\n"
+			"Returns (CompositeShape, next_key). next_key is the first key not used\n"
+			"by this call; pass it as base_key to subsequent pack calls on the same atlas."
+		);
+	}
 #endif
 
 	// py::module_ skia = m.def_submodule("skia",

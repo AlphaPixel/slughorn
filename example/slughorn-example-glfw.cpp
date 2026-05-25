@@ -57,7 +57,7 @@ static const char* k_VertSrc = R"(
 
 layout(location = 0) in vec3 a_position;
 layout(location = 1) in vec4 a_color;
-layout(location = 2) in vec2 a_emCoord;
+layout(location = 2) in vec4 a_emCoord;
 layout(location = 3) in vec4 a_bandXform; // bandScaleX/Y, bandOffsetX/Y
 layout(location = 4) in vec4 a_shapeData; // bandTexX/Y, bandMaxX/Y
 layout(location = 5) in float a_effectId; // unused in this demo, carried through
@@ -66,13 +66,15 @@ uniform mat4 u_mvp;
 uniform float u_time;
 
 out vec2 v_emCoord;
+out vec2 v_uv;
 out vec4 v_color;
 
 flat out vec4 v_bandXform;
 flat out vec4 v_shapeData;
 
 void main() {
-	v_emCoord = a_emCoord;
+	v_emCoord = a_emCoord.xy;
+	v_uv = a_emCoord.zw;
 	v_color = a_color;
 	v_bandXform = a_bandXform;
 	v_shapeData = a_shapeData;
@@ -88,6 +90,7 @@ static const char* k_FragSrc = R"(
 #version 330 core
 
 in vec2 v_emCoord;
+in vec2 v_uv;
 in vec4 v_color;
 
 flat in vec4 v_bandXform; // bandScaleX/Y, bandOffsetX/Y
@@ -468,7 +471,7 @@ static Vec3 orbitCameraPosition(const ViewState& view) {
 //
 // location 0: position vec3
 // location 1: color vec4
-// location 2: emCoord vec2
+// location 2: emCoord vec4 (.xy = em-space, .zw = true [0,1] UV)
 // location 3: bandXform vec4 (bandScaleX/Y, bandOffsetX/Y)
 // location 4: shapeData vec4 (bandTexX/Y, bandMaxX/Y)
 // location 5: effectId float (unused here, carried for forward-compat)
@@ -476,7 +479,7 @@ static Vec3 orbitCameraPosition(const ViewState& view) {
 struct Vertex {
 	float position[3];
 	float color[4];
-	float emCoord[2];
+	float emCoord[4];
 	float bandXform[4];
 	float shapeData[4];
 	float effectId;
@@ -533,11 +536,11 @@ static void buildMesh(
 			{x1, y1, 0.0f},
 			{x0, y1, 0.0f}
 		};
-		const float emCoords[4][2] = {
-			{emX0, emY0},
-			{emX1, emY0},
-			{emX1, emY1},
-			{emX0, emY1}
+		const float emCoords[4][4] = {
+			{emX0, emY0, 0.0f, 0.0f},
+			{emX1, emY0, 1.0f, 0.0f},
+			{emX1, emY1, 1.0f, 1.0f},
+			{emX0, emY1, 0.0f, 1.0f}
 		};
 
 		for(int i = 0; i < 4; i++) {
@@ -818,9 +821,9 @@ int main(int /*argc*/, char** /*argv*/) {
 	glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, stride,
 		(void*)offsetof(Vertex, color));
 
-	// location 2: emCoord (vec2)
+	// location 2: emCoord (vec4: .xy = em-space, .zw = true [0,1] UV)
 	glEnableVertexAttribArray(2);
-	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, stride,
+	glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, stride,
 		(void*)offsetof(Vertex, emCoord));
 
 	// location 3: bandXform (vec4)

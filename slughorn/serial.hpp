@@ -97,7 +97,10 @@
 // =============================================================================
 
 #include "slughorn.hpp"
+
+#ifdef SLUGHORN_SERIAL_IMPLEMENTATION
 #include "nlohmann/json.hpp"
+#endif
 
 #include <cstdint>
 #include <fstream>
