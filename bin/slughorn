@@ -63,7 +63,7 @@ def make_key(raw: str) -> slughorn.Key:
 		return slughorn.Key(int(raw, 0))
 
 	except ValueError:
-		return slughorn.Key.from_string(raw)
+		return slughorn.Key(raw)
 
 
 def format_key(key) -> str:

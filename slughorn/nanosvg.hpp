@@ -386,6 +386,9 @@ CompositeShape loadImage(const NSVGimage* image, Atlas& atlas, uint32_t& baseKey
 
 			gradientId = atlas.addGradient(info);
 		}
+		else if(shape->fill.type == NSVG_PAINT_NONE) {
+			continue;
+		}
 		else {
 			std::cerr
 				<< "slughorn::nanosvg: skipping unsupported fill type "
