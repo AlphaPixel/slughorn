@@ -59,7 +59,7 @@ inline void flattenCurve(
 	slug_t p0x, slug_t p0y,
 	slug_t p1x, slug_t p1y,
 	slug_t p2x, slug_t p2y,
-	slug_t tol, int depth,
+	slug_t tol, size_t depth,
 	std::vector<std::pair<slug_t, slug_t>>& pts
 ) {
 	const slug_t dx = p2x - p0x, dy = p2y - p0y;
@@ -68,6 +68,7 @@ inline void flattenCurve(
 
 	if(lenSq < 1e-12_cv || (cross * cross) <= (tol * tol * lenSq) || depth >= 8) {
 		pts.push_back({p2x, p2y});
+
 		return;
 	}
 
@@ -435,10 +436,15 @@ public:
 		else if(!_pendingCurves.empty()) centerline = std::move(_pendingCurves);
 		else return false;
 
-		const slug_t h = width * 0.5_cv;
+		// Scale width by the CTM's pen scale so canvas.scale() affects stroke width.
+		const slug_t xScale = std::sqrt(_ctm.xx * _ctm.xx + _ctm.yx * _ctm.yx);
+		const slug_t yScale = std::sqrt(_ctm.xy * _ctm.xy + _ctm.yy * _ctm.yy);
+		const slug_t penScale = (xScale > 0_cv && yScale > 0_cv) ? std::sqrt(xScale * yScale) : 1.0_cv;
+		const slug_t h = width * penScale * 0.5_cv;
 		const slug_t tol = _decomposer.tolerance < TOLERANCE_EXACT
 			? _decomposer.tolerance
-			: TOLERANCE_BALANCED;
+			: std::max(TOLERANCE_BALANCED, h * 0.1_cv)
+		;
 
 		// Pass 1: flatten centerline to polyline.
 		std::vector<std::pair<slug_t, slug_t>> pts;
@@ -477,37 +483,49 @@ public:
 
 		struct PN { slug_t nx, ny; };
 
+		const bool isClosed =
+			std::abs(pts.back().first - pts.front().first) < 1e-6_cv &&
+			std::abs(pts.back().second - pts.front().second) < 1e-6_cv;
+
+		auto calcMiter = [&](size_t prev, size_t cur) -> PN {
+			slug_t nx = segN[prev].first + segN[cur].first;
+			slug_t ny = segN[prev].second + segN[cur].second;
+
+			const slug_t len = std::sqrt(nx*nx + ny*ny);
+
+			if(len > 1e-6_cv) {
+				nx /= len; ny /= len;
+
+				const slug_t d = nx * segN[cur].first + ny * segN[cur].second;
+
+				if(d > 1e-3_cv) {
+					const slug_t m = 1.0_cv / d;
+
+					if(m <= MITER_LIMIT) { nx *= m; ny *= m; }
+
+					else { nx *= MITER_LIMIT; ny *= MITER_LIMIT; }
+				}
+			}
+
+			else {
+				nx = segN[cur].first;
+				ny = segN[cur].second;
+			}
+
+			return {nx, ny};
+		};
+
 		std::vector<PN> pn(pts.size());
 
 		for(size_t i = 0; i < pts.size(); ++i) {
-			if(!i) pn[i] = {segN[0].first, segN[0].second};
+			if(!i) pn[i] = isClosed ? calcMiter(numSegs-1, 0) : PN{segN[0].first, segN[0].second};
 
-			else if(i == numSegs) pn[i] = {segN[numSegs-1].first, segN[numSegs-1].second};
+			else if(i==numSegs) pn[i] = isClosed ?
+				pn[0] :
+				PN{segN[numSegs-1].first, segN[numSegs-1].second}
+			;
 
-			else {
-				slug_t nx = segN[i-1].first + segN[i].first;
-				slug_t ny = segN[i-1].second + segN[i].second;
-				const slug_t len = std::sqrt(nx*nx + ny*ny);
-
-				if(len > 1e-6_cv) {
-					nx /= len; ny /= len;
-
-					const slug_t d = nx * segN[i].first + ny * segN[i].second;
-
-					if(d > 1e-3_cv) {
-						const slug_t m = 1.0_cv / d;
-						if(m <= MITER_LIMIT) { nx *= m; ny *= m; }
-						else { nx *= MITER_LIMIT; ny *= MITER_LIMIT; }
-					}
-				}
-
-				else {
-					nx = segN[i].first;
-					ny = segN[i].second;
-				}
-
-				pn[i] = {nx, ny};
-			}
+			else pn[i] = calcMiter(i-1, i);
 		}
 
 		// Pass 3: build lwall / rwall, then close.
@@ -555,6 +573,7 @@ public:
 
 		else for(size_t i = outline.size(); i-- > 0;) {
 			const auto& c = outline[i];
+
 			_pendingCurves.push_back({c.x3, c.y3, c.x2, c.y2, c.x1, c.y1});
 		}
 
@@ -584,6 +603,7 @@ public:
 
 	Sample sample(slug_t t) const {
 		if(_lutDirty) _rebuildLUT();
+
 		if(_pts.size() < 2) return {};
 
 		const slug_t s = std::max(0.0_cv, std::min(1.0_cv, t)) * _totalLength;
@@ -593,7 +613,7 @@ public:
 
 		i = std::min(i, _pts.size() - 1);
 
-		if(i == 0) i = 1;
+		if(!i) i = 1;
 
 		const slug_t segLen = _lut[i] - _lut[i-1];
 		const slug_t frac = segLen > 1e-12_cv ? (s - _lut[i-1]) / segLen : 0.0_cv;
@@ -636,6 +656,7 @@ private:
 
 			else if(i == 0) {
 				const slug_t dx = p0x - _penX, dy = p0y - _penY;
+
 				if(dx*dx + dy*dy > 1e-10_cv) lineTo(p0x, p0y);
 			}
 
