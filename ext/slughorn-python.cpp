@@ -950,6 +950,39 @@ PYBIND11_MODULE(slughorn, m) {
 	;
 
 	// ============================================================================================
+	// slughorn.FontMetrics
+	// ============================================================================================
+
+	py::class_<slughorn::FontMetrics>(m, "FontMetrics",
+		"Dimensionless em-space ratios for a typeface.\n\n"
+		"All ratio fields are fractions of the em-square in [0, 1]. Multiply by\n"
+		"fontSize to get world-space distances. Produced by\n"
+		"slughorn.freetype.load_font_metrics(); consumed by Canvas.text()."
+	)
+		.def(py::init<>())
+		.def_readwrite("units_per_em", &slughorn::FontMetrics::unitsPerEM,
+			"Raw em units (e.g. 1000 or 2048); not a ratio."
+		)
+		.def_readwrite("cap_height_ratio", &slughorn::FontMetrics::capHeightRatio,
+			"OS/2 sCapHeight / unitsPerEM (~0.72 for Latin)."
+		)
+		.def_readwrite("x_height_ratio", &slughorn::FontMetrics::xHeightRatio,
+			"OS/2 sxHeight / unitsPerEM (~0.53)."
+		)
+		.def_readwrite("ascender_ratio", &slughorn::FontMetrics::ascenderRatio,
+			"ascender / unitsPerEM (~0.80)."
+		)
+		.def_readwrite("descender_ratio", &slughorn::FontMetrics::descenderRatio,
+			"|descender| / unitsPerEM (~0.20)."
+		)
+		.def_readwrite("line_gap_ratio", &slughorn::FontMetrics::lineGapRatio,
+			"Recommended line gap / unitsPerEM (0 if none).\n"
+			"lineHeight = fontSize * (1 + line_gap_ratio)"
+		)
+		.def("__repr__", [](const slughorn::FontMetrics& fm) { return streamRepr(fm); })
+	;
+
+	// ============================================================================================
 	// slughorn.Curve (Atlas::Curve in C++, flat in Python - see file header)
 	// ============================================================================================
 	py::class_<slughorn::Atlas::Curve>(m, "Curve")
@@ -1525,6 +1558,37 @@ PYBIND11_MODULE(slughorn, m) {
 			"Call finalize() to retrieve the completed CompositeShape."
 		);
 
+		py::enum_<slughorn::canvas::TextAnchorY>(canvas, "TextAnchorY",
+			"Vertical anchor for Canvas.text()."
+		)
+			.value("BASELINE", slughorn::canvas::TextAnchorY::Baseline,
+				"y is the text baseline (default)."
+			)
+			.value("CAP_CENTER", slughorn::canvas::TextAnchorY::CapCenter,
+				"y is the vertical center of the cap-height band."
+			)
+			.value("CAP_TOP", slughorn::canvas::TextAnchorY::CapTop,
+				"y is the top of capital letters."
+			)
+			.value("X_CENTER", slughorn::canvas::TextAnchorY::XCenter,
+				"y is the vertical center of the x-height band."
+			)
+		;
+
+		py::enum_<slughorn::canvas::TextAlignX>(canvas, "TextAlignX",
+			"Horizontal alignment for Canvas.text()."
+		)
+			.value("LEFT", slughorn::canvas::TextAlignX::Left,
+				"x is the left edge of the first glyph (default, single-pass)."
+			)
+			.value("CENTER", slughorn::canvas::TextAlignX::Center,
+				"x is the horizontal center of the run (two-pass)."
+			)
+			.value("RIGHT", slughorn::canvas::TextAlignX::Right,
+				"x is the right edge of the last glyph (two-pass)."
+			)
+		;
+
 		py::class_<slughorn::canvas::Canvas::GradientHandle>(canvas, "GradientHandle",
 			"Lightweight gradient descriptor returned by Canvas.create_linear_gradient().\n"
 			"Pass it to Canvas.fill_gradient() to commit the current path with a gradient fill.\n"
@@ -2038,6 +2102,23 @@ PYBIND11_MODULE(slughorn, m) {
 				py::arg("key"),
 				"Register the completed CompositeShape in the Atlas under key and reset."
 			)
+			.def("text",
+				&slughorn::canvas::Canvas::text,
+				py::arg("s"),
+				py::arg("font_size"),
+				py::arg("x"),
+				py::arg("y"),
+				py::arg("color"),
+				py::arg("metrics"),
+				py::arg("anchor_y") = slughorn::canvas::TextAnchorY::Baseline,
+				py::arg("align_x") = slughorn::canvas::TextAlignX::Left,
+				"Place glyphs from s into the current composite.\n\n"
+				"The atlas must already contain the requested codepoints (loaded via a\n"
+				"freetype function before atlas.build()). Handles em-space conversion,\n"
+				"vertical anchoring, and optional horizontal alignment internally.\n\n"
+				"anchor_y controls what y refers to (baseline, cap center, cap top, x-center).\n"
+				"align_x LEFT is single-pass; CENTER and RIGHT do a measure pass first."
+			)
 
 			// Accessors -------------------------------------------------------
 
@@ -2256,6 +2337,16 @@ PYBIND11_MODULE(slughorn, m) {
 		"Pass None (default) to use the uniform fast path.\n"
 		"Returns a dict mapping codepoint (int) -> CompositeShape "
 		"for each successfully loaded glyph."
+	);
+
+	freetype.def("load_font_metrics",
+		[](const std::string& fontPath) -> std::optional<slughorn::FontMetrics> {
+			return slughorn::freetype::loadFontMetrics(fontPath);
+		},
+		py::arg("font_path"),
+		"Read em-space metrics from font_path and return a FontMetrics object.\n"
+		"Returns None if the font cannot be opened.\n"
+		"Safe to call before or independently of any load_* call."
 	);
 #endif
 

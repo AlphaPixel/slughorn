@@ -66,39 +66,13 @@ void setLogCallback(LogCallback cb);
 // Font metrics
 // =============================================================================
 
-// Dimensionless em-space ratios for a typeface. All ratio fields are in [0, 1] and are fractions of
-// the em-square. Multiply by fontSize (em-size in world units) to get world-space distances at any
-// render size.
-//
-// DPI is deliberately absent; slughorn is display-agnostic.
-struct FontMetrics {
-	// raw em units (e.g. 1000 or 2048); not a ratio
-	slug_t unitsPerEM = 0_cv;
-
-	// OS/2 sCapHeight / unitsPerEM (~0.72 for Latin)
-	slug_t capHeightRatio = 0_cv;
-
-	// OS/2 sxHeight / unitsPerEM (~0.53)
-	slug_t xHeightRatio = 0_cv;
-
-	// ascender / unitsPerEM (~0.80)
-	slug_t ascenderRatio = 0_cv;
-
-	// |descender| / unitsPerEM (~0.20)
-	slug_t descenderRatio = 0_cv;
-
-	// recommended line gap / unitsPerEM (0 if none)
-	// lineHeight = fontSize * (1 + lineGapRatio)
-	slug_t lineGapRatio = 0_cv;
-};
-
 // Read metrics from an already-open FT_Face. Safe to call immediately after
 // FT_New_Face / FT_Open_Face, before any glyph is loaded.
-FontMetrics readFontMetrics(FT_Face face);
+slughorn::FontMetrics readFontMetrics(FT_Face face);
 
 // Open the font at fontPath, read its metrics, and close it. Returns nullopt
 // if the font cannot be opened.
-std::optional<FontMetrics> loadFontMetrics(const std::string& fontPath);
+std::optional<slughorn::FontMetrics> loadFontMetrics(const std::string& fontPath);
 
 // =============================================================================
 // Core decomposition
@@ -1045,8 +1019,8 @@ static void processColorGlyphV1(
 // Public API implementation
 // =============================================================================
 
-FontMetrics readFontMetrics(FT_Face face) {
-	FontMetrics m;
+slughorn::FontMetrics readFontMetrics(FT_Face face) {
+	slughorn::FontMetrics m;
 
 	m.unitsPerEM = cv(face->units_per_EM);
 
@@ -1079,12 +1053,12 @@ FontMetrics readFontMetrics(FT_Face face) {
 	return m;
 }
 
-std::optional<FontMetrics> loadFontMetrics(const std::string& fontPath) {
+std::optional<slughorn::FontMetrics> loadFontMetrics(const std::string& fontPath) {
 	return detail::withFace(
 		fontPath,
 		"loadFontMetrics",
-		std::optional<FontMetrics>{},
-		[](FT_Face face) -> std::optional<FontMetrics> {
+		std::optional<slughorn::FontMetrics>{},
+		[](FT_Face face) -> std::optional<slughorn::FontMetrics> {
 			return readFontMetrics(face);
 		}
 	);

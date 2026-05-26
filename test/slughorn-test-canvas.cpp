@@ -512,8 +512,8 @@ int main(int argc, char** argv) {
 	//
 	// The rectangle spans [0.1, 0.9] x [0.15, 0.85] in authoring space.
 	//
-	//   pivot_centered_shape : Origin::Centered  -> dot at geometric center (0.5, 0.5)
-	//   pivot_custom_shape   : Origin(0.2, 0.72) -> dot clearly off-center; obviously intentional
+	// pivot_centered_shape: Origin::Centered -> dot at geometric center (0.5, 0.5)
+	// pivot_custom_shape: Origin(0.2, 0.72) -> dot clearly off-center; obviously intentional
 	//
 	// CLI: `slughorn svg atlas.slug pivot_centered_shape`
 	//      `slughorn svg atlas.slug pivot_custom_shape`
@@ -540,6 +540,11 @@ int main(int argc, char** argv) {
 
 	// ============================================================================================
 	// Pattern 16: Standalone Path - build, sample, and commit independently of Canvas.
+	//
+	// NOTE: Patterns 17 and 18 below exercise Canvas::text(). No font is loaded in this
+	// test, so atlas.getShape() returns nullptr for every codepoint and the fallback
+	// advance (0.6 em) is used for spacing. The tests verify layer accumulation and that
+	// both the single-pass (Left) and two-pass (Center) alignment paths execute cleanly.
 	//
 	// The path is constructed without any canvas involvement. sample() works directly on
 	// the standalone Path. canvas.stroke(p, ...) commits p's geometry without consuming it;
@@ -569,6 +574,68 @@ int main(int argc, char** argv) {
 			<< "Pattern 16: internal path hasPendingPath="
 			<< canvas.hasPendingPath() << " (expected 0)\n"
 		;
+	}
+
+	// ============================================================================================
+	// Pattern 17: Canvas::text() - left-aligned baseline placement (single-pass).
+	//
+	// FontMetrics is a plain slug_t struct in slughorn.hpp; no FreeType dependency here.
+	// canvas.text() pushes one Layer per glyph into _composite, same as fill()/stroke().
+	// With no font loaded, atlas.getShape() returns nullptr and the 0.6-em fallback
+	// advance is used; the layer count and key values are still correct.
+	// ============================================================================================
+	{
+		slughorn::FontMetrics m;
+
+		// Approximate Latin metrics for a typical serif face.
+		m.unitsPerEM = 1000_cv;
+		m.capHeightRatio = 0.72_cv;
+		m.xHeightRatio = 0.53_cv;
+		m.ascenderRatio = 0.80_cv;
+		m.descenderRatio = 0.20_cv;
+		m.lineGapRatio = 0.00_cv;
+
+		canvas.text("AXO", 70_cv, 20_cv, 55_cv, WHITE, m);
+		canvas.finalize(Key("text_left"));
+
+		std::cerr
+			<< "Pattern 17: text_left layers="
+			<< canvas.layerCount() << " (expected 0 after finalize)\n"
+		;
+	}
+
+	// ============================================================================================
+	// Pattern 18: Canvas::text() - centered + CapCenter anchor (two-pass alignment).
+	//
+	// TextAlignX::Center triggers a measure pass before placing glyphs.
+	// TextAnchorY::CapCenter shifts the baseline so that capital-letter tops align to y.
+	// ============================================================================================
+	{
+		slughorn::FontMetrics m;
+
+		m.unitsPerEM = 1000_cv;
+		m.capHeightRatio = 0.72_cv;
+		m.xHeightRatio = 0.53_cv;
+		m.ascenderRatio = 0.80_cv;
+		m.descenderRatio = 0.20_cv;
+		m.lineGapRatio = 0.00_cv;
+
+		const size_t before = canvas.layerCount();
+
+		canvas.text(
+			"AXO", 70_cv,
+			180_cv, 260_cv,
+			WHITE, m,
+			slughorn::canvas::TextAnchorY::CapCenter,
+			slughorn::canvas::TextAlignX::Center
+		);
+
+		std::cerr
+			<< "Pattern 18: text_centered layers added="
+			<< (canvas.layerCount() - before) << " (expected 3)\n"
+		;
+
+		canvas.finalize(Key("text_centered"));
 	}
 
 	// ============================================================================================

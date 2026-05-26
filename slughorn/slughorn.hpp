@@ -332,6 +332,38 @@ struct CompositeShape {
 };
 
 // ================================================================================================
+// FontMetrics
+//
+// Dimensionless em-space ratios for a typeface. All ratio fields are in [0, 1] and are fractions of
+// the em-square. Multiply by fontSize (em-size in world units) to get world-space distances at any
+// render size. Produced by slughorn::freetype::loadFontMetrics / readFontMetrics; consumed by
+// canvas::Canvas::text() and any other backend-agnostic layout code.
+//
+// DPI is deliberately absent; slughorn is display-agnostic.
+// ================================================================================================
+
+struct FontMetrics {
+	// raw em units (e.g. 1000 or 2048); not a ratio
+	slug_t unitsPerEM = 0_cv;
+
+	// OS/2 sCapHeight / unitsPerEM (~0.72 for Latin)
+	slug_t capHeightRatio = 0_cv;
+
+	// OS/2 sxHeight / unitsPerEM (~0.53)
+	slug_t xHeightRatio = 0_cv;
+
+	// ascender / unitsPerEM (~0.80)
+	slug_t ascenderRatio = 0_cv;
+
+	// |descender| / unitsPerEM (~0.20)
+	slug_t descenderRatio = 0_cv;
+
+	// recommended line gap / unitsPerEM (0 if none)
+	// lineHeight = fontSize * (1 + lineGapRatio)
+	slug_t lineGapRatio = 0_cv;
+};
+
+// ================================================================================================
 // Atlas
 //
 // Owns the two raw pixel buffers required by the Slug rendering algorithm (Lengyel 2017):
@@ -1285,6 +1317,17 @@ inline std::ostream& operator<<(std::ostream& os, const Atlas::TextureData& t) {
 
 inline std::ostream& operator<<(std::ostream& os, const CompositeShape& c) {
 	return os << "CompositeShape(layers=" << c.layers.size() << " advance=" << c.advance << ")";
+}
+
+inline std::ostream& operator<<(std::ostream& os, const FontMetrics& m) {
+	return os
+		<< "FontMetrics(unitsPerEM=" << m.unitsPerEM
+		<< " capHeight=" << m.capHeightRatio
+		<< " xHeight=" << m.xHeightRatio
+		<< " ascender=" << m.ascenderRatio
+		<< " descender=" << m.descenderRatio
+		<< " lineGap=" << m.lineGapRatio << ")"
+	;
 }
 
 }

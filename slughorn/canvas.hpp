@@ -718,6 +718,23 @@ private:
 };
 
 // ================================================================================================
+// Text layout enums
+// ================================================================================================
+
+enum class TextAnchorY {
+	Baseline, // y is the text baseline (default)
+	CapCenter, // y is the vertical center of the cap-height band
+	CapTop, // y is the top of capital letters
+	XCenter, // y is the vertical center of the x-height band
+};
+
+enum class TextAlignX {
+	Left, // x is the left edge of the first glyph (default, single-pass)
+	Center, // x is the horizontal center of the run (two-pass)
+	Right, // x is the right edge of the last glyph (two-pass)
+};
+
+// ================================================================================================
 // Canvas
 // ================================================================================================
 
@@ -831,9 +848,9 @@ public:
 	// -------------------------------------------------------------------------
 	// Band split state (persists like fillStyle - applies to subsequent commits)
 	//
-	// setSplits()         - explicit normalized [0,1] fractions; clears any strategy
-	// setSplitStrategy()  - callable computed from curves at commit time; clears explicit splits
-	// clearSplits()       - revert to default auto-band behavior
+	// setSplits() - explicit normalized [0,1] fractions; clears any strategy
+	// setSplitStrategy() - callable computed from curves at commit time; clears explicit splits
+	// clearSplits() - revert to default auto-band behavior
 	// -------------------------------------------------------------------------
 
 	void setSplits(std::vector<slug_t> splitsX, std::vector<slug_t> splitsY) {
@@ -990,6 +1007,71 @@ public:
 		if(!p.hasPendingPath()) return Key(0u);
 
 		return _commitGradient(_merged(p), handle, scale, key, origin);
+	}
+
+	// -------------------------------------------------------------------------
+	// Text layout
+	//
+	// Places glyphs from the atlas into the current composite. The atlas must
+	// already contain the requested codepoints (loaded via a font backend before
+	// atlas->build()). Handles em-space conversion, vertical anchoring, and
+	// optional horizontal alignment internally.
+	// -------------------------------------------------------------------------
+
+	void text(
+		std::string_view str,
+		slug_t fontSize,
+		slug_t x,
+		slug_t y,
+		Color color,
+		const FontMetrics& metrics,
+		TextAnchorY anchorY=TextAnchorY::Baseline,
+		TextAlignX alignX=TextAlignX::Left
+	) {
+		if(str.empty() || fontSize == 0_cv) return;
+
+		// Baseline dy in em-space, adjusted for vertical anchor
+		slug_t dy = y / fontSize;
+
+		switch(anchorY) {
+			case TextAnchorY::Baseline: break;
+			case TextAnchorY::CapCenter: dy -= metrics.capHeightRatio * 0.5_cv; break;
+			case TextAnchorY::CapTop: dy -= metrics.capHeightRatio; break;
+			case TextAnchorY::XCenter: dy -= metrics.xHeightRatio * 0.5_cv; break;
+		}
+
+		// Starting dx in em-space; two-pass only for Center/Right
+		slug_t dx = x / fontSize;
+
+		if(alignX != TextAlignX::Left) {
+			slug_t totalAdvance = 0_cv;
+
+			for(char c : str) {
+				const auto* shape = _atlas.getShape(Key(static_cast<uint32_t>(static_cast<unsigned char>(c))));
+
+				totalAdvance += shape ? shape->advance : 0.6_cv;
+			}
+
+			if(alignX == TextAlignX::Center) dx -= totalAdvance * 0.5_cv;
+
+			else dx -= totalAdvance;
+		}
+
+		for(char c : str) {
+			const uint32_t cp = static_cast<uint32_t>(static_cast<unsigned char>(c));
+			const auto* shape = _atlas.getShape(Key(cp));
+
+			Layer layer;
+
+			layer.key = Key(cp);
+			layer.color = color;
+			layer.transform = Matrix{.dx = dx, .dy = dy};
+			layer.scale = fontSize;
+
+			_composite.layers.push_back(layer);
+
+			dx += shape ? shape->advance : 0.6_cv;
+		}
 	}
 
 	// -------------------------------------------------------------------------
