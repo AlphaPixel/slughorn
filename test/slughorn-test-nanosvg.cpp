@@ -271,9 +271,9 @@ void test_Gradients() {
 
 		slughorn::Atlas atlas;
 
-		uint32_t baseKey = 0;
+		slughorn::KeyIterator keys;
 
-		auto composite = slughorn::nanosvg::loadString(svg, atlas, baseKey);
+		auto composite = slughorn::nanosvg::loadString(svg, atlas, keys);
 
 		check("1 layer loaded", composite.layers.size() == 1);
 		check(
@@ -390,12 +390,12 @@ void test_CompositeShape() {
 
 	slughorn::Atlas atlas;
 
-	uint32_t baseKey = 0;
+	slughorn::KeyIterator keys;
 
 	slughorn::CompositeShape composite = slughorn::nanosvg::loadString(
 		SVG_THREE_TRIANGLES,
 		atlas,
-		baseKey
+		keys
 	);
 
 	atlas.build();
@@ -466,8 +466,8 @@ void dumpSVGFile(const std::string& path) {
 
 	slughorn::Atlas atlas;
 
-	uint32_t baseKey = 0;
-	auto composite = slughorn::nanosvg::loadFile(path, atlas, baseKey);
+	slughorn::KeyIterator keys;
+	auto composite = slughorn::nanosvg::loadFile(path, atlas, keys);
 
 	atlas.addCompositeShape(slughorn::Key("composite"), composite);
 

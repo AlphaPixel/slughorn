@@ -527,9 +527,9 @@ Atlas atlasFromJson(
 			GradientInfo gi;
 
 			gi.type = gradientTypeFromString(jg.value("type", "linear"));
-			gi.innerRadius = jg.value("inner_radius", 0.0f);
-			gi.startAngle = jg.value("start_angle", 0.0f);
-			gi.endAngle = jg.value("end_angle", 1.0f);
+			gi.innerRadius = jg.value("inner_radius", 0.0_cv);
+			gi.startAngle = jg.value("start_angle", 0.0_cv);
+			gi.endAngle = jg.value("end_angle", 1.0_cv);
 
 			if(jg.contains("transform")) {
 				const auto& jt = jg.at("transform");
@@ -541,7 +541,7 @@ Atlas atlasFromJson(
 			if(jg.contains("stops")) {
 				for(const json& js : jg.at("stops")) {
 					GradientStop s;
-					s.t = js.at("t").get<float>();
+					s.t = js.at("t").get<slug_t>();
 					const auto& jc = js.at("color");
 					s.color = { jc[0], jc[1], jc[2], jc[3] };
 					gi.stops.push_back(s);
@@ -571,8 +571,8 @@ Atlas atlasFromJson(
 		shape.width = js.at("width");
 		shape.height = js.at("height");
 		shape.advance = js.at("advance");
-		shape.originX = js.value("origin_x", 0.0f);
-		shape.originY = js.value("origin_y", 0.0f);
+		shape.originX = js.value("origin_x", 0.0_cv);
+		shape.originY = js.value("origin_y", 0.0_cv);
 
 		sd.shapes[key] = shape;
 	}

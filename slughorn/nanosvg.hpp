@@ -137,15 +137,16 @@ Matrix loadShape(
 // NSVGshape, back-to-front order preserved.
 //
 // Scale is always auto-computed as 1/image->width, normalizing the SVG canvas
-// to [0,1] em-space. Keys are allocated sequentially from @p baseKey; on
-// return baseKey is advanced past the last key used.
+// to [0,1] em-space. Keys are allocated via @p keys (KeyIterator); on return
+// keys.counter is advanced past the last key used. Pass a named KeyIterator
+// (e.g. KeyIterator("logo")) to produce named keys like "logo_0", "logo_1", …
 //
 // Shapes with no solid fill are skipped with a warning to stderr.
 // ================================================================================================
 CompositeShape loadImage(
 	const NSVGimage* image,
 	Atlas& atlas,
-	uint32_t& baseKey
+	KeyIterator& keys
 );
 
 // ================================================================================================
@@ -154,14 +155,14 @@ CompositeShape loadImage(
 CompositeShape loadFile(
 	const std::string& path,
 	Atlas& atlas,
-	uint32_t& baseKey,
+	KeyIterator& keys,
 	float dpi=96.0f
 );
 
 CompositeShape loadString(
 	const std::string& svg,
 	Atlas& atlas,
-	uint32_t& baseKey,
+	KeyIterator& keys,
 	float dpi=96.0f
 );
 
@@ -244,7 +245,7 @@ Matrix loadShape(const NSVGshape* shape, Atlas& atlas, Key key, slug_t scale, At
 	return transform;
 }
 
-CompositeShape loadImage(const NSVGimage* image, Atlas& atlas, uint32_t& baseKey) {
+CompositeShape loadImage(const NSVGimage* image, Atlas& atlas, KeyIterator& keys) {
 	CompositeShape composite;
 
 	if(!image) return composite;
@@ -399,7 +400,7 @@ CompositeShape loadImage(const NSVGimage* image, Atlas& atlas, uint32_t& baseKey
 			continue;
 		}
 
-		const uint32_t key = baseKey++;
+		const Key key = keys.next();
 
 		Matrix transform = loadShape(shape, atlas, key, scale);
 
@@ -421,7 +422,7 @@ CompositeShape loadImage(const NSVGimage* image, Atlas& atlas, uint32_t& baseKey
 CompositeShape loadFile(
 	const std::string& path,
 	Atlas& atlas,
-	uint32_t& baseKey,
+	KeyIterator& keys,
 	float dpi
 ) {
 	NSVGimage* image = nsvgParseFromFile(path.c_str(), "px", dpi);
@@ -435,7 +436,7 @@ CompositeShape loadFile(
 		return {};
 	}
 
-	CompositeShape result = loadImage(image, atlas, baseKey);
+	CompositeShape result = loadImage(image, atlas, keys);
 
 	nsvgDelete(image);
 
@@ -445,7 +446,7 @@ CompositeShape loadFile(
 CompositeShape loadString(
 	const std::string& svg,
 	Atlas& atlas,
-	uint32_t& baseKey,
+	KeyIterator& keys,
 	float dpi
 ) {
 	std::string buf = svg;
@@ -458,7 +459,7 @@ CompositeShape loadString(
 		return {};
 	}
 
-	CompositeShape result = loadImage(image, atlas, baseKey);
+	CompositeShape result = loadImage(image, atlas, keys);
 
 	nsvgDelete(image);
 
