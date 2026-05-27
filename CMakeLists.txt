@@ -250,3 +250,40 @@ option(SLUGHORN_BUILD_EXAMPLES "Build example programs" OFF)
 if(SLUGHORN_BUILD_EXAMPLES)
 	add_subdirectory("example")
 endif()
+
+# -----------------------------------------------------------------------------
+# userguide — builds doc/UserGuide.pdf via pandoc/xelatex
+#
+# Usage: cmake --build . --target userguide
+# -----------------------------------------------------------------------------
+find_program(PANDOC_EXECUTABLE pandoc)
+
+if(PANDOC_EXECUTABLE)
+	set(_DOC_DIR "${CMAKE_SOURCE_DIR}/doc")
+	set(_USERGUIDE_PDF "${_DOC_DIR}/UserGuide.pdf")
+
+	add_custom_target(userguide
+		COMMAND ${PANDOC_EXECUTABLE}
+			cover.md UserGuide.md
+			-o UserGuide.pdf
+			--pdf-engine=xelatex
+			--number-sections
+			--highlight-style=breezedark
+			-H darkmode.tex
+			-V papersize:letter
+			-V geometry:margin=1in
+			-V fontsize=11pt
+			-V "mainfont=Source Serif 4"
+			-V "sansfont=Source Sans 3"
+			-V "monofont=Source Code Pro"
+			-V "monofontoptions=Scale=MatchLowercase"
+			-V booktabs=true
+		WORKING_DIRECTORY "${_DOC_DIR}"
+		BYPRODUCTS "${_USERGUIDE_PDF}"
+		COMMENT "Building UserGuide.pdf"
+		USES_TERMINAL
+		VERBATIM
+	)
+else()
+	message(STATUS "slughorn docs: pandoc not found, 'userguide' target unavailable")
+endif()
