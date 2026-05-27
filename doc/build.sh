@@ -6,7 +6,7 @@ pandoc cover.md UserGuide.md \
 	-o UserGuide.pdf \
 	--pdf-engine=xelatex \
 	--number-sections \
-	--highlight-style=espresso \
+	--highlight-style=breezedark \
 	-H darkmode.tex \
 	-V papersize:letter \
 	-V geometry:margin=1in \
@@ -19,11 +19,6 @@ pandoc cover.md UserGuide.md \
 
 # Some options for --highlight-style:
 #
-# pygments
-# tango
 # espresso
 # zenburn
-# kate
-# monochrome
 # breezedark
-# haddock

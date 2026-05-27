@@ -12,13 +12,15 @@
 \usepackage[normalem]{ulem}
 
 % --- Page colors ---------------------------------------------------------
-\pagecolor[HTML]{1E1E1E}
+\definecolor{pagebackground}{HTML}{1E1E1E}
+\pagecolor{pagebackground}
 \color[HTML]{D4D4D4}
 
 % --- Named colors --------------------------------------------------------
 \definecolor{linkblue}{HTML}{8AB4F8}
 \definecolor{accentblue}{HTML}{4A6FA5}
 \definecolor{dimtext}{HTML}{777777}
+\definecolor{bodytext}{HTML}{D4D4D4}
 
 % --- Hyperref ------------------------------------------------------------
 \hypersetup{
@@ -48,6 +50,56 @@
   ItalicFont={Source Sans 3 Italic},
   BoldItalicFont={Source Sans 3 Bold Italic}
 ]{Source Sans 3}
+
+% --- Code block styling: rounded corners, padding, inherited background --
+% tcolorbox redefines Shaded at \AtBeginDocument so we win the load-order
+% race against pandoc's own definition. colback=shadecolor inherits whatever
+% --highlight-style sets, so swapping themes Just Works.
+\usepackage{tcolorbox}
+\tcbuselibrary{skins, breakable}
+
+\AtBeginDocument{%
+  \renewenvironment{Shaded}{%
+    \begin{tcolorbox}[%
+      enhanced,
+      breakable,
+      arc=4pt,
+      outer arc=4pt,
+      boxrule=0pt,
+      colback=shadecolor,
+      left=8pt, right=8pt, top=6pt, bottom=6pt,
+      fontupper=\footnotesize
+    ]%
+  }{%
+    \end{tcolorbox}%
+  }%
+}
+
+% --- Blockquote callout: left bar only (Option A) ------------------------
+% Wrapped in center so the 80%-wide box is horizontally centered.
+% breakable is omitted — center creates a vbox that prevents page splits,
+% and notes are almost always short enough that this doesn't matter.
+\AtBeginDocument{%
+  \renewenvironment{quote}{%
+    \begin{center}%
+    \begin{tcolorbox}[%
+      enhanced,
+      arc=0pt,
+      outer arc=0pt,
+      boxrule=0pt,
+      leftrule=3pt,
+      colback=pagebackground,
+      colframe=linkblue,
+      colupper=bodytext,
+      width=0.8\linewidth,
+      left=10pt, right=6pt, top=3pt, bottom=3pt,
+      fontupper=\footnotesize,
+    ]%
+  }{%
+    \end{tcolorbox}%
+    \end{center}%
+  }%
+}
 
 % --- H1 always starts on a fresh page -----------------------------------
 % \pretocmd fires *before* \section so \clearpage runs before hyperref

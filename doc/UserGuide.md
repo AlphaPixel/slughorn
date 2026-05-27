@@ -1,29 +1,7 @@
 # slughorn User Guide
 
-> **Work in progress.** Sections are filled in incrementally across sessions.
-> Stubs are marked _Coming soon._
-
----
-
-## Table of Contents
-
-1. [What Is Slug](#what-is-slug)
-2. [What Is slughorn](#what-is-slughorn)
-3. [Who Is This For](#who-is-this-for)
-4. [Core Concepts](#core-concepts)
-5. [Getting Data In: Backends](#getting-data-in-backends)
-6. [The Canvas API](#the-canvas-api)
-7. [Gradients](#gradients)
-8. [Band Placement & Atlas Tuning](#band-placement--atlas-tuning)
-9. [Serialization](#serialization)
-10. [Python](#python)
-11. [Connecting to Your Graphics Backend](#connecting-to-your-graphics-backend)
-12. [Interactivity](#interactivity)
-13. [Debugging & Diagnostics](#debugging--diagnostics)
-14. [How This All Started](#how-this-all-started)
-15. [AI Disclosure & Sponsorship](#ai-disclosure--sponsorship)
-
----
+**TODO**: Insert *AlphaPixel* branding here, as well as anything else we might
+liek to highlight (like Github link, `TODO.md`, etc, etc)
 
 # What Is Slug
 
@@ -101,8 +79,6 @@ any scale or under any perspective transform. The band texture keeps per-fragmen
 cost bounded regardless of glyph complexity: only the curves that overlap the current
 horizontal strip need evaluating, not the entire outline.
 
----
-
 # What Is slughorn
 
 At its core, slughorn is a library for creating buffers of data (inside a
@@ -143,8 +119,6 @@ professor whose surname also contains the word "slug," and whose fondness for co
 talented acquaintances — and crystallized pineapple — felt, to the author, like a
 reasonable metaphor for a library that collects rendering backends. The overlap was not
 accidental. No copyright lawyers were consulted in the naming of this project.
-
----
 
 # Who Is This For
 
@@ -205,8 +179,6 @@ slughorn is probably the wrong choice if:
 > NOTE: As mentioned previously, slughorn will inevitably improve support for
 > all of these areas as time goes on, depending largely on community
 > interest/needs.
-
----
 
 # Core Concepts
 
@@ -328,6 +300,7 @@ struct Layer {
     uint32_t gradientId; // 0 = flat color; 1-based ID from addGradient()
 };
 ```
+
 > The `effectId` field is a general-purpose field exposed by slughorn that gives
 > the user some place to resolve what kind of frontend "effects" are applied; it
 > is the only field in *any* of the slughorn POD structs that implies some
@@ -448,8 +421,6 @@ if(const auto* shape = atlas.getShape(layer.key); shape) {
 curve and band-texture utilization numbers useful for tuning and debugging. The
 `slughorn` Python CLI utility can also be used to query this information.
 
----
-
 # Getting Data In: Backends
 
 Every backend does the same job: read curve data from an external source — a font
@@ -488,8 +459,6 @@ All other translation units include the header without the define. No separate
 The Canvas API is covered separately because it is slughorn's native authoring
 layer rather than a bridge to an external library. For new projects without
 existing font or SVG assets, start there.
-
----
 
 ## FreeType (`slughorn/freetype.hpp`)
 
@@ -611,8 +580,6 @@ slughorn::freetype::setLogCallback([](int level, const std::string& msg) {
 Log levels: `LOG_INFO = 0`, `LOG_NOTICE = 1`, `LOG_WARN = 2`. The default
 callback prints `LOG_WARN` and above to `stderr`.
 
----
-
 ## NanoSVG (`slughorn/nanosvg.hpp`)
 
 The NanoSVG backend parses SVG files or strings and produces a `CompositeShape`
@@ -676,15 +643,13 @@ for(const auto* shape = image->shapes; shape; shape = shape->next) {
 }
 ```
 
-### What NanoSVG supports
+### What NanoSVG Supports
 
 Supported: filled shapes with solid color or linear/radial gradients; lines and
 cubics (split to quadratics at load time).
 
 Not yet: stroked shapes, sweep/conic gradients, gradient `spreadMethod`
 reflect/repeat, clip paths, masks, group opacity/transforms, text elements.
-
----
 
 ## Cairo (`slughorn/cairo.hpp`)
 
@@ -715,8 +680,6 @@ Cairo's native curve primitive is the cubic Bézier (`CAIRO_PATH_CURVE_TO`). The
 backend splits each cubic at its midpoint into two quadratics. `cairo_stroke_to_path()`
 is not part of Cairo's stable public API; for stroke outlines, use the Skia backend
 or author stroked shapes as explicit filled paths.
-
----
 
 ## Skia (`slughorn/skia.hpp`)
 
@@ -768,8 +731,6 @@ weight `w = cos(angle/2)`. When `w == 1` the conic is an ordinary quadratic and
 passes through unchanged. When `w != 1`, the backend splits it at `t = 0.5` into
 two ordinary quadratics. This is transparent to callers.
 
----
-
 ## The Local-Origin Convention
 
 All backends share one convention: curves are shifted so the shape's bounding box
@@ -780,8 +741,6 @@ this matrix in `Layer::transform`; at render time, `Shape::computeQuad` adds
 
 Passing `Origin::Centered` to any backend stores the bounding-box center instead
 of the corner, turning `dx`/`dy` into a GPU-side rotation pivot.
-
----
 
 # The Canvas API
 
@@ -798,24 +757,22 @@ Two cooperating types do all the work:
 | `Path` | Geometry state and authoring verbs; equivalent to HTML Canvas `Path2D` |
 | `Canvas` | Stateful `CompositeShape` builder; holds an implicit `Path` and exposes commit verbs |
 
----
-
 ## Path
 
 `Path` owns curve geometry and the current transform matrix (CTM). It can be used
 standalone (built and sampled independently) or through the `Canvas` forwarding API.
 
-### Path commands
+### Path Commands
 
 ```cpp
 path.moveTo(x, y);
 path.lineTo(x, y);
-path.quadTo(cx, cy, x, y);              // quadratic Bézier
+path.quadTo(cx, cy, x, y); // quadratic Bézier
 path.bezierTo(c1x, c1y, c2x, c2y, x, y); // cubic Bézier
-path.closePath();                        // close sub-path and move curves to pending
+path.closePath(); // close sub-path and move curves to pending
 ```
 
-### Convenience shape helpers
+### Convenience Shape Helpers
 
 Each helper calls `clear()` internally and replaces the current path — except `arc()`,
 which *appends* to the current path, enabling composition with `lineTo()` for pie slices,
@@ -827,29 +784,29 @@ path.roundedRect(x, y, w, h, r);
 path.circle(cx, cy, r);
 path.ellipse(cx, cy, rx, ry);
 path.arc(cx, cy, r, startAngle, endAngle, ccw=false); // appends; does NOT call clear()
-path.arcTo(x1, y1, x2, y2, r);                       // rounded corner connecting two lines
+path.arcTo(x1, y1, x2, y2, r); // rounded corner connecting two lines
 ```
 
-### Transform stack
+### Transform Stack
 
 The CTM is applied to every path command before coordinates reach the curve accumulator.
 Geometry is baked in its transformed state; the CTM does not retroactively affect curves
 already accumulated.
 
 ```cpp
-path.save();              // push CTM onto stack
-path.restore();           // pop CTM from stack
+path.save(); // push CTM onto stack
+path.restore(); // pop CTM from stack
 path.translate(tx, ty);
-path.rotate(angle);       // radians
+path.rotate(angle); // radians
 path.scale(sx, sy);
-path.setTransform(m);     // replace CTM entirely
-path.resetTransform();    // back to identity
+path.setTransform(m); // replace CTM entirely
+path.resetTransform(); // back to identity
 ```
 
 `clear()` (i.e. `canvas.beginPath()`) does **not** reset the CTM — matching HTML Canvas
 behavior where `beginPath()` only clears geometry, never the transform.
 
-### Stroke expansion
+### Stroke Expansion
 
 `strokePath(width)` expands the current path in-place from a centerline to a
 constant-width filled outline. The resulting curves replace the current geometry:
@@ -857,32 +814,35 @@ constant-width filled outline. The resulting curves replace the current geometry
 ```cpp
 path.moveTo(0.1, 0.5);
 path.quadTo(0.25, 0.05, 0.5, 0.5);
-path.strokePath(0.04);   // path is now a filled outline, not a centerline
+path.strokePath(0.04); // path is now a filled outline, not a centerline
 ```
 
 The optional `cw` argument reverses winding so the outline subtracts coverage — useful for
 punch-out effects when combined with a filled region sharing the same commit call.
 
-### Arc-length sampling
+### Arc-length Sampling
 
 `Path::sample(t)` returns position and tangent direction at normalized arc-length
-`t ∈ [0, 1]`. The lookup table is built lazily and cached until the path geometry changes.
+$t \in [0, 1]$. The lookup table is built lazily and cached until the path geometry changes.
 
 ```cpp
 slughorn::canvas::Path p;
-p.moveTo(0, 0); p.quadTo(0.5, 1.0, 1, 0);
+
+p.moveTo(0, 0);
+p.quadTo(0.5, 1.0, 1, 0);
 
 auto mid = p.sample(0.5);
-// mid.x, mid.y  — world position at 50% arc length
-// mid.angle     — tangent angle in radians
+// mid.x, mid.y — world position at 50% arc length
+// mid.angle — tangent angle in radians
 
-slug_t len = p.arcLength();   // total arc length in authoring space
+// total arc length in authoring space
+slug_t len = p.arcLength();
 ```
 
 This is the mechanism used to place tick labels around a circular gauge or position an
 icon at an exact point along a curved path.
 
-### Composing paths
+### Composing Paths
 
 `addPath(other)` appends all curves from `other` into this path's pending accumulator
 without consuming or modifying `other`. Use it to build compound shapes from reusable
@@ -890,15 +850,15 @@ sub-paths or to merge paths produced independently:
 
 ```cpp
 slughorn::canvas::Path body, detail;
+
 body.circle(0.5, 0.5, 0.4);
 detail.rect(0.3, 0.3, 0.4, 0.4);
 
-body.addPath(detail);          // one commit covers both sub-paths
+// one commit covers both sub-paths
+body.addPath(detail);
+
 canvas.fill(body, RED);
 ```
-
----
-
 ## Canvas
 
 `Canvas` wraps an `Atlas` reference and an implicit `Path`. It forwards the full `Path`
@@ -908,7 +868,8 @@ drain the current path into the Atlas and push a `Layer` onto the in-progress
 
 ```cpp
 slughorn::Atlas atlas;
-slughorn::canvas::Canvas canvas(atlas);                           // default auto-key prefix
+
+slughorn::canvas::Canvas canvas(atlas); // default auto-key prefix
 slughorn::canvas::Canvas canvas(atlas, slughorn::KeyIterator("icon")); // custom prefix
 ```
 
@@ -917,10 +878,10 @@ slughorn::canvas::Canvas canvas(atlas, slughorn::KeyIterator("icon")); // custom
 All authoring commands operate on the Canvas's internal path:
 
 ```cpp
-canvas.beginPath();              // clear internal path; CTM unchanged
+canvas.beginPath(); // clear internal path; CTM unchanged
 canvas.moveTo(0.1, 0.5);
 canvas.quadTo(0.5, 0.1, 0.9, 0.5);
-canvas.fill(RED);                // commit internal path
+canvas.fill(RED); // commit internal path
 ```
 
 Any commit verb also accepts an explicit `Path` argument. The path is read but never
@@ -929,8 +890,8 @@ consumed — the same `Path` can be committed multiple times or to multiple canv
 ```cpp
 slughorn::canvas::Path star = buildStar();
 
-canvas.fill(star, RED);          // commit once in red — star is unchanged
-canvas.fill(star, BLUE, 1.0, Key("blue_star")); // commit again in blue
+canvas.fill(star, RED); // commit once in red — star is unchanged
+canvas.fill(star, BLUE, 1.0, "blue_star"); // commit again in blue
 ```
 
 `canvas.path()` returns a copy of the internal path for sampling or continued building
@@ -940,9 +901,9 @@ without disturbing the accumulator.
 > path until the next `beginPath()` call. Call `beginPath()` explicitly when starting a
 > new, unrelated shape to avoid inadvertently merging geometry.
 
-### Commit verbs
+### Commit Verbs
 
-#### fill — flat color
+#### fill — Flat Color
 
 ```cpp
 Key fill(Color color, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={});
@@ -953,7 +914,7 @@ Commits the current path as a flat-colored Layer. The auto-key overload assigns 
 name from the `KeyIterator` (`"icon_0"`, `"icon_1"`, …). The explicit-key overload makes
 the shape addressable by name after `build()`.
 
-#### stroke — stroke as commit verb
+#### stroke — Stroke as Commit Verb
 
 ```cpp
 Key stroke(slug_t width, Color color, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={});
@@ -986,25 +947,23 @@ Like `fill` / `stroke`, but the resulting Layer carries a `gradientId` instead o
 color. Gradient construction is covered in [Gradients](#gradients); a quick-start
 reference is at the end of this section.
 
-### CompositeShape management
+### CompositeShape Management
 
 Every `fill`, `stroke`, `fillGradient`, and `strokeGradient` call appends a Layer to an
 in-progress `CompositeShape`. `finalize()` seals it:
 
 ```cpp
 // Implicit reset — happens automatically at construction and after each finalize()
-canvas.beginComposite();       // explicitly reset accumulator + clear path
+canvas.beginComposite(); // explicitly reset accumulator + clear path
 
-canvas.setAdvance(0.6_cv);     // em-space horizontal advance (for text layout)
+canvas.setAdvance(0.6_cv); // em-space horizontal advance (for text layout)
 
-CompositeShape cs = canvas.finalize();          // returns composite; does NOT register in Atlas
-canvas.finalize(Key("my_icon"));                // registers in Atlas + resets accumulator
+CompositeShape cs = canvas.finalize(); // returns composite; does NOT register in Atlas
+canvas.finalize(Key("my_icon")); // registers in Atlas + resets accumulator
 ```
 
 `beginComposite()` resets both the composite accumulator and the internal path. Call it
 when you want to discard an in-progress composite without producing a `CompositeShape`.
-
----
 
 ## The Core Patterns
 
@@ -1141,8 +1100,6 @@ canvas.stroke(p, 0.06, WHITE);
 canvas.finalize(Key("sample_path"));
 ```
 
----
-
 ## The scale Parameter
 
 Every commit verb accepts an optional `scale` parameter (default `1_cv`). This is a
@@ -1150,8 +1107,6 @@ Every commit verb accepts an optional `scale` parameter (default `1_cv`). This i
 em-space `[0, 1]`. It is never stored in `Layer::scale`, which is reserved for FreeType2
 font sizes. For all Canvas-authored geometry, leave `scale` at `1_cv` unless your
 authoring coordinate system differs from `[0, 1]` em-space.
-
----
 
 ## Text Placement
 
@@ -1221,8 +1176,6 @@ freetype.hpp  ──→  slughorn.hpp  ←──  canvas.hpp
 FreeType, HarfBuzz, a future backend, or a manually filled struct — the API is identical.
 The application bridges the two at the call site.
 
----
-
 ## Gradient Quick Reference
 
 The Canvas provides three factory methods. All return a `GradientHandle` that you pass to
@@ -1240,10 +1193,8 @@ auto g = canvas.createRadialGradient(cx, cy, r0, r1, stops);
 auto g = canvas.createSweepGradient(cx, cy, startAngle, endAngle, stops);
 ```
 
-Stops are `{t, Color}` pairs with `t ∈ [0, 1]`. See [Gradients](#gradients) for the
+Stops are `{t, Color}` pairs with $t \in [0, 1]$. See [Gradients](#gradients) for the
 full treatment of gradient transforms, aspect-ratio correction, and COLRv1 integration.
-
----
 
 # Gradients
 
@@ -1316,7 +1267,7 @@ a per-layer opacity multiplier.
 
 ## Stops
 
-Stops are `{t, Color}` pairs with `t ∈ [0, 1]`. They are sorted by `t` during
+Stops are `{t, Color}` pairs with $t \in [0, 1]$. They are sorted by `t` during
 `build()`, so order does not matter. Colors beyond the first and last stop are clamped
 (pad spread). 256 texels is enough resolution for any ramp visible at screen sizes.
 
@@ -1373,7 +1324,7 @@ gi.stops     = stops;
 ```
 
 For a seam-free full-circle sweep, use `startAngle = −π` and `arcSpan = 2π`.
-`atan2` returns values in `[−π, π]`, which maps exactly onto `t ∈ [0, 1]` under
+`atan2` returns values in `[−π, π]`, which maps exactly onto $t \in [0, 1]$ under
 this parameterization — no visible seam at the wrap point.
 
 ## The Type Discriminator
@@ -1437,8 +1388,6 @@ For content from external sources, gradient registration is automatic:
 
 Manual `GradientInfo` construction is only needed when authoring through the Canvas
 API or writing a custom backend.
-
----
 
 # Band Placement & Atlas Tuning
 
@@ -1679,8 +1628,6 @@ Atlas::computeUniformSplits(curves, numBandsX, numBandsY);     // baseline / con
 Atlas::computeAdaptiveSplitsV2(curves, numBandsX, numBandsY);  // cost-based (planned)
 ```
 
----
-
 # Serialization
 
 slughorn's serialization layer lives in `slughorn/serial.hpp` and supports two formats.
@@ -1783,8 +1730,6 @@ The three differences from a formal glTF extension are minor:
 
 The result is that any tool capable of parsing `.glb` chunk structure can read the binary
 section of a `.slugb` file without modification.
-
----
 
 # Python
 
@@ -1952,8 +1897,6 @@ loading pipeline.
 alongside `osgSlug` itself, the entire `slughorn → osgSlug → OSG` pipeline will be
 fully scriptable from Python — load shapes, configure the scene graph, and drive
 rendering without writing a line of C++.
-
----
 
 # Connecting to Your Graphics Backend
 
@@ -2138,8 +2081,6 @@ single-file raw OpenGL example with no framework dependencies. It covers the cor
 geometry loop and texture upload and is useful as the simplest possible end-to-end
 reading of the pipeline in isolation.
 
----
-
 # Interactivity
 
 slughorn's GPU architecture makes runtime mutation unusually cheap. The two-SSBO
@@ -2300,7 +2241,7 @@ mt->addChild(shapeDrawable);
 mt->setUpdateCallback(new PathFollowCallback{path, 0.2f});
 ```
 
-`Canvas::Path::sample(t)` returns a `Sample { x, y, angle }` where `t ∈ [0, 1]`
+`Canvas::Path::sample(t)` returns a `Sample { x, y, angle }` where $t \in [0, 1]$
 is normalized arc-length and `angle` is the tangent direction in radians. Multiple
 shapes can sample the same `Path` at different `t` offsets to produce a convoy or
 flight-formation effect.
@@ -2334,15 +2275,11 @@ shared pivot) makes all layers in the composite share the same `transform.dx/dy`
 so `computeQuad` places all quads around the same world point without any manual
 coordinate arithmetic.
 
----
-
 # Debugging & Diagnostics
 
 Most of the diagnostic tooling lives in **osgSlug** — it is inherently GPU-side work.
 slughorn itself contributes a few CPU-side and Python-side tools. This section covers both
 layers and is clear about which belongs where.
-
----
 
 ## slughorn-side tools
 
@@ -2427,8 +2364,6 @@ This exact workflow caught the bug described in `ai/bug.md`: the
 corner arcs subdivided to the maximum recursion depth (256 segments per arc) and flooded
 the band tables with degenerate zero-length curves. The SVG diff made it obvious in
 seconds; the fix was one line.
-
----
 
 ## osgSlug-side tools
 
@@ -2542,8 +2477,6 @@ at the sizes evaluated, so both variants remain available for further experiment
 > is the alternative path that would narrow the gap without a fallback. See `TODO.md` for
 > detail.
 
----
-
 ## Workflow notes
 
 A typical debug session for a new shape looks like this:
@@ -2564,16 +2497,12 @@ A typical debug session for a new shape looks like this:
 For multi-layer composites, combine `osgSlug_layerMask` with the debug modes: isolate one
 layer at a time in mode 1 or mode 4 before going back to the full composite.
 
----
-
 # How This All Started
 
 We began by replacing a single character with an arbitrary group of curves, and
 it exploded outwards from there.
 
 _Coming soon — full backstory._
-
----
 
 # AI Disclosure & Sponsorship
 
