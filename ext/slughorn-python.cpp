@@ -705,10 +705,12 @@ PYBIND11_MODULE(slughorn, m) {
 		.def(py::init<uint32_t>(), py::arg("counter"),
 			"Numeric auto-key iterator starting at counter."
 		)
-		.def(py::init([](std::string prefix) {
-			return slughorn::KeyIterator(prefix);
-		}), py::arg("prefix"),
-			"String key iterator: produces prefix_0, prefix_1, ..."
+		.def(py::init([](std::string prefix, bool force) {
+			return slughorn::KeyIterator(prefix, force);
+		}), py::arg("prefix"), py::arg("force") = false,
+			"String key iterator: produces prefix_0, prefix_1, …\n"
+			"If force=True, the iterator name is always used even when the source\n"
+			"element (e.g. an SVG path) provides its own id attribute."
 		)
 		.def("next", &slughorn::KeyIterator::next, "Return the next Key and advance the counter.")
 		.def("__iter__", [](slughorn::KeyIterator& ki) -> slughorn::KeyIterator& {
@@ -720,6 +722,9 @@ PYBIND11_MODULE(slughorn, m) {
 		)
 		.def_readwrite("prefix", &slughorn::KeyIterator::prefix,
 			"Prefix string, or empty string for numeric mode."
+		)
+		.def_readwrite("force", &slughorn::KeyIterator::force,
+			"When True, iterator keys override any source-provided element id."
 		)
 		.def("__repr__", [](const slughorn::KeyIterator& ki) { return streamRepr(ki); })
 	;

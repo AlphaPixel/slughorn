@@ -400,7 +400,7 @@ CompositeShape loadImage(const NSVGimage* image, Atlas& atlas, KeyIterator& keys
 			continue;
 		}
 
-		const Key key = (shape->id[0] != '\0') ? Key(shape->id) : keys.next();
+		const Key key = (!keys.force && shape->id[0] != '\0') ? Key(shape->id) : keys.next();
 
 		Matrix transform = loadShape(shape, atlas, key, scale);
 
