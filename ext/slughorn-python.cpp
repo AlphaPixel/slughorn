@@ -498,7 +498,7 @@ static Sampler decodeShape(const slughorn::Atlas& atlas, const slughorn::Key& ke
 
 	out.shape = *shape;
 
-	if(shape->bandScaleX == 0.0_cv || shape->bandScaleY == 0.0_cv) {
+	if(shape->bandScaleX == 0_cv || shape->bandScaleY == 0_cv) {
 		out.hbandOffsets = {0, 0};
 		out.vbandOffsets = {0, 0};
 
@@ -731,7 +731,7 @@ PYBIND11_MODULE(slughorn, m) {
 		.def(py::init<>(), "Default: (0, 0, 0, 1) - opaque black.")
 		.def(py::init([](slug_t r, slug_t g, slug_t b, slug_t a) {
 			return slughorn::Color{r, g, b, a};
-		}), py::arg("r"), py::arg("g"), py::arg("b"), py::arg("a") = 1.0_cv,
+		}), py::arg("r"), py::arg("g"), py::arg("b"), py::arg("a") = 1_cv,
 			"Construct from r, g, b [, a]. All values in [0, 1]."
 		)
 		.def_readwrite("r", &slughorn::Color::r)
@@ -1145,8 +1145,8 @@ PYBIND11_MODULE(slughorn, m) {
 			"(0,0) = bottom-left of bounding box, (1,1) = top-right.")
 		.def("compute_quad", &slughorn::Atlas::Shape::computeQuad,
 			py::arg("transform"),
-			py::arg("scale") = 1.0_cv,
-			py::arg("expand") = 0.0_cv,
+			py::arg("scale") = 1_cv,
+			py::arg("expand") = 0_cv,
 			"Compute the world-space bounding quad for this shape."
 		)
 		.def("__repr__", [](const slughorn::Atlas::Shape& s) { return streamRepr(s); })
@@ -1521,7 +1521,7 @@ PYBIND11_MODULE(slughorn, m) {
 					return d.renderGrid(size, margin, banded);
 				},
 				py::arg("size") = 128,
-				py::arg("margin") = 0.0_cv,
+				py::arg("margin") = 0_cv,
 				py::arg("banded") = true,
 				"Render a full grayscale coverage grid as a float32 NumPy-compatible array."
 			)
@@ -1798,7 +1798,7 @@ PYBIND11_MODULE(slughorn, m) {
 				) {
 					return c.fill(color, scale, origin);
 				},
-				py::arg("color"), py::arg("scale") = 1.0_cv,
+				py::arg("color"), py::arg("scale") = 1_cv,
 				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin{},
 				"Commit the current path as a new Layer with the given color.\n"
 				"Returns the auto-generated Key, or Key(0) if the path was empty."
@@ -1828,7 +1828,7 @@ PYBIND11_MODULE(slughorn, m) {
 				) {
 					return c.defineShape(key, scale, origin);
 				},
-				py::arg("key"), py::arg("scale") = 1.0_cv,
+				py::arg("key"), py::arg("scale") = 1_cv,
 				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin{},
 				"Register the current path as a named Shape (geometry only, no Layer).\n"
 				"Returns False if the path was empty."
@@ -1854,7 +1854,7 @@ PYBIND11_MODULE(slughorn, m) {
 				) {
 					return c.stroke(width, color, scale, origin);
 				},
-				py::arg("width"), py::arg("color"), py::arg("scale") = 1.0_cv,
+				py::arg("width"), py::arg("color"), py::arg("scale") = 1_cv,
 				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin{},
 				"Expand the current path as a stroke outline and commit as a colored Layer."
 			)
@@ -1888,7 +1888,7 @@ PYBIND11_MODULE(slughorn, m) {
 				) {
 					return c.fill(p, color, scale, origin);
 				},
-				py::arg("path"), py::arg("color"), py::arg("scale") = 1.0_cv,
+				py::arg("path"), py::arg("color"), py::arg("scale") = 1_cv,
 				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin{},
 				"Fill a standalone Path. path is not consumed or modified."
 			)
@@ -1918,7 +1918,7 @@ PYBIND11_MODULE(slughorn, m) {
 				) {
 					return c.defineShape(p, key, scale, origin);
 				},
-				py::arg("path"), py::arg("key"), py::arg("scale") = 1.0_cv,
+				py::arg("path"), py::arg("key"), py::arg("scale") = 1_cv,
 				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin{},
 				"Register a standalone Path as a named Shape (geometry only, no Layer)."
 			)
@@ -1934,7 +1934,7 @@ PYBIND11_MODULE(slughorn, m) {
 				) {
 					return c.stroke(p, width, color, scale, origin);
 				},
-				py::arg("path"), py::arg("width"), py::arg("color"), py::arg("scale") = 1.0_cv,
+				py::arg("path"), py::arg("width"), py::arg("color"), py::arg("scale") = 1_cv,
 				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin{},
 				"Stroke a standalone Path. path is not consumed or modified."
 			)
@@ -1966,7 +1966,7 @@ PYBIND11_MODULE(slughorn, m) {
 				) {
 					return c.fillGradient(p, handle, scale, origin);
 				},
-				py::arg("path"), py::arg("handle"), py::arg("scale") = 1.0_cv,
+				py::arg("path"), py::arg("handle"), py::arg("scale") = 1_cv,
 				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin{},
 				"Gradient-fill a standalone Path. path is not consumed."
 			)
@@ -2029,7 +2029,7 @@ PYBIND11_MODULE(slughorn, m) {
 					return c.fillGradient(handle, scale, origin);
 				},
 				py::arg("handle"),
-				py::arg("scale") = 1.0_cv,
+				py::arg("scale") = 1_cv,
 				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin{},
 				"Commit the current path as a gradient-filled Layer."
 			)
@@ -2062,7 +2062,7 @@ PYBIND11_MODULE(slughorn, m) {
 					return c.strokeGradient(width, handle, scale, origin);
 				},
 				py::arg("width"), py::arg("handle"),
-				py::arg("scale") = 1.0_cv,
+				py::arg("scale") = 1_cv,
 				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin{},
 				"Expand the current path as a stroke outline and commit with a gradient fill."
 			)

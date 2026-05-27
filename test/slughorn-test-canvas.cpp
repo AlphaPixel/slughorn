@@ -112,7 +112,7 @@ int main(int argc, char** argv) {
 	// ============================================================================================
 
 	canvas.circle(0.5_cv, 0.5_cv, 0.4_cv);
-	canvas.fill(BLUE, 1.0_cv, Key("circle_shape"));
+	canvas.fill(BLUE, 1_cv, Key("circle_shape"));
 
 	canvas.finalize(Key("circle_composite"));
 
@@ -144,10 +144,10 @@ int main(int argc, char** argv) {
 	// ============================================================================================
 
 	canvas.ellipse(0.5_cv, 0.5_cv, 0.45_cv, 0.28_cv);
-	canvas.fill(CYAN, 1.0_cv, Key("badge_bg"));
+	canvas.fill(CYAN, 1_cv, Key("badge_bg"));
 
 	canvas.roundedRect(0.15_cv, 0.35_cv, 0.7_cv, 0.3_cv, 0.12_cv);
-	canvas.fill(GOLD, 1.0_cv, Key("badge_bar"));
+	canvas.fill(GOLD, 1_cv, Key("badge_bar"));
 
 	canvas.finalize(Key("badge_composite"));
 
@@ -190,18 +190,18 @@ int main(int argc, char** argv) {
 	// ============================================================================================
 
 	canvas.beginPath();
-	canvas.moveTo(0.0_cv, 0.0_cv);
+	canvas.moveTo(0_cv, 0_cv);
 	canvas.lineTo(0.1_cv, 0.5_cv);
-	canvas.lineTo(0.2_cv, 0.0_cv);
+	canvas.lineTo(0.2_cv, 0_cv);
 	canvas.lineTo(0.3_cv, 0.5_cv);
-	canvas.lineTo(0.4_cv, 0.0_cv);
+	canvas.lineTo(0.4_cv, 0_cv);
 	canvas.lineTo(0.5_cv, 0.5_cv);
-	canvas.lineTo(0.6_cv, 0.0_cv);
+	canvas.lineTo(0.6_cv, 0_cv);
 	canvas.lineTo(0.7_cv, 0.5_cv);
-	canvas.lineTo(0.8_cv, 0.0_cv);
+	canvas.lineTo(0.8_cv, 0_cv);
 	canvas.lineTo(0.9_cv, 0.5_cv);
-	canvas.lineTo(1.0_cv, 0.0_cv);
-	canvas.stroke(0.04_cv, CYAN, 1.0_cv, Key("zigzag_stroke"));
+	canvas.lineTo(1_cv, 0_cv);
+	canvas.stroke(0.04_cv, CYAN, 1_cv, Key("zigzag_stroke"));
 	// stroke() with an explicit key registers the shape AND queues a Layer in the
 	// composite accumulator, just like fill(). If you only want the named shape
 	// and not the composite wrapper, clear the accumulator explicitly.
@@ -237,7 +237,7 @@ int main(int argc, char** argv) {
 	canvas.arcTo(0.2_cv, 0.7_cv, 0.2_cv, 0.3_cv, 0.1_cv);
 	canvas.arcTo(0.2_cv, 0.3_cv, 0.8_cv, 0.3_cv, 0.1_cv);
 	canvas.closePath();
-	canvas.fill(GREEN, 1.0_cv, Key("stadium_arcto"));
+	canvas.fill(GREEN, 1_cv, Key("stadium_arcto"));
 
 	canvas.finalize(Key("stadium_composite"));
 
@@ -389,9 +389,9 @@ int main(int argc, char** argv) {
 			0.5_cv, 0.5_cv,
 			-PI * 0.75_cv, PI * 0.75_cv,
 			{
-				{0.0_cv, {0_cv, 1_cv, 0_cv, 1_cv}}, // green
+				{0_cv, {0_cv, 1_cv, 0_cv, 1_cv}}, // green
 				{0.5_cv, {1_cv, 1_cv, 0_cv, 1_cv}}, // yellow
-				{1.0_cv, {1_cv, 0_cv, 0_cv, 1_cv}} // red
+				{1_cv, {1_cv, 0_cv, 0_cv, 1_cv}} // red
 			}
 		);
 
@@ -478,7 +478,7 @@ int main(int argc, char** argv) {
 		const slug_t HAND_LENGTH = 0.45_cv;
 		const slug_t HAND_WIDTH = 0.03_cv;
 
-		const Color HAND_COLOR = {0.12_cv, 0.12_cv, 0.18_cv, 1.0_cv};
+		const Color HAND_COLOR = {0.12_cv, 0.12_cv, 0.18_cv, 1_cv};
 
 		canvas.moveTo(CX, CY);
 		canvas.lineTo(CX, CY + HAND_LENGTH);
@@ -486,7 +486,7 @@ int main(int argc, char** argv) {
 		const Key handKey = canvas.stroke(
 			HAND_WIDTH,
 			HAND_COLOR,
-			1.0_cv,
+			1_cv,
 			slughorn::Atlas::ShapeInfo::Origin(CX, CY)
 		);
 

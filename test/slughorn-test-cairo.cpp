@@ -24,7 +24,7 @@ void test_Shape() {
 	// -------------------------------------------------------------------------
 	// Step 1: raw decomposition
 	// -------------------------------------------------------------------------
-	auto [info, transform] = slughorn::cairo::decomposePath(cr, 1.0_cv / 100.0_cv);
+	auto [info, transform] = slughorn::cairo::decomposePath(cr, 1_cv / 100_cv);
 
 	std::cout << "Matrix: " << transform << std::endl;
 	std::cout << "Curves: " << info.curves.size() << std::endl;
@@ -105,7 +105,7 @@ void test_CompositeShape() {
 		cairo_close_path(cr);
 		cairo_restore(cr);
 
-		// auto [curves, transform] = slughorn::cairo::decomposePath(cr, 1.0_cv / 100.0_cv);
+		// auto [curves, transform] = slughorn::cairo::decomposePath(cr, 1_cv / 100_cv);
 		auto [info, transform] = slughorn::cairo::decomposePath(cr, 1_cv);
 
 		std::cout << "Matrix: " << transform << std::endl;

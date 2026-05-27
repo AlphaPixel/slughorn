@@ -71,7 +71,7 @@ namespace skia {
 // has a zero-size bounding box.
 std::pair<Atlas::ShapeInfo, Matrix> decomposePath(
 	const SkPath& path,
-	slug_t scale=1.0_cv,
+	slug_t scale=1_cv,
 	Atlas::ShapeInfo::Origin origin={}
 );
 
@@ -109,7 +109,7 @@ Matrix loadShape(
 	const SkPath& path,
 	Atlas& atlas,
 	uint32_t key,
-	slug_t scale=1.0_cv,
+	slug_t scale=1_cv,
 	bool autoMetrics=true,
 	Atlas::ShapeInfo::Origin origin={}
 );
@@ -121,7 +121,7 @@ Matrix loadStrokedShape(
 	Atlas& atlas,
 	uint32_t key,
 	float strokeWidth,
-	slug_t scale=1.0_cv,
+	slug_t scale=1_cv,
 	SkPaint::Join join=SkPaint::kRound_Join,
 	SkPaint::Cap cap=SkPaint::kRound_Cap,
 	Atlas::ShapeInfo::Origin origin={}
@@ -148,12 +148,12 @@ static void splitConic(
 	slug_t p2x, slug_t p2y, // end point P2
 	slug_t w // conic weight
 ) {
-	const slug_t denom = 1.0_cv + w;
-	const slug_t inv = 1.0_cv / denom;
+	const slug_t denom = 1_cv + w;
+	const slug_t inv = 1_cv / denom;
 
 	// Midpoint on the curve
-	const slug_t midX = (p0x + 2.0_cv * w * p1x + p2x) * (0.5_cv * inv);
-	const slug_t midY = (p0y + 2.0_cv * w * p1y + p2y) * (0.5_cv * inv);
+	const slug_t midX = (p0x + 2_cv * w * p1x + p2x) * (0.5_cv * inv);
+	const slug_t midY = (p0y + 2_cv * w * p1y + p2y) * (0.5_cv * inv);
 
 	// Control points for each half
 	const slug_t c0x = (p0x + w * p1x) * inv;
@@ -222,7 +222,7 @@ std::pair<Atlas::ShapeInfo, Matrix> decomposePath(const SkPath& path, slug_t sca
 				const slug_t w = cv(iter.conicWeight());
 
 				// w == 1.0: ordinary quadratic, no split needed.
-				if(std::abs(w - 1.0_cv) < 1e-5_cv) decomposer.quadTo(
+				if(std::abs(w - 1_cv) < 1e-5_cv) decomposer.quadTo(
 					cv(pts[1].x()) * scale, cv(pts[1].y()) * scale,
 					cv(pts[2].x()) * scale, cv(pts[2].y()) * scale
 				);

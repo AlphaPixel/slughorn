@@ -62,7 +62,7 @@ namespace cairo {
 // space). Pass 1.0 if coordinates are already normalized.
 std::pair<Atlas::ShapeInfo, Matrix> decomposePath(
 	cairo_t* cr,
-	slug_t scale=1.0_cv,
+	slug_t scale=1_cv,
 	Atlas::ShapeInfo::Origin origin={}
 );
 
@@ -76,7 +76,7 @@ Matrix loadShape(
 	cairo_t* cr,
 	Atlas& atlas,
 	Key key,
-	slug_t scale=1.0_cv,
+	slug_t scale=1_cv,
 	bool autoMetrics=true,
 	Atlas::ShapeInfo::Origin origin={}
 );

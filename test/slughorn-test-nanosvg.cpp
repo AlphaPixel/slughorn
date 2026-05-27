@@ -193,7 +193,7 @@ void test_Shape() {
 	if(!image || !image->shapes) { nsvgDelete(image); return; }
 
 	const NSVGshape* shape = image->shapes;
-	const slug_t scale = 1.0_cv / cv(image->width); // = 1/100
+	const slug_t scale = 1_cv / cv(image->width); // = 1/100
 
 	// --- decomposePath ---
 	auto [info, transform] = slughorn::nanosvg::decomposePath(shape, scale);
@@ -222,8 +222,8 @@ void test_Shape() {
 	check("all curves in [0,1]", inRange);
 
 	// Transform: shape is at canvas origin so dx=0, dy=0
-	checkNear("transform.dx == 0", transform.dx, 0.0_cv);
-	checkNear("transform.dy == 0", transform.dy, 0.0_cv);
+	checkNear("transform.dx == 0", transform.dx, 0_cv);
+	checkNear("transform.dy == 0", transform.dy, 0_cv);
 
 	slughorn::Atlas atlas;
 
@@ -237,18 +237,18 @@ void test_Shape() {
 	if(s) {
 		std::cout << "  " << *s << std::endl;
 
-		checkNear("width == 1", s->width, 1.0_cv);
-		checkNear("height == 1", s->height, 1.0_cv);
-		checkNear("bearingX == 0", s->bearingX, 0.0_cv);
-		checkNear("bearingY == 1", s->bearingY, 1.0_cv);
+		checkNear("width == 1", s->width, 1_cv);
+		checkNear("height == 1", s->height, 1_cv);
+		checkNear("bearingX == 0", s->bearingX, 0_cv);
+		checkNear("bearingY == 1", s->bearingY, 1_cv);
 
 		auto q = s->computeQuad(transform);
 		std::cout << "  " << q << std::endl;
 
-		checkNear("quad.x0 == 0", q.x0, 0.0_cv);
-		checkNear("quad.y0 == 0", q.y0, 0.0_cv);
-		checkNear("quad.x1 == 1", q.x1, 1.0_cv);
-		checkNear("quad.y1 == 1", q.y1, 1.0_cv);
+		checkNear("quad.x0 == 0", q.x0, 0_cv);
+		checkNear("quad.y0 == 0", q.y0, 0_cv);
+		checkNear("quad.x1 == 1", q.x1, 1_cv);
+		checkNear("quad.y1 == 1", q.y1, 1_cv);
 	}
 
 	nsvgDelete(image);
@@ -310,16 +310,16 @@ void test_Gradients() {
 
 		if(g.stops.size() >= 2) {
 			// stop 0: red (#ff0000), offset 0
-			checkNear("stop[0].t == 0", g.stops[0].t, 0.0_cv);
-			checkNear("stop[0].r == 1", g.stops[0].color.r, 1.0_cv);
-			checkNear("stop[0].g == 0", g.stops[0].color.g, 0.0_cv);
-			checkNear("stop[0].b == 0", g.stops[0].color.b, 0.0_cv);
+			checkNear("stop[0].t == 0", g.stops[0].t, 0_cv);
+			checkNear("stop[0].r == 1", g.stops[0].color.r, 1_cv);
+			checkNear("stop[0].g == 0", g.stops[0].color.g, 0_cv);
+			checkNear("stop[0].b == 0", g.stops[0].color.b, 0_cv);
 
 			// stop 1: blue (#0000ff), offset 1
-			checkNear("stop[1].t == 1", g.stops[1].t, 1.0_cv);
-			checkNear("stop[1].r == 0", g.stops[1].color.r, 0.0_cv);
-			checkNear("stop[1].g == 0", g.stops[1].color.g, 0.0_cv);
-			checkNear("stop[1].b == 1", g.stops[1].color.b, 1.0_cv);
+			checkNear("stop[1].t == 1", g.stops[1].t, 1_cv);
+			checkNear("stop[1].r == 0", g.stops[1].color.r, 0_cv);
+			checkNear("stop[1].g == 0", g.stops[1].color.g, 0_cv);
+			checkNear("stop[1].b == 1", g.stops[1].color.b, 1_cv);
 		}
 	});
 
@@ -328,11 +328,11 @@ void test_Gradients() {
 		check("2 stops", g.stops.size() == 2);
 
 		// For a square bbox, B should be approximately scalar * I (b01 and b10 near 0).
-		checkNear("b01 ~= 0", g.transform.xy, 0.0_cv, 1e-3_cv);
-		checkNear("b10 ~= 0", g.transform.yx, 0.0_cv, 1e-3_cv);
+		checkNear("b01 ~= 0", g.transform.xy, 0_cv, 1e-3_cv);
+		checkNear("b10 ~= 0", g.transform.yx, 0_cv, 1e-3_cv);
 
 		// b00 and b11 should be equal (isotropic) and positive.
-		check("b00 > 0", g.transform.xx > 0.0_cv);
+		check("b00 > 0", g.transform.xx > 0_cv);
 		checkNear("b00 == b11", g.transform.xx, g.transform.yy, 1e-3_cv);
 	});
 
@@ -342,12 +342,12 @@ void test_Gradients() {
 
 		// gradientTransform="matrix(200,0,0,100,200,100)" -> x-radius=200, y-radius=100 in SVG.
 		// In em-space (scale=1/400): B should be [[2,0],[0,4]] and center at (0.5, 0.25).
-		check("b11 > 0", g.transform.yy > 0.0_cv);
+		check("b11 > 0", g.transform.yy > 0_cv);
 		check("b00 != b11 (anisotropic)", std::abs(g.transform.xx - g.transform.yy) > 1e-3_cv);
-		checkNear("b00 ~= 2", g.transform.xx, 2.0_cv, 0.01_cv);
-		checkNear("b11 ~= 4", g.transform.yy, 4.0_cv, 0.01_cv);
-		checkNear("b01 ~= 0", g.transform.xy, 0.0_cv, 1e-3_cv);
-		checkNear("b10 ~= 0", g.transform.yx, 0.0_cv, 1e-3_cv);
+		checkNear("b00 ~= 2", g.transform.xx, 2_cv, 0.01_cv);
+		checkNear("b11 ~= 4", g.transform.yy, 4_cv, 0.01_cv);
+		checkNear("b01 ~= 0", g.transform.xy, 0_cv, 1e-3_cv);
+		checkNear("b10 ~= 0", g.transform.yx, 0_cv, 1e-3_cv);
 		checkNear("center.x ~= 0.5", g.transform.dx, 0.5_cv, 0.01_cv);
 		checkNear("center.y ~= 0.25", g.transform.dy, 0.25_cv, 0.01_cv);
 
@@ -360,12 +360,12 @@ void test_Gradients() {
 
 		// objectBoundingBox on 400x200: sl/sw = 0.79, sl/sh = 1.58 -> B = [[2,0],[0,4]],
 		// center=(0.5,0.25)
-		check("b11 > 0", g.transform.yy > 0.0_cv);
+		check("b11 > 0", g.transform.yy > 0_cv);
 		check("b00 != b11 (anisotropic)", std::abs(g.transform.xx - g.transform.yy) > 1e-3_cv);
-		checkNear("b00 ~= 2", g.transform.xx, 2.0_cv, 0.05_cv);
-		checkNear("b11 ~= 4", g.transform.yy, 4.0_cv, 0.05_cv);
-		checkNear("b01 ~= 0", g.transform.xy, 0.0_cv, 1e-3_cv);
-		checkNear("b10 ~= 0", g.transform.yx, 0.0_cv, 1e-3_cv);
+		checkNear("b00 ~= 2", g.transform.xx, 2_cv, 0.05_cv);
+		checkNear("b11 ~= 4", g.transform.yy, 4_cv, 0.05_cv);
+		checkNear("b01 ~= 0", g.transform.xy, 0_cv, 1e-3_cv);
+		checkNear("b10 ~= 0", g.transform.yx, 0_cv, 1e-3_cv);
 		checkNear("center.x ~= 0.5", g.transform.dx, 0.5_cv, 0.01_cv);
 		checkNear("center.y ~= 0.25", g.transform.dy, 0.25_cv, 0.01_cv);
 
@@ -403,8 +403,8 @@ void test_CompositeShape() {
 	check("3 layers loaded", composite.layers.size() == 3);
 
 	// Expected offsets in normalized space (scale = 1/300)
-	const slug_t third = 1.0_cv / 3.0_cv;
-	const slug_t offsets[3] = { 0.0_cv, third, 2.0_cv * third };
+	const slug_t third = 1_cv / 3_cv;
+	const slug_t offsets[3] = { 0_cv, third, 2_cv * third };
 
 	for(size_t i = 0; i < composite.layers.size(); i++) {
 		const auto& layer = composite.layers[i];

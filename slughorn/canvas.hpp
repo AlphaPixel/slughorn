@@ -176,9 +176,9 @@ public:
 	void clear() {
 		_pendingCurves.clear();
 		_activeCurves.clear();
-		_decomposer._x = _decomposer._y = 0.0_cv;
-		_decomposer._sx = _decomposer._sy = 0.0_cv;
-		_penX = _penY = 0.0_cv;
+		_decomposer._x = _decomposer._y = 0_cv;
+		_decomposer._sx = _decomposer._sy = 0_cv;
+		_penX = _penY = 0_cv;
 		_lutDirty = true;
 	}
 
@@ -327,7 +327,7 @@ public:
 	void roundedRect(slug_t x, slug_t y, slug_t w, slug_t h, slug_t r) {
 		r = std::min(r, std::min(w, h) * 0.5_cv);
 
-		if(r <= 0.0_cv) { rect(x, y, w, h); return; }
+		if(r <= 0_cv) { rect(x, y, w, h); return; }
 
 		const slug_t k = 0.5522847498_cv;
 		const slug_t kr = k * r;
@@ -371,7 +371,7 @@ public:
 		if(ccw) {
 			sweep = startAngle - endAngle;
 
-			if(sweep < 0.0_cv) sweep += cv(2.0 * M_PI);
+			if(sweep < 0_cv) sweep += cv(2.0 * M_PI);
 
 			sweep = -sweep;
 		}
@@ -379,14 +379,14 @@ public:
 		else {
 			sweep = endAngle - startAngle;
 
-			if(sweep < 0.0_cv) sweep += cv(2.0 * M_PI);
+			if(sweep < 0_cv) sweep += cv(2.0 * M_PI);
 		}
 
 		_arcSegments(cx, cy, r, startAngle, sweep);
 	}
 
 	void arcTo(slug_t x1, slug_t y1, slug_t x2, slug_t y2, slug_t r) {
-		if(r <= 0.0_cv) { lineTo(x1, y1); return; }
+		if(r <= 0_cv) { lineTo(x1, y1); return; }
 
 		const slug_t p0x = _penX, p0y = _penY;
 		const slug_t d0x = p0x - x1, d0y = p0y - y1;
@@ -403,7 +403,7 @@ public:
 		if(std::abs(cross) < 1e-6_cv) { lineTo(x1, y1); return; }
 
 		const slug_t dot = u0x*u1x + u0y*u1y;
-		const slug_t tanHalf = std::abs(cross) / (1.0_cv + dot);
+		const slug_t tanHalf = std::abs(cross) / (1_cv + dot);
 
 		if(tanHalf < 1e-6_cv) { lineTo(x1, y1); return; }
 
@@ -411,7 +411,7 @@ public:
 		const slug_t t0x = x1 + u0x * tangentDist, t0y = y1 + u0y * tangentDist;
 		const slug_t t1x = x1 + u1x * tangentDist, t1y = y1 + u1y * tangentDist;
 
-		const slug_t sign = (cross > 0.0_cv) ? 1.0_cv : -1.0_cv;
+		const slug_t sign = (cross > 0_cv) ? 1_cv : -1_cv;
 		const slug_t cenX = t0x - sign * u0y * r;
 		const slug_t cenY = t0y + sign * u0x * r;
 
@@ -419,7 +419,7 @@ public:
 		const slug_t a1 = std::atan2(t1y - cenY, t1x - cenX);
 
 		lineTo(t0x, t0y);
-		arc(cenX, cenY, r, a0, a1, cross > 0.0_cv);
+		arc(cenX, cenY, r, a0, a1, cross > 0_cv);
 	}
 
 	// -------------------------------------------------------------------------
@@ -439,7 +439,7 @@ public:
 		// Scale width by the CTM's pen scale so canvas.scale() affects stroke width.
 		const slug_t xScale = std::sqrt(_ctm.xx * _ctm.xx + _ctm.yx * _ctm.yx);
 		const slug_t yScale = std::sqrt(_ctm.xy * _ctm.xy + _ctm.yy * _ctm.yy);
-		const slug_t penScale = (xScale > 0_cv && yScale > 0_cv) ? std::sqrt(xScale * yScale) : 1.0_cv;
+		const slug_t penScale = (xScale > 0_cv && yScale > 0_cv) ? std::sqrt(xScale * yScale) : 1_cv;
 		const slug_t h = width * penScale * 0.5_cv;
 		const slug_t tol = _decomposer.tolerance < TOLERANCE_EXACT
 			? _decomposer.tolerance
@@ -474,12 +474,12 @@ public:
 
 			segN[i] = len > 1e-9_cv
 				? std::pair{-dy / len, dx / len}
-				: std::pair{0.0_cv, 1.0_cv}
+				: std::pair{0_cv, 1_cv}
 			;
 		}
 
 		// Pass 2b: per-point miter-corrected normals.
-		static constexpr slug_t MITER_LIMIT = 4.0_cv;
+		static constexpr slug_t MITER_LIMIT = 4_cv;
 
 		struct PN { slug_t nx, ny; };
 
@@ -499,7 +499,7 @@ public:
 				const slug_t d = nx * segN[cur].first + ny * segN[cur].second;
 
 				if(d > 1e-3_cv) {
-					const slug_t m = 1.0_cv / d;
+					const slug_t m = 1_cv / d;
 
 					if(m <= MITER_LIMIT) { nx *= m; ny *= m; }
 
@@ -606,7 +606,7 @@ public:
 
 		if(_pts.size() < 2) return {};
 
-		const slug_t s = std::max(0.0_cv, std::min(1.0_cv, t)) * _totalLength;
+		const slug_t s = std::max(0_cv, std::min(1_cv, t)) * _totalLength;
 
 		auto it = std::lower_bound(_lut.begin(), _lut.end(), s);
 		size_t i = static_cast<size_t>(std::distance(_lut.begin(), it));
@@ -616,7 +616,7 @@ public:
 		if(!i) i = 1;
 
 		const slug_t segLen = _lut[i] - _lut[i-1];
-		const slug_t frac = segLen > 1e-12_cv ? (s - _lut[i-1]) / segLen : 0.0_cv;
+		const slug_t frac = segLen > 1e-12_cv ? (s - _lut[i-1]) / segLen : 0_cv;
 
 		const slug_t x = _pts[i-1].first + frac * (_pts[i].first - _pts[i-1].first);
 		const slug_t y = _pts[i-1].second + frac * (_pts[i].second - _pts[i-1].second);
@@ -633,7 +633,7 @@ private:
 	friend class Canvas;
 
 	void _arcSegments(slug_t cx, slug_t cy, slug_t r, slug_t startAngle, slug_t sweep) {
-		if(r <= 0.0_cv || sweep == 0.0_cv) return;
+		if(r <= 0_cv || sweep == 0_cv) return;
 
 		const slug_t absSweep = std::abs(sweep);
 		const int nSegs = std::max(1, static_cast<int>(std::ceil(absSweep / cv(M_PI_2))));
@@ -643,7 +643,7 @@ private:
 
 		for(int i = 0; i < nSegs; ++i) {
 			const slug_t a0 = angle, a1 = angle + segSweep;
-			const slug_t k = (4.0_cv / 3.0_cv) * std::tan(segSweep * 0.25_cv);
+			const slug_t k = (4_cv / 3_cv) * std::tan(segSweep * 0.25_cv);
 			const slug_t cos0 = std::cos(a0), sin0 = std::sin(a0);
 			const slug_t cos1 = std::cos(a1), sin1 = std::sin(a1);
 
@@ -670,7 +670,7 @@ private:
 		_pts.clear();
 		_lut.clear();
 
-		_totalLength = 0.0_cv;
+		_totalLength = 0_cv;
 
 		Atlas::Curves all = _pendingCurves;
 
@@ -688,7 +688,7 @@ private:
 				_pts
 			);
 
-			_lut.resize(_pts.size(), 0.0_cv);
+			_lut.resize(_pts.size(), 0_cv);
 
 			for(size_t i = 1; i < _pts.size(); ++i) {
 				const slug_t dx = _pts[i].first - _pts[i-1].first;
@@ -713,7 +713,7 @@ private:
 
 	mutable std::vector<std::pair<slug_t, slug_t>> _pts;
 	mutable std::vector<slug_t> _lut;
-	mutable slug_t _totalLength = 0.0_cv;
+	mutable slug_t _totalLength = 0_cv;
 	mutable bool _lutDirty = true;
 };
 
@@ -878,7 +878,7 @@ public:
 	// accumulated curves remain in the path until the next beginPath() call.
 	// -------------------------------------------------------------------------
 
-	Key fill(Color color, slug_t scale=1.0_cv, Atlas::ShapeInfo::Origin origin={}) {
+	Key fill(Color color, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={}) {
 		_consolidate();
 
 		if(_path._pendingCurves.empty()) return Key(0u);
@@ -894,13 +894,13 @@ public:
 		return _commitFill(_path._pendingCurves, color, scale, key, origin);
 	}
 
-	bool defineShape(Key key, slug_t scale=1.0_cv, Atlas::ShapeInfo::Origin origin={}) {
+	bool defineShape(Key key, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={}) {
 		_consolidate();
 
 		return _commitShape(_path._pendingCurves, key, scale, origin);
 	}
 
-	Key stroke(slug_t width, Color color, slug_t scale=1.0_cv, Atlas::ShapeInfo::Origin origin={}) {
+	Key stroke(slug_t width, Color color, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={}) {
 		if(!_path.strokePath(width)) return Key(0u);
 
 		return _commitFill(_path._pendingCurves, color, scale, _key.next(), origin);
@@ -912,7 +912,7 @@ public:
 		return _commitFill(_path._pendingCurves, color, scale, key, origin);
 	}
 
-	Key fillGradient(const GradientHandle& handle, slug_t scale=1.0_cv, Atlas::ShapeInfo::Origin origin={}) {
+	Key fillGradient(const GradientHandle& handle, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={}) {
 		_consolidate();
 
 		if(_path._pendingCurves.empty()) return Key(0u);
@@ -936,7 +936,7 @@ public:
 		return k;
 	}
 
-	Key strokeGradient(slug_t width, const GradientHandle& handle, slug_t scale=1.0_cv, Atlas::ShapeInfo::Origin origin={}) {
+	Key strokeGradient(slug_t width, const GradientHandle& handle, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={}) {
 		if(!_path.strokePath(width)) return Key(0u);
 
 		Key k = _commitGradient(_path._pendingCurves, handle, scale, _key.next(), origin);
@@ -963,7 +963,7 @@ public:
 	// stroke() makes an internal copy to expand the stroke without altering @p p.
 	// -------------------------------------------------------------------------
 
-	Key fill(const Path& p, Color color, slug_t scale=1.0_cv, Atlas::ShapeInfo::Origin origin={}) {
+	Key fill(const Path& p, Color color, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={}) {
 		if(!p.hasPendingPath()) return Key(0u);
 
 		return _commitFill(_merged(p), color, scale, _key.next(), origin);
@@ -975,13 +975,13 @@ public:
 		return _commitFill(_merged(p), color, scale, key, origin);
 	}
 
-	bool defineShape(const Path& p, Key key, slug_t scale=1.0_cv, Atlas::ShapeInfo::Origin origin={}) {
+	bool defineShape(const Path& p, Key key, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={}) {
 		if(!p.hasPendingPath()) return false;
 
 		return _commitShape(_merged(p), key, scale, origin);
 	}
 
-	Key stroke(const Path& p, slug_t width, Color color, slug_t scale=1.0_cv, Atlas::ShapeInfo::Origin origin={}) {
+	Key stroke(const Path& p, slug_t width, Color color, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={}) {
 		Path copy = p;
 
 		if(!copy.strokePath(width)) return Key(0u);
@@ -997,7 +997,7 @@ public:
 		return _commitFill(_merged(copy), color, scale, key, origin);
 	}
 
-	Key fillGradient(const Path& p, const GradientHandle& handle, slug_t scale=1.0_cv, Atlas::ShapeInfo::Origin origin={}) {
+	Key fillGradient(const Path& p, const GradientHandle& handle, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={}) {
 		if(!p.hasPendingPath()) return Key(0u);
 
 		return _commitGradient(_merged(p), handle, scale, _key.next(), origin);
@@ -1301,7 +1301,7 @@ private:
 	}
 
 	static Atlas::Curves _scaleCurves(const Atlas::Curves& src, slug_t scale) {
-		if(scale == 1.0_cv) return src;
+		if(scale == 1_cv) return src;
 
 		Atlas::Curves out;
 
@@ -1319,7 +1319,7 @@ private:
 	static std::pair<Atlas::Curves, Matrix> _toLocalOrigin(
 		const Atlas::Curves& src,
 		Atlas::ShapeInfo::Origin origin={},
-		slug_t scale=1.0_cv
+		slug_t scale=1_cv
 	) {
 		if(src.empty()) return { {}, Matrix::identity() };
 

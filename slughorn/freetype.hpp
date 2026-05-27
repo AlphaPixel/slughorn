@@ -473,10 +473,10 @@ static Color resolveColor(FT_Color* palette, uint32_t colorIndex) {
 	const auto& c = palette[colorIndex];
 
 	return Color{
-		cv(c.red) / 255.0_cv,
-		cv(c.green) / 255.0_cv,
-		cv(c.blue) / 255.0_cv,
-		cv(c.alpha) / 255.0_cv
+		cv(c.red) / 255_cv,
+		cv(c.green) / 255_cv,
+		cv(c.blue) / 255_cv,
+		cv(c.alpha) / 255_cv
 	};
 }
 
@@ -493,7 +493,7 @@ static void processColorGlyphV0(
 	const Atlas::SplitStrategy& strategy
 ) {
 	const auto glyphIndex = FT_Get_Char_Index(face, codepoint);
-	const slug_t emScale = 1.0_cv / cv(face->units_per_EM);
+	const slug_t emScale = 1_cv / cv(face->units_per_EM);
 	const slug_t advance = out.advance;
 
 	FT_LayerIterator iterator = {};
@@ -574,9 +574,9 @@ static std::vector<GradientStop> extractColorStops(
 	while(FT_Get_Colorline_Stops(face, &stop, &iter)) {
 		Color c = resolveColor(palette, stop.color.palette_index);
 
-		c.a *= cv(stop.color.alpha) / 16384.0_cv;
+		c.a *= cv(stop.color.alpha) / 16384_cv;
 
-		stops.push_back({cv(stop.stop_offset) / 65536.0_cv, c});
+		stops.push_back({cv(stop.stop_offset) / 65536_cv, c});
 	}
 
 	return stops;
@@ -743,12 +743,12 @@ static PaintResult traversePaint(
 
 			slughorn::Matrix m;
 
-			m.xx = cv(a.xx) / 65536.0_cv;
-			m.yx = cv(a.yx) / 65536.0_cv;
-			m.xy = cv(a.xy) / 65536.0_cv;
-			m.yy = cv(a.yy) / 65536.0_cv;
-			m.dx = cv(a.dx) / 65536.0_cv * emScale;
-			m.dy = cv(a.dy) / 65536.0_cv * emScale;
+			m.xx = cv(a.xx) / 65536_cv;
+			m.yx = cv(a.yx) / 65536_cv;
+			m.xy = cv(a.xy) / 65536_cv;
+			m.yy = cv(a.yy) / 65536_cv;
+			m.dx = cv(a.dx) / 65536_cv * emScale;
+			m.dy = cv(a.dy) / 65536_cv * emScale;
 
 			// combined = m * parentMatrix (parentMatrix applied first)
 			const slughorn::Matrix combined = m * parentMatrix;
@@ -767,8 +767,8 @@ static PaintResult traversePaint(
 		case FT_COLR_PAINTFORMAT_TRANSLATE: {
 			slughorn::Matrix m;
 
-			m.dx = cv(paint.u.translate.dx) / 65536.0_cv * emScale;
-			m.dy = cv(paint.u.translate.dy) / 65536.0_cv * emScale;
+			m.dx = cv(paint.u.translate.dx) / 65536_cv * emScale;
+			m.dy = cv(paint.u.translate.dy) / 65536_cv * emScale;
 			// xx, yy default to 1; yx, xy default to 0 - identity rotation
 
 			// const slughorn::Matrix combined = m * parentMatrix;
@@ -786,17 +786,17 @@ static PaintResult traversePaint(
 		// -----------------------------------------------------------------
 		case FT_COLR_PAINTFORMAT_SCALE: {
 			const auto& s = paint.u.scale;
-			const slug_t sx = cv(s.scale_x) / 65536.0_cv;
-			const slug_t sy = cv(s.scale_y) / 65536.0_cv;
-			const slug_t cx = cv(s.center_x) / 65536.0_cv * emScale;
-			const slug_t cy = cv(s.center_y) / 65536.0_cv * emScale;
+			const slug_t sx = cv(s.scale_x) / 65536_cv;
+			const slug_t sy = cv(s.scale_y) / 65536_cv;
+			const slug_t cx = cv(s.center_x) / 65536_cv * emScale;
+			const slug_t cy = cv(s.center_y) / 65536_cv * emScale;
 
 			slughorn::Matrix m;
 
 			m.xx = sx;
 			m.yy = sy;
-			m.dx = cx * (1.0_cv - sx);
-			m.dy = cy * (1.0_cv - sy);
+			m.dx = cx * (1_cv - sx);
+			m.dy = cy * (1_cv - sy);
 
 			return traversePaint(
 				face, &s.paint, palette,
@@ -811,11 +811,11 @@ static PaintResult traversePaint(
 		// -----------------------------------------------------------------
 		case FT_COLR_PAINTFORMAT_ROTATE: {
 			const auto& r = paint.u.rotate;
-			const slug_t theta = cv(r.angle) / 65536.0_cv * cv(M_PI);
+			const slug_t theta = cv(r.angle) / 65536_cv * cv(M_PI);
 			const slug_t c = cv(std::cos(static_cast<double>(theta)));
 			const slug_t s = cv(std::sin(static_cast<double>(theta)));
-			const slug_t cx = cv(r.center_x) / 65536.0_cv * emScale;
-			const slug_t cy = cv(r.center_y) / 65536.0_cv * emScale;
+			const slug_t cx = cv(r.center_x) / 65536_cv * emScale;
+			const slug_t cy = cv(r.center_y) / 65536_cv * emScale;
 
 			slughorn::Matrix m;
 
@@ -823,8 +823,8 @@ static PaintResult traversePaint(
 			m.xy = -s;
 			m.yx = s;
 			m.yy = c;
-			m.dx = cx * (1.0_cv - c) + s * cy;
-			m.dy = cy * (1.0_cv - c) - s * cx;
+			m.dx = cx * (1_cv - c) + s * cy;
+			m.dy = cy * (1_cv - c) - s * cx;
 
 			return traversePaint(
 				face, &r.paint, palette,
@@ -839,17 +839,17 @@ static PaintResult traversePaint(
 		// -----------------------------------------------------------------
 		case FT_COLR_PAINTFORMAT_SKEW: {
 			const auto& sk = paint.u.skew;
-			const slug_t tax = cv(std::tan(static_cast<double>(cv(sk.x_skew_angle) / 65536.0_cv * cv(M_PI))));
-			const slug_t tay = cv(std::tan(static_cast<double>(cv(sk.y_skew_angle) / 65536.0_cv * cv(M_PI))));
-			const slug_t cx = cv(sk.center_x) / 65536.0_cv * emScale;
-			const slug_t cy = cv(sk.center_y) / 65536.0_cv * emScale;
+			const slug_t tax = cv(std::tan(static_cast<double>(cv(sk.x_skew_angle) / 65536_cv * cv(M_PI))));
+			const slug_t tay = cv(std::tan(static_cast<double>(cv(sk.y_skew_angle) / 65536_cv * cv(M_PI))));
+			const slug_t cx = cv(sk.center_x) / 65536_cv * emScale;
+			const slug_t cy = cv(sk.center_y) / 65536_cv * emScale;
 
 			slughorn::Matrix m;
 
-			m.xx = 1.0_cv;
+			m.xx = 1_cv;
 			m.xy = tax;
 			m.yx = tay;
-			m.yy = 1.0_cv;
+			m.yy = 1_cv;
 			m.dx = -tax * cy;
 			m.dy = -tay * cx;
 
@@ -889,10 +889,10 @@ static PaintResult traversePaint(
 
 			if(stops.empty()) return {white};
 
-			slug_t x0 = cv(lg.p0.x) / 65536.0_cv * emScale;
-			slug_t y0 = cv(lg.p0.y) / 65536.0_cv * emScale;
-			slug_t x1 = cv(lg.p1.x) / 65536.0_cv * emScale;
-			slug_t y1 = cv(lg.p1.y) / 65536.0_cv * emScale;
+			slug_t x0 = cv(lg.p0.x) / 65536_cv * emScale;
+			slug_t y0 = cv(lg.p0.y) / 65536_cv * emScale;
+			slug_t x1 = cv(lg.p1.x) / 65536_cv * emScale;
+			slug_t y1 = cv(lg.p1.y) / 65536_cv * emScale;
 
 			parentMatrix.apply(x0, y0, x0, y0);
 			parentMatrix.apply(x1, y1, x1, y1);
@@ -917,10 +917,10 @@ static PaintResult traversePaint(
 			if(stops.empty()) return {white};
 
 			// Use the outer circle (c1, r1) as the gradient center/radius.
-			slug_t cx = cv(rg.c1.x) / 65536.0_cv * emScale;
-			slug_t cy = cv(rg.c1.y) / 65536.0_cv * emScale;
-			slug_t r1 = cv(rg.r1) / 65536.0_cv * emScale;
-			slug_t r0 = cv(rg.r0) / 65536.0_cv * emScale;
+			slug_t cx = cv(rg.c1.x) / 65536_cv * emScale;
+			slug_t cy = cv(rg.c1.y) / 65536_cv * emScale;
+			slug_t r1 = cv(rg.r1) / 65536_cv * emScale;
+			slug_t r0 = cv(rg.r0) / 65536_cv * emScale;
 
 			parentMatrix.apply(cx, cy, cx, cy);
 
@@ -945,14 +945,14 @@ static PaintResult traversePaint(
 
 			if(stops.empty()) return {white};
 
-			slug_t cx = cv(sg.center.x) / 65536.0_cv * emScale;
-			slug_t cy = cv(sg.center.y) / 65536.0_cv * emScale;
+			slug_t cx = cv(sg.center.x) / 65536_cv * emScale;
+			slug_t cy = cv(sg.center.y) / 65536_cv * emScale;
 
 			parentMatrix.apply(cx, cy, cx, cy);
 
-			const slug_t tau = 2.0_cv * cv(M_PI);
-			const slug_t startAngle = cv(sg.start_angle) / 65536.0_cv * tau;
-			const slug_t arcSpan = cv(sg.end_angle) / 65536.0_cv * tau - startAngle;
+			const slug_t tau = 2_cv * cv(M_PI);
+			const slug_t startAngle = cv(sg.start_angle) / 65536_cv * tau;
+			const slug_t arcSpan = cv(sg.end_angle) / 65536_cv * tau - startAngle;
 
 			GradientInfo info;
 
@@ -992,7 +992,7 @@ static void processColorGlyphV1(
 	const Atlas::SplitStrategy& strategy
 ) {
 	const FT_UInt glyphIndex = FT_Get_Char_Index(face, codepoint);
-	const slug_t emScale = 1.0_cv / cv(face->units_per_EM);
+	const slug_t emScale = 1_cv / cv(face->units_per_EM);
 
 	FT_OpaquePaint rootPaint = {};
 
@@ -1102,7 +1102,7 @@ bool loadGlyph(FT_Face face, uint32_t codepoint, Atlas& atlas,
 	if(!glyphIndex && codepoint != 0) return false;
 	if(FT_Load_Glyph(face, glyphIndex, FT_LOAD_NO_SCALE)) return false;
 
-	const slug_t emScale = 1.0_cv / cv(face->units_per_EM);
+	const slug_t emScale = 1_cv / cv(face->units_per_EM);
 
 	Atlas::ShapeInfo data;
 
@@ -1178,7 +1178,7 @@ bool loadColorGlyph(
 
 	if(FT_Load_Glyph(face, glyphIndex, FT_LOAD_NO_SCALE)) return false;
 
-	const slug_t emScale = 1.0_cv / cv(face->units_per_EM);
+	const slug_t emScale = 1_cv / cv(face->units_per_EM);
 
 	out.advance = cv(face->glyph->metrics.horiAdvance) * emScale;
 

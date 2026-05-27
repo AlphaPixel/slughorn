@@ -80,10 +80,10 @@ namespace nanosvg {
 // ================================================================================================
 inline Color colorFromNSVG(unsigned int packed) {
 	return {
-		cv((packed & 0xFF)) / 255.0_cv, // R
-		cv(((packed >> 8) & 0xFF)) / 255.0_cv, // G
-		cv(((packed >> 16) & 0xFF)) / 255.0_cv, // B
-		cv(((packed >> 24) & 0xFF)) / 255.0_cv, // A
+		cv((packed & 0xFF)) / 255_cv, // R
+		cv(((packed >> 8) & 0xFF)) / 255_cv, // G
+		cv(((packed >> 16) & 0xFF)) / 255_cv, // B
+		cv(((packed >> 24) & 0xFF)) / 255_cv, // A
 	};
 }
 
@@ -108,7 +108,7 @@ inline Color colorFromNSVG(unsigned int packed) {
 // ================================================================================================
 std::pair<Atlas::ShapeInfo, Matrix> decomposePath(
 	const NSVGshape* shape,
-	slug_t scale=1.0_cv,
+	slug_t scale=1_cv,
 	Atlas::ShapeInfo::Origin origin={}
 );
 
@@ -126,7 +126,7 @@ Matrix loadShape(
 	const NSVGshape* shape,
 	Atlas& atlas,
 	Key key,
-	slug_t scale=1.0_cv,
+	slug_t scale=1_cv,
 	Atlas::ShapeInfo::Origin origin={}
 );
 
@@ -259,15 +259,15 @@ CompositeShape loadImage(const NSVGimage* image, Atlas& atlas, KeyIterator& keys
 		return composite;
 	}
 
-	const slug_t scale = 1.0_cv / cv(image->width);
+	const slug_t scale = 1_cv / cv(image->width);
 
 	// Normalized width is always 1.0...
-	composite.advance = 1.0_cv;
+	composite.advance = 1_cv;
 
 	for(const NSVGshape* shape = image->shapes; shape; shape = shape->next) {
 		if(!(shape->flags & NSVG_FLAGS_VISIBLE)) continue;
 
-		Color color = { 1.0_cv, 1.0_cv, 1.0_cv, 1.0_cv };
+		Color color = { 1_cv, 1_cv, 1_cv, 1_cv };
 		uint32_t gradientId = 0;
 
 		if(shape->fill.type == NSVG_PAINT_COLOR) {
@@ -382,7 +382,7 @@ CompositeShape loadImage(const NSVGimage* image, Atlas& atlas, KeyIterator& keys
 					cv(pcy) * scale - minY_em,
 					cv(b00), cv(b01), cv(b10), cv(b11)
 				);
-				info.innerRadius = 0.0_cv;
+				info.innerRadius = 0_cv;
 			}
 
 			gradientId = atlas.addGradient(info);
@@ -400,7 +400,7 @@ CompositeShape loadImage(const NSVGimage* image, Atlas& atlas, KeyIterator& keys
 			continue;
 		}
 
-		const Key key = keys.next();
+		const Key key = (shape->id[0] != '\0') ? Key(shape->id) : keys.next();
 
 		Matrix transform = loadShape(shape, atlas, key, scale);
 
