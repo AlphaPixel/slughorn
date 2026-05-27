@@ -1,15 +1,82 @@
+% Pass [table] to xcolor before anything else can load it without that option
+\PassOptionsToPackage{table}{xcolor}
 \usepackage{xcolor}
 \usepackage{hyperref}
 \usepackage{graphicx}
+\usepackage{microtype}
+\usepackage{fontspec}
+\usepackage{titlesec}
+\usepackage{fancyhdr}
+\usepackage{colortbl}
+\usepackage{etoolbox}
+\usepackage[normalem]{ulem}
 
+% --- Page colors ---------------------------------------------------------
 \pagecolor[HTML]{1E1E1E}
 \color[HTML]{D4D4D4}
 
+% --- Named colors --------------------------------------------------------
 \definecolor{linkblue}{HTML}{8AB4F8}
+\definecolor{accentblue}{HTML}{4A6FA5}
+\definecolor{dimtext}{HTML}{777777}
 
+% --- Hyperref ------------------------------------------------------------
 \hypersetup{
   colorlinks=true,
   linkcolor=linkblue,
   urlcolor=linkblue,
   citecolor=linkblue
+}
+
+% Bake underlines into the typeset text rather than relying on PDF annotation
+% border rendering (which defaults to black — invisible on a dark background).
+% \uline inherits the current color so the underline is blue, matching the text.
+\makeatletter
+\let\slughorn@href\href
+\renewcommand{\href}[2]{\slughorn@href{#1}{\uline{#2}}}
+\makeatother
+
+% --- Table rule color (booktabs \toprule / \midrule / \bottomrule) ------
+\arrayrulecolor{accentblue}
+
+% --- Line spacing --------------------------------------------------------
+\linespread{1.1}
+
+% --- Heading font: Source Sans 3 contrasts nicely with Source Serif 4 body
+\newfontfamily\headingfont[
+  BoldFont={Source Sans 3 Bold},
+  ItalicFont={Source Sans 3 Italic},
+  BoldItalicFont={Source Sans 3 Bold Italic}
+]{Source Sans 3}
+
+% --- H1 always starts on a fresh page -----------------------------------
+% \pretocmd fires *before* \section so \clearpage runs before hyperref
+% places its PDF destination anchor — fixing off-by-one-page bookmark jumps.
+\pretocmd{\section}{\clearpage}{}{}
+
+% --- Heading formats -----------------------------------------------------
+\titleformat{\section}
+  {\headingfont\Large\bfseries\color{linkblue}}
+  {\thesection}{1em}{}
+  [\vspace{2pt}{\color{accentblue}\rule{\linewidth}{0.5pt}}]
+
+\titleformat{\subsection}
+  {\headingfont\large\bfseries\color[HTML]{C8C8C8}}
+  {\thesubsection}{1em}{}
+
+\titleformat{\subsubsection}
+  {\headingfont\normalsize\bfseries\color[HTML]{999999}}
+  {\thesubsubsection}{1em}{}
+
+% --- Running headers / footers -------------------------------------------
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\color{dimtext}\small\textit{slughorn User Guide}}
+\fancyhead[R]{\color{dimtext}\small\nouppercase{\leftmark}}
+\fancyfoot[C]{\color{dimtext}\small\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\footrulewidth}{0pt}
+\renewcommand{\headrule}{%
+  {\color{dimtext}\hrule height\headrulewidth width\headwidth}%
+  \vskip-\headrulewidth
 }

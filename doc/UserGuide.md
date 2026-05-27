@@ -68,7 +68,7 @@ GLSL shaders exposed via `GetFragmentShaderSourceCode()` / `GetVertexShaderSourc
 If your project needs a complete, production-grade, commercially supported text layout
 engine, that is the product to evaluate.
 
-slughorn is not Slug. slughorn is an independent open-source C++ library that adopts the
+slughorn is not Slug. slughorn is an independent open-source C++20 library that adopts the
 same two-texture GPU representation and uses shader mathematics derived from Lengyel's
 openly published work. It provides its own backends (FreeType, NanoSVG, Cairo, Skia,
 Canvas), its own `Atlas` abstraction and `.slugb` file format, and its own Canvas
@@ -111,7 +111,8 @@ purpose is to be consumed by a renderer using OpenGL, Vulkan, DirectX, etc.
 Whenever possible, slughorn is designed with the assumption that any parts of the
 vector graphics pipeline that *can* be offloaded to the GPU **will be**. Where
 dynamic content makes frequent GPU updates unavoidable, compute shaders are the
-recommended way to keep CPU overhead minimal.
+recommended way to keep CPU overhead minimal (and we have examples of doing
+exactly that).
 
 ## slughorn + osgSlug
 
@@ -126,18 +127,16 @@ osgSlug is just the one we can point to concretely.
 
 In its current version, the data slughorn exports is tested in osgSlug using two
 distinct rendering approaches: a GL3-compatible path where all the necessary
-state is tightly packed into vertex attributes, and the preferred GL4-compatible path where "shader storage buffer objects" (SSBO) are used to
-represent both static and dynamic state.
+state is tightly packed into vertex attributes, and the preferred GL4-compatible
+path where "shader storage buffer objects" (SSBO) are used to represent both
+static and dynamic state.
 
 ## The Name
 
 The name carries two readings, and you are welcome to enjoy both.
 
-The practical one: **slug** (the rendering algorithm) + **horn** (as in shoe-horn). The
-project exists because its author kept shoe-horning the Slug technique into contexts that
-had no business rendering GPU vector outlines — a font renderer wired into a game engine,
-an SVG album compiled into a dashboard widget, an emoji atlas driving a terminal UI. The
-name is apt.
+The practical one: **slug** (the rendering algorithm) + **horn** (as in shoe-horn);
+essentially, "shoe-horning the Slug technique into different environments."
 
 The other reading is for Harry Potter readers. There is a certain Hogwarts Potions
 professor whose surname also contains the word "slug," and whose fondness for collecting
@@ -193,7 +192,7 @@ and multipass rendering are all driven from Python.
 slughorn is probably the wrong choice if:
 
 - You need **complete, production-grade BiDi, ligature substitution, or paragraph layout
-  today.** That is Terathon Slug's domain, and it is the product to reach for if your
+  now.** That is Terathon Slug's domain, and it is the product to reach for if your
   text requirements are complex.
 - You are building a **document layout engine** or rich-text editor. slughorn has no text
   flow, line breaking, or inline object model.
@@ -202,6 +201,10 @@ slughorn is probably the wrong choice if:
   the roadmap but not yet shipped.
 - You want a **drop-in UI toolkit.** slughorn provides a rendering primitive, not a widget
   system. Layout, hit testing, and input handling are entirely the caller's responsibility.
+
+> NOTE: As mentioned previously, slughorn will inevitably improve support for
+> all of these areas as time goes on, depending largely on community
+> interest/needs.
 
 ---
 
@@ -225,14 +228,46 @@ and the Atlas hands back raw GPU texture buffers. From that point on, rendering
 is entirely driven by `Layer` values that tell the GPU where and how to draw
 each shape.
 
+## `slug_t`, `_cv`, and `cv()` — No Silent Double Narrowing
+
+Every numeric value in the slughorn API — coordinates, scale factors, color
+components, tolerance thresholds — has type `slug_t`. It is a `typedef` for
+`float`.
+
+The reason this gets its own section is that C++ will silently accept a `double`
+literal wherever a `float` is expected, truncate its precision, issue zero
+warnings, and move on. Write a bare `0.5` where you meant a slughorn value and
+you have a `double` quietly narrowed to `float`. **You do not want to deal with
+`double → float` size issues.** `slug_t`, `_cv`, and `cv()` exist so that you
+never have to.
+
+```cpp
+using namespace slughorn::literals;
+
+// _cv: attach to any literal to produce a slug_t directly
+slug_t x = 0.5_cv; // float — NOT a double narrowed to float
+slug_t full = 1_cv; // prefer 1_cv over 1.0_cv
+
+// cv(): static_cast<slug_t> — the right way to convert computed values
+int i = 4;
+slug_t t = cv(i) / 16_cv; // not float(i), not static_cast<float>(i)
+```
+
+When you see `float(i)` in slughorn context that is `cv(i)` spelled wrong. When
+you see `1.0f` that is `1_cv` spelled wrong. When you see a bare `1.0` assigned
+to a `slug_t` parameter — that is a `double` narrowing silently, which is exactly
+what this is here to prevent.
+
+The `using namespace slughorn::literals;` declaration is assumed throughout this guide.
+
 ## Key
 
 A `Key` is a discriminated union that names a shape inside an `Atlas`. Two
 factory constructors cover the two use cases:
 
 ```cpp
-Key k1 = Key(0x1F600); // glyph / emoji / your own number system
-Key k2 = Key("logo-body"); // arbitrary named shape
+auto k1 = slughorn::Key(0x1F600); // glyph / emoji / your own number system
+auto k2 = slughorn::Key("logo-body"); // arbitrary named shape
 ```
 
 Keys are stable identifiers: they survive serialization round-trips
@@ -240,15 +275,19 @@ Keys are stable identifiers: they survive serialization round-trips
 a Shape after `build()`. Every shape you add to the Atlas receives a Key at the
 moment it is added.
 
+> The `Key` constructor is overloaded to support implicit conversion; any
+> function that requires a `Key` can also accept a `string/uint32_t` in its
+> place.
+
 `KeyIterator` is a convenience factory that auto-increments so you rarely need
 to manage strings manually:
 
 ```cpp
-KeyIterator ki("widget");   // produces "widget_0", "widget_1", …
-Key ka = ki.next();         // "widget_0"
-Key kb = ki.next();         // "widget_1"
-```
+slughor::KeyIterator ki("widget"); // produces "widget_0", "widget_1", …
 
+auto ka = ki.next(); // "widget_0"
+auto kb = ki.next(); // "widget_1"
+```
 ## Shape
 
 A `Shape` is the baked output of one closed vector outline. It contains:
@@ -263,11 +302,12 @@ curve data into the Atlas, and the Atlas produces Shapes. After `build()` you
 retrieve a Shape by Key:
 
 ```cpp
-const auto* shape = atlas.getShape(key);
-auto q = shape->computeQuad(layer.transform, layer.scale, expand);
+if(const auto* shape = atlas.getShape(key); shape) {
+    auto quad = shape->computeQuad(transform, scale, expand);
+}
 ```
 
-Shapes are resolution-independent. The same Shape can be rendered at any scale,
+Shapes are resolution-independent. The same `Shape` can be rendered at any scale,
 with any transform, without re-baking.
 
 > TODO: Talk about `expand`, and why it exists (to give the Slug algorithm "room
@@ -275,48 +315,62 @@ with any transform, without re-baking.
 
 ## Layer
 
-A `Layer` is a placed instance of a Shape. It binds a Key to the rendering
-parameters needed to draw that shape once:
+A `Layer` is a placed instance of a `Shape`. It binds a `Key` to the rendering
+parameters/state needed to draw that shape once:
 
 ```cpp
 struct Layer {
-    Key       key;        // which Shape to draw
-    Color     color;      // RGBA flat color
-    Matrix    transform;  // dx/dy = CPU quad placement; xx/yx/xy/yy reserved for future GPU use
-    slug_t    scale;      // em→world scaling (font size for text; 1.0 for SVG/Canvas)
-    uint32_t  effectId;   // 0 = default
-    uint32_t  gradientId; // 0 = flat color; 1-based ID from addGradient()
+    Key key; // which Shape to draw
+    Color color; // RGBA flat color
+    Matrix transform; // dx/dy = CPU quad placement; xx/yx/xy/yy reserved for future GPU use
+    slug_t scale; // em→world scaling (font size for text; 1.0 for SVG/Canvas)
+    uint32_t effectId; // 0 = default
+    uint32_t gradientId; // 0 = flat color; 1-based ID from addGradient()
 };
 ```
+> The `effectId` field is a general-purpose field exposed by slughorn that gives
+> the user some place to resolve what kind of frontend "effects" are applied; it
+> is the only field in *any* of the slughorn POD structs that implies some
+> kind of backend-to-frontend assumption/relationship that **isn't** clearly
+> defined.
 
-Today only `dx` / `dy` are active: `computeQuad()` reads them to place the
-bounding quad in world space, and the frontend passes them straight to
-`gradientMeta` for gradient lookups. The remaining fields — `xx` / `yx` /
-`xy` / `yy` — are present on the struct but currently unused by the renderer.
-They are reserved for future GPU-driven animation work, where per-layer
-affine transforms could be streamed to the vertex shader without CPU
-re-layout (the clock demo is an early hint of this direction).
+### Layer::Color
 
 When `gradientId` is non-zero, `color.rgb` is overridden by the gradient; only
 `color.a` (as a multiplier) remains active.
 
+### Layer::Transform
+
+Currently, only `dx` / `dy` are active: `computeQuad()` reads them to place the
+bounding quad in world space, and the frontend should pass them straight to
+`gradientMeta` for gradient lookups. The remaining fields — `xx` / `yx` /
+`xy` / `yy` — are present on the struct but currently unused.
+They are reserved for future GPU-driven interactivity.
+
 ## CompositeShape
 
 A `CompositeShape` groups an ordered list of `Layer`s with a single `advance`
-value — the horizontal advance in em-space used for text layout. A single
-rendered glyph may map to one `CompositeShape` containing several Layers stacked
-on top of each other (e.g., a COLRv1 emoji with a base outline, a color fill,
-and a gradient wash):
+value (the horizontal advance in em-space used in text layout). `CompositeShape`
+is the highest-level type in slughorn, and is the mechanism by which simple
+`Shape` instances are grouped together with `Layer`s and finally composited into
+something more dynamic.
+
+> Emojis are the simplest way to visualize how `CompositeShape` works. A single
+> rendered emoji maps to one `CompositeShape` containing several Layers stacked
+> on top of each other (e.g., a COLRv1 emoji with a base outline, a color fill,
+> and a gradient wash):
 
 ```cpp
-CompositeShape cs;
-cs.layers.push_back({ outlineKey, black, Matrix::identity(), fontSize, 0, 0 });
-cs.layers.push_back({ fillKey,    white, Matrix::identity(), fontSize, 0, gradId });
-cs.advance = 0.6_cv;   // em-space horizontal advance
+slughorn::CompositeShape cs;
+
+cs.layers.push_back({ outlineKey, black, {}, fontSize, 0, 0 });
+cs.layers.push_back({ fillKey, white, {}, fontSize, 0, gradId });
+
+cs.advance = 0.6_cv; // em-space horizontal advance
 ```
 
-When laying out a string, the caller iterates `CompositeShape`s and accumulates
-`advance` to compute each glyph's starting position.
+When laying out a string, the caller iterates over codepoints, building up a
+`CompositeShape` and accumulating `advance` to compute each glyph's starting position.
 
 ## Atlas
 
@@ -328,9 +382,10 @@ or direct calls, and on `build()` packs everything into two GPU textures:
   indirection tables
 
 ```cpp
-Atlas atlas;          // default 512px texture width
-Atlas atlas(1024);    // or specify a power-of-two width
+slughorn::Atlas atlas; // default 512px texture width
+slughorn::Atlas atlas(1024); // or specify a power-of-two width
 ```
+### Atlas::TextureData
 
 After all shapes and gradients have been registered, call `build()`:
 
@@ -341,7 +396,7 @@ Atlas::TextureData td = atlas.build();
 `TextureData` is plain byte buffers — no OpenGL state is touched. You upload the
 buffers to your GPU however your rendering layer prefers. `osgSlug` is the
 reference implementation; see [Connecting to Your Graphics Backend](#connecting-to-your-graphics-backend)
-for the full vertex attribute layout.
+for the full GL3/GL4 approaches.
 
 After `build()`, the Atlas is immutable. To add new shapes you start a new
 Atlas. This is a deliberate design decision: static textures are cache-friendly
@@ -355,41 +410,43 @@ A complete slughorn session has six steps:
 
 ```cpp
 // 1. Create the Atlas
-Atlas atlas(512);   // texture width must be a power of two
+slughorn::Atlas atlas;
 
 // 2. Add shapes via whichever backend(s) suit your content.
-//    Each backend returns Key values you use at render time.
-//    (See: Getting Data In: Backends)
+// Each backend returns Key values you use at render time.
+// (See: Getting Data In: Backends)
 
 // 3. Register gradients — must happen before build()
-GradientInfo gi;
-gi.type   = GradientInfo::Type::Linear;
-gi.stops  = { {0.0_cv, red}, {1.0_cv, blue} };
-gi.transform = buildLinearGradientMatrix(x0, y0, x1, y1);
-uint32_t gid = atlas.addGradient(gi);   // returns a 1-based ID
+slughorn::GradientInfo gi;
+
+gi.type = slughorn::GradientInfo::Type::Linear;
+gi.stops = { {0_cv, red}, {1_cv, blue} };
+gi.transform = slughorn::buildLinearGradientMatrix(x0, y0, x1, y1);
+
+uint32_t gid = atlas.addGradient(gi); // returns a 1-based ID
 
 // 4. Bake — packs curves and bands into GPU texture buffers
-Atlas::TextureData td = atlas.build();
+slughorn::Atlas::TextureData td = atlas.build();
 
 // 5. Upload textures to your GPU (backend-specific)
-//    td.curveTexture — RGBA32F
-//    td.bandTexture  — RGBA16UI
+// td.curveTexture — RGBA32F
+// td.bandTexture — RGBA16UI
 
 // 6. Render: for each Layer in each CompositeShape:
-const Atlas::Shape* shape = atlas.getShape(layer.key);
-if (!shape) continue;
-
-Quad q = shape->computeQuad(layer.transform, layer.scale, expand);
-// q.x0, q.y0 — bottom-left corner in world space
-// q.x1, q.y1 — top-right corner in world space
-// Emit quad vertices and set band/gradient vertex attributes from
-// shape and layer. See: Connecting to Your Graphics Backend.
+if(const auto* shape = atlas.getShape(layer.key); shape) {
+    auto q = shape->computeQuad(layer.transform, layer.scale, expand);
+    // q.x0, q.y0 — bottom-left corner in world space
+    // q.x1, q.y1 — top-right corner in world space
+    // Emit quad vertices and set band/gradient vertex attributes from
+    // shape and layer. See: Connecting to Your Graphics Backend.
+}
 ```
 
+## PackingStats
+
 `PackingStats` (accessible via `atlas.getPackingStats()` after `build()`) gives
-curve and band-texture utilization numbers useful for tuning. In practice a
-20-layer SVG reaches ~80% curve utilization and ~92% band utilization in a
-512px Atlas.
+curve and band-texture utilization numbers useful for tuning and debugging. The
+`slughorn` Python CLI utility can also be used to query this information.
 
 ---
 
@@ -397,7 +454,7 @@ curve and band-texture utilization numbers useful for tuning. In practice a
 
 Every backend does the same job: read curve data from an external source — a font
 file, an SVG document, a Cairo path, a Skia path — and register one or more shapes
-in the Atlas. Each backend lives in its own header with no dependency beyond what
+in the atlas. Each backend lives in its own header with no dependency beyond what
 that backend itself requires.
 
 ## The Single-Translation-Unit Pattern
@@ -412,6 +469,11 @@ one `.cpp` file, define the implementation macro before including the header:
 
 All other translation units include the header without the define. No separate
 `.cpp` compilation unit is needed.
+
+> The slughorn CMake configuration includes the ability to compile the backends
+> directly into the resulting library; this simplifies "in-tree" usage of
+> slughorn significantly (for example, when slughorn is included as a Git
+> submodule).
 
 ## Choosing a Backend
 
@@ -437,28 +499,31 @@ other graphics dependency.
 
 ### Font metrics
 
-`FontMetrics` carries dimensionless em-space ratios that scale to any font size:
+`FontMetrics` carries dimensionless em-space ratios that scale to any font size.
+While the struct itself is defined in the `slughorn` top-level namespace (in
+order to support future backends "exporting" font metrics), the FreeType backend
+is currently the *only* one that does so.
 
 ```cpp
 // From an already-open face:
-slughorn::freetype::FontMetrics m = slughorn::freetype::readFontMetrics(face);
+slughorn::FontMetrics m = slughorn::freetype::readFontMetrics(face);
 
 // Or without managing an FT_Face yourself:
 auto m = slughorn::freetype::loadFontMetrics("/usr/share/fonts/truetype/my.ttf");
 
-float capHeight  = fontSize * m.capHeightRatio;   // ~0.72 for Latin
-float lineHeight = fontSize * (1.0f + m.lineGapRatio);
+slug_t capHeight = fontSize * m.capHeightRatio; // ~0.72 for Latin
+slug_t lineHeight = fontSize * (1_cv + m.lineGapRatio);
 ```
 
 All ratio fields are in `[0, 1]` as fractions of the em-square. `unitsPerEM` is
 the raw integer from the font's head table.
 
-### High-level helpers (manage their own FT_Library / FT_Face)
+### High-level Helpers
 
 For the common case where you just want to load a font and move on:
 
 ```cpp
-Atlas atlas;
+slughorn::Atlas atlas;
 
 // Printable ASCII (codepoints 32–126) — simplest path
 slughorn::freetype::loadAsciiFont("/path/to/font.ttf", atlas);
@@ -466,7 +531,7 @@ slughorn::freetype::loadAsciiFont("/path/to/font.ttf", atlas);
 // Explicit list of codepoints
 slughorn::freetype::loadFontGlyphs(
     "/path/to/font.ttf",
-    { 'A', 'B', 'C', 0x2603 },  // snowman included
+    { 'A', 'B', 'C', 0x2603 }, // snowman included
     atlas
 );
 
@@ -474,42 +539,45 @@ slughorn::freetype::loadFontGlyphs(
 slughorn::freetype::loadAllFontGlyphs("/path/to/font.ttf", atlas);
 ```
 
-### Mid-level helpers (caller manages FT_Face)
+### Low-level Helpers
 
 ```cpp
-FT_Library ftLib;  FT_Init_FreeType(&ftLib);
-FT_Face face;      FT_New_Face(ftLib, "/path/to/font.ttf", 0, &face);
+FT_Library ftLib; FT_Init_FreeType(&ftLib);
+FT_Face face; FT_New_Face(ftLib, "/path/to/font.ttf", 0, &face);
 
-slughorn::freetype::loadGlyph(face, 'A', atlas);                        // single codepoint
-slughorn::freetype::loadGlyphRange(face, 0x0020, 0x007E, atlas);        // contiguous range
-slughorn::freetype::loadGlyphs(face, { 'A', 'Z', '0', '9' }, atlas);   // explicit list
-slughorn::freetype::loadAllGlyphs(face, atlas);                         // full charmap
+slughorn::freetype::loadGlyph(face, 'A', atlas); // single codepoint
+slughorn::freetype::loadGlyphRange(face, 0x0020, 0x007E, atlas); // contiguous range
+slughorn::freetype::loadGlyphs(face, { 'A', 'Z', '0', '9' }, atlas); // explicit list
+slughorn::freetype::loadAllGlyphs(face, atlas); // full charmap
 
 FT_Done_Face(face);
 FT_Done_FreeType(ftLib);
 ```
 
-All mid-level calls skip codepoints already present in the Atlas, so incremental
+All low-level calls skip codepoints already present in the Atlas, so incremental
 loading is safe.
 
 ### COLRv1 emoji
 
-Color emoji expand into multi-layer `CompositeShape`s. The backend auto-detects
+Color emojis expand into multi-layer `CompositeShape`s. The backend auto-detects
 COLRv1 (FreeType ≥ 2.11) and falls back to COLRv0:
 
 ```cpp
 // Obtain the palette (nullptr → resolveColor falls back to opaque white)
 FT_Color* palette = nullptr;
 FT_Palette_Data pd = {};
-if (!FT_Palette_Data_Get(face, &pd) && pd.num_palettes > 0)
+
+if(!FT_Palette_Data_Get(face, &pd) && pd.num_palettes > 0)
     FT_Palette_Select(face, 0, &palette);
 
 // Single emoji
 slughorn::CompositeShape cs;
+
 slughorn::freetype::loadColorGlyph(face, 0x1F600, palette, atlas, cs);
 
-// List of emoji — mid-level
+// List of emojis
 std::map<uint32_t, slughorn::CompositeShape> colorGlyphs;
+
 slughorn::freetype::loadColorGlyphs(
     face, { 0x1F600, 0x1F4A9, 0x2764 }, palette, atlas, colorGlyphs
 );
@@ -536,8 +604,7 @@ any other calls:
 
 ```cpp
 slughorn::freetype::setLogCallback([](int level, const std::string& msg) {
-    if (level >= slughorn::freetype::LOG_WARN)
-        std::cerr << msg << "\n";
+    if(level >= slughorn::freetype::LOG_WARN) std::cerr << msg << "\n";
 });
 ```
 
@@ -555,12 +622,11 @@ a single-header C library bundled with slughorn — no system dependency.
 ### High-level: file and string loading
 
 ```cpp
-Atlas atlas;
-uint32_t keyBase = 1;
+slughorn::Atlas atlas;
+slughorn::KeyIterator(0x1234); // Or, something like "MySVG"...
 
-slughorn::CompositeShape cs = slughorn::nanosvg::loadFile("icon.svg", atlas, keyBase);
-// or
-slughorn::CompositeShape cs = slughorn::nanosvg::loadString(svgString, atlas, keyBase);
+auto cs0 = slughorn::nanosvg::loadFile("icon.svg", atlas, keyBase);
+auto cs1 = slughorn::nanosvg::loadString(svgString, atlas, keyBase);
 ```
 
 Scale is always auto-computed as `1 / image->width`, normalizing the SVG canvas
@@ -571,13 +637,28 @@ via `Layer::scale` or a world transform.
 the same Atlas, pass the same `keyBase` variable to each call and key allocations
 will not collide.
 
+When a `KeyIterator` with a named prefix is used, any SVG shape that carries its
+own `id` attribute (`<path id="arrow-left" …>`) is registered under that id
+directly — the iterator is only consulted for anonymous shapes. To suppress this
+and force the iterator's own naming scheme regardless of what the SVG says, pass
+`true` as the second constructor argument:
+
+```cpp
+// Uses SVG element ids where present; falls back to "icon_0", "icon_1", …
+slughorn::KeyIterator keys("icon");
+
+// Always uses "brand_0", "brand_1", … — SVG ids are ignored
+slughorn::KeyIterator forced("brand", true);
+```
+
 ### Mid-level: NSVGimage
 
 If you already have an `NSVGimage*`:
 
 ```cpp
-NSVGimage* image = nsvgParseFromFile("icon.svg", "px", 96.0f);
-slughorn::CompositeShape cs = slughorn::nanosvg::loadImage(image, atlas, keyBase);
+auto* image = nsvgParseFromFile("icon.svg", "px", 96_cv);
+auto cs = slughorn::nanosvg::loadImage(image, atlas, keyBase);
+
 nsvgDelete(image);
 ```
 
@@ -586,10 +667,11 @@ nsvgDelete(image);
 `decomposePath` and `loadShape` operate on a single `NSVGshape*`:
 
 ```cpp
-for (const NSVGshape* shape = image->shapes; shape; shape = shape->next) {
-    Matrix m = slughorn::nanosvg::loadShape(
-        shape, atlas, Key(keyBase++), 1.0f / image->width
+for(const auto* shape = image->shapes; shape; shape = shape->next) {
+    slughorn::Matrix m = slughorn::nanosvg::loadShape(
+        shape, atlas, Key(keyBase++), 1_cv / image->width
     );
+
     // Store m in Layer::transform for correct composite positioning.
 }
 ```
@@ -619,14 +701,15 @@ cairo_t* cr = /* your cairo context */;
 auto [info, transform] = slughorn::cairo::decomposePath(cr, scale);
 
 // Mid-level: register directly in the Atlas
-Matrix transform = slughorn::cairo::loadShape(cr, atlas, Key("my_shape"), scale);
+Matrix transform = slughorn::cairo::loadShape(cr, atlas, "my_shape", scale);
+
 // Store transform in Layer::transform.
 ```
 
 `scale` normalizes path coordinates into `[0, 1]` em-space. For a Cairo canvas
-drawn in a 100-unit space, pass `1.0 / 100.0`.
+drawn in a 100-unit space, pass `1_cv / 100_cv`.
 
-### What Cairo supports
+### What Cairo Supports
 
 Cairo's native curve primitive is the cubic Bézier (`CAIRO_PATH_CURVE_TO`). The
 backend splits each cubic at its midpoint into two quadratics. `cairo_stroke_to_path()`
@@ -644,6 +727,7 @@ stroke-to-fill expansion via `skpathutils::FillPathWithPaint`.
 
 ```cpp
 SkPath path;
+
 path.moveTo(10, 10);
 path.lineTo(90, 90);
 
@@ -651,24 +735,30 @@ path.lineTo(90, 90);
 auto [info, transform] = slughorn::skia::decomposePath(path, scale);
 
 // Mid-level
-Matrix transform = slughorn::skia::loadShape(path, atlas, keyId, scale);
+auto transform = slughorn::skia::loadShape(path, atlas, "my_shape", scale);
 ```
 
-### Stroke expansion
+### Stroke Expansion
+
+Until the Canvas API improves, Skia is currently the only backend in slughorn
+that can produce strokes with completely accurate joins/caps (although
+`slughorn::canvas` **will** eventually catch up).
 
 ```cpp
 // Expand a stroked outline into a filled path, then load it:
-Matrix transform = slughorn::skia::loadStrokedShape(
-    path, atlas, keyId,
-    8.0f,                    // stroke width
+slughorn::Matrix transform = slughorn::skia::loadStrokedShape(
+    path,
+    atlas,
+    "my_stroked_shape",
+    8_cv, // stroke width
     scale,
-    SkPaint::kRound_Join,    // join style (default)
-    SkPaint::kRound_Cap      // cap style (default)
+    SkPaint::kRound_Join, // join style (default)
+    SkPaint::kRound_Cap // cap style (default)
 );
 
 // Or as two steps — useful when you need to inspect the filled path first:
-SkPath filled = slughorn::skia::strokeToFill(path, 8.0f);
-Matrix transform = slughorn::skia::loadShape(filled, atlas, keyId, scale);
+auto filled = slughorn::skia::strokeToFill(path, 8_cv);
+auto transform = slughorn::skia::loadShape(filled, atlas, key, scale);
 ```
 
 ### Conic segment handling
@@ -689,9 +779,7 @@ this matrix in `Layer::transform`; at render time, `Shape::computeQuad` adds
 `dx`/`dy` back to reconstruct the correct world position.
 
 Passing `Origin::Centered` to any backend stores the bounding-box center instead
-of the corner, turning `dx`/`dy` into a GPU-side rotation pivot. This pattern is
-explored in Pattern 8 of [The Canvas API](#the-canvas-api) and put to work in
-[Basic Animation](#basic-animation).
+of the corner, turning `dx`/`dy` into a GPU-side rotation pivot.
 
 ---
 
@@ -857,7 +945,7 @@ without disturbing the accumulator.
 #### fill — flat color
 
 ```cpp
-Key fill(Color color, slug_t scale=1.0, Atlas::ShapeInfo::Origin origin={});
+Key fill(Color color, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={});
 Key fill(Color color, slug_t scale, Key key, Atlas::ShapeInfo::Origin origin={});
 ```
 
@@ -868,7 +956,7 @@ the shape addressable by name after `build()`.
 #### stroke — stroke as commit verb
 
 ```cpp
-Key stroke(slug_t width, Color color, slug_t scale=1.0, Atlas::ShapeInfo::Origin origin={});
+Key stroke(slug_t width, Color color, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={});
 Key stroke(slug_t width, Color color, slug_t scale, Key key, ...);
 ```
 
@@ -880,7 +968,7 @@ shape but not the composite membership, call `beginComposite()` immediately afte
 #### defineShape — geometry only
 
 ```cpp
-bool defineShape(Key key, slug_t scale=1.0, Atlas::ShapeInfo::Origin origin={});
+bool defineShape(Key key, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={});
 ```
 
 Registers geometry in the Atlas but does **not** push a Layer onto the composite
@@ -890,8 +978,8 @@ re-use it later with different colors or gradients managed by the caller.
 #### fillGradient / strokeGradient
 
 ```cpp
-Key fillGradient(const GradientHandle& handle, slug_t scale=1.0, ...);
-Key strokeGradient(slug_t width, const GradientHandle& handle, slug_t scale=1.0, ...);
+Key fillGradient(const GradientHandle& handle, slug_t scale=1_cv, ...);
+Key strokeGradient(slug_t width, const GradientHandle& handle, slug_t scale=1_cv, ...);
 ```
 
 Like `fill` / `stroke`, but the resulting Layer carries a `gradientId` instead of a flat
@@ -939,7 +1027,7 @@ Use when you need the shape directly addressable after `build()`, e.g. for
 
 ```cpp
 canvas.circle(0.5, 0.5, 0.4);
-canvas.fill(BLUE, 1.0, Key("circle_shape"));
+canvas.fill(BLUE, 1_cv, Key("circle_shape"));
 canvas.finalize(Key("circle_composite"));
 ```
 
@@ -1026,7 +1114,7 @@ canvas.moveTo(CX, CY);
 canvas.lineTo(CX, CY + HAND_LENGTH);
 
 canvas.stroke(
-    HAND_WIDTH, HAND_COLOR, 1.0,
+    HAND_WIDTH, HAND_COLOR, 1_cv,
     Key("clock_hand"),
     Origin(CX, CY)   // pivot = stroke base, stored in Layer::transform.dx/dy
 );
@@ -1057,11 +1145,81 @@ canvas.finalize(Key("sample_path"));
 
 ## The scale Parameter
 
-Every commit verb accepts an optional `scale` parameter (default `1.0`). This is a
+Every commit verb accepts an optional `scale` parameter (default `1_cv`). This is a
 *backend normalization scale* that converts authoring-space coordinates into slughorn
 em-space `[0, 1]`. It is never stored in `Layer::scale`, which is reserved for FreeType2
-font sizes. For all Canvas-authored geometry, leave `scale` at `1.0` unless your
+font sizes. For all Canvas-authored geometry, leave `scale` at `1_cv` unless your
 authoring coordinate system differs from `[0, 1]` em-space.
+
+---
+
+## Text Placement
+
+`Canvas::text()` places pre-loaded glyphs into the in-progress composite, handling
+em-space conversion, vertical anchoring, and optional horizontal centering automatically.
+The result is indistinguishable from a sequence of `fill()` calls — one `Layer` per
+glyph, all accumulating into the same composite as any other canvas geometry.
+
+The glyphs must already exist in the Atlas (loaded via a font backend before
+`atlas.build()`). `Canvas` itself has no font dependency.
+
+```cpp
+// font->metrics() returns a slughorn::FontMetrics — plain slug_t fields,
+// defined in slughorn.hpp, no FreeType types anywhere in the struct.
+slughorn::FontMetrics m = font->metrics();
+
+canvas.text(
+    "AXO",
+    70_cv,                                    // fontSize in canvas units
+    180_cv, 55_cv,                            // x (anchor), y (anchor)
+    {1_cv, 1_cv, 1_cv, 1_cv},                // color
+    m,
+    slughorn::canvas::TextAnchorY::Baseline,  // y = text baseline (default)
+    slughorn::canvas::TextAlignX::Center      // x = horizontal center of run
+);
+
+canvas.finalize(Key("card_text"));
+```
+
+### Vertical anchoring — `TextAnchorY`
+
+| Value | `y` refers to | Metric used |
+|---|---|---|
+| `Baseline` | text baseline (default) | — |
+| `CapCenter` | vertical centre of capital letters | `capHeightRatio` |
+| `CapTop` | top edge of capital letters | `capHeightRatio` |
+| `XCenter` | vertical centre of lowercase letters | `xHeightRatio` |
+
+All ratios are fractions of the em-square stored in `slughorn::FontMetrics`. Multiply
+by `fontSize` to get world-space distances. The axolotl card demo, for example, uses
+`CapCenter` so that "AXO" sits exactly centred in the lower half of the card regardless
+of which font or size is chosen.
+
+### Horizontal alignment — `TextAlignX`
+
+| Value | `x` refers to | Pass count |
+|---|---|---|
+| `Left` | left edge of first glyph (default) | single |
+| `Center` | horizontal centre of run | two (measures total advance first) |
+| `Right` | right edge of last glyph | two |
+
+`Left` is single-pass with no overhead. `Center` and `Right` iterate the string
+twice — once to measure total advance, once to place. The advance values come from
+the Atlas shapes loaded by the font backend; if a glyph is not present in the Atlas
+a 0.6 em fallback is used.
+
+### Dependency design
+
+`FontMetrics` lives in `slughorn/slughorn.hpp` as a plain struct of `slug_t` fields.
+Neither `canvas.hpp` nor `freetype.hpp` includes the other — both see only `slughorn.hpp`:
+
+```
+freetype.hpp  ──→  slughorn.hpp  ←──  canvas.hpp
+```
+
+`Canvas::text()` has no opinion on where the metrics came from. Pass metrics from
+FreeType, HarfBuzz, a future backend, or a manually filled struct — the API is identical.
+The application bridges the two at the call site.
 
 ---
 
@@ -1131,7 +1289,7 @@ auto g = canvas.createRadialGradient(cx, cy, r0, r1, stops);
 auto g = canvas.createSweepGradient(cx, cy, startAngle, endAngle, stops); // radians
 
 canvas.fillGradient(g);                                // commit current path
-canvas.fillGradient(g, 1.0, Key("named_gradient"));   // with explicit key
+canvas.fillGradient(g, 1_cv, Key("named_gradient"));   // with explicit key
 ```
 
 Gradient coordinates are in the same authoring space as your path commands —
@@ -1145,7 +1303,7 @@ directly:
 ```cpp
 GradientInfo gi;
 gi.type      = GradientInfo::Type::Linear;
-gi.stops     = { {0.0_cv, RED}, {0.5_cv, YELLOW}, {1.0_cv, BLUE} };
+gi.stops     = { {0_cv, RED}, {0.5_cv, YELLOW}, {1_cv, BLUE} };
 gi.transform = buildLinearGradientMatrix(x0, y0, x1, y1);
 
 uint32_t gid = atlas.addGradient(gi);   // 1-based ID; must be called before build()
@@ -1164,9 +1322,9 @@ Stops are `{t, Color}` pairs with `t ∈ [0, 1]`. They are sorted by `t` during
 
 ```cpp
 std::vector<GradientStop> stops = {
-    {0.0_cv, {1, 0, 0, 1}},   // red
-    {0.5_cv, {1, 1, 0, 1}},   // yellow
-    {1.0_cv, {0, 0, 1, 1}},   // blue
+    {0_cv,    {1, 0, 0, 1}},   // red
+    {0.5_cv,  {1, 1, 0, 1}},   // yellow
+    {1_cv,    {0, 0, 1, 1}},   // blue
 };
 ```
 
@@ -1194,7 +1352,7 @@ center, the common case). The shader computes
 ```cpp
 gi.type        = GradientInfo::Type::Radial;
 gi.transform   = buildRadialGradientMatrix(0.5_cv, 0.5_cv, 0.4_cv);
-gi.innerRadius = 0.0_cv;   // point center; set > 0 for a ring
+gi.innerRadius = 0_cv;   // point center; set > 0 for a ring
 gi.stops       = stops;
 ```
 
@@ -1435,8 +1593,8 @@ band count is `splits.size() + 1`:
 ```cpp
 Atlas::ShapeInfo info;
 info.curves  = curves;
-info.splitsX = {0.25f, 0.5f, 0.75f};  // 4 X-bands
-info.splitsY = {0.5f};                 // 2 Y-bands
+info.splitsX = {0.25_cv, 0.5_cv, 0.75_cv};  // 4 X-bands
+info.splitsY = {0.5_cv};                 // 2 Y-bands
 ```
 
 ### A Concrete Result
@@ -1454,26 +1612,26 @@ bands in the dense left half, and just 4 in the sparse right half — drops that
 structure, and the same total band count.
 
 ```cpp
-const float pivotX  = 0.5f;
-const int   nDense  = 12;   // bands in [0.0, pivotX]
-const int   nSparse =  4;   // bands in [pivotX, 1.0]
+const slug_t pivotX  = 0.5_cv;
+const int    nDense  = 12;   // bands in [0.0, pivotX]
+const int    nSparse =  4;   // bands in [pivotX, 1.0]
 // Total: 16 bands, 15 splits — same texture budget as uniform
 
 std::vector<slug_t> splitsX;
 
 for(int i = 1; i < nDense;  ++i)
-    splitsX.push_back(pivotX * float(i) / float(nDense));
+    splitsX.push_back(pivotX * cv(i) / cv(nDense));
 
 splitsX.push_back(pivotX);  // the pivot boundary itself
 
 for(int i = 1; i < nSparse; ++i)
-    splitsX.push_back(pivotX + (1.0f - pivotX) * float(i) / float(nSparse));
+    splitsX.push_back(pivotX + (1_cv - pivotX) * cv(i) / cv(nSparse));
 
 // Y: left uniform — curves span the full height on the dense side
 std::vector<slug_t> splitsY;
 
 for(int i = 1; i < 16; ++i)
-    splitsY.push_back(float(i) / 16.0f);
+    splitsY.push_back(cv(i) / 16_cv);
 
 canvas.setSplits(splitsX, splitsY);
 canvas.fill(color);
@@ -1819,6 +1977,8 @@ Two rendering paths are available:
 
 ## The SSBO Path (Default)
 
+![SSBO layout](ssbo-layout.svg)
+
 The SSBO path splits per-shape data across two shader storage buffers bound at
 different points. The key insight is that some data is **atlas-static** (fixed once
 after `build()`) and some is **layer-dynamic** (can change per frame). Separating
@@ -1869,7 +2029,7 @@ Only two vertex attributes are emitted:
 Each `Layer` in a `CompositeShape` produces one quad: four vertices, two triangles.
 
 ```cpp
-static constexpr float EXPAND = 0.01f;
+static constexpr slug_t EXPAND = 0.01_cv;
 size_t layerIndex = 0;
 
 for(const slughorn::Layer& layer : compositeShape.layers) {
@@ -1885,7 +2045,7 @@ for(const slughorn::Layer& layer : compositeShape.layers) {
     float emX1 = (float)(shape->bearingX + shape->width)    + EXPAND;
     float emY1 = (float)shape->bearingY                     + EXPAND;
 
-    float lidx = float(layerIndex + 1);  // 1-based, packed into a_position.w
+    float lidx = cv(layerIndex + 1);  // 1-based, packed into a_position.w
 
     // Emit 4 vertices: a_position (xyz corner, lidx) + a_emCoord (em xy, uv)
     // Pack 4 vec4s into the layer buffer at layerIndex * 4
@@ -1900,14 +2060,14 @@ for(const slughorn::Layer& layer : compositeShape.layers) {
 
 ## The GL3 Path
 
+![Vertex attribute layout](attr-layout.svg)
+
 The GL3 path replicates all per-shape data as per-vertex attributes instead of using
 SSBO buffers. It is the correct choice for GL 3.x hardware or when SSBO support is
 unavailable. Use `GL3ShapeDrawable` (or `GL3SubdividedDrawable`) to opt in; the atlas
 build, texture upload, and blend mode are identical between the two paths.
 
 The vertex attribute layout diagram below documents the GL3 path.
-
-![Vertex attribute layout](attr-layout.svg)
 
 | Loc | Name | Type | What it carries | Why the shader needs it |
 |---|---|---|---|---|
@@ -2161,7 +2321,7 @@ faceLayer.origin = slughorn::Origin::Centered;
 // Hand: rotates each frame via effectId 8
 slughorn::Layer handLayer;
 handLayer.key      = handKey;
-handLayer.origin   = slughorn::Origin{0.5f, 0.5f};   // pivot at clock centre
+handLayer.origin   = slughorn::Origin{0.5_cv, 0.5_cv};   // pivot at clock centre
 handLayer.effectId = 8;
 
 // At runtime, effectId 8 reads osg_SimulationTime directly — no UpdateCallback needed.
@@ -2208,7 +2368,7 @@ the shader uses — so what you see in the image is exactly what the GPU sees.
 
 ### CLI subcommands
 
-The `bin/slughorn` CLI has two subcommands useful for debugging:
+The `bin/slughorn` CLI has three subcommands useful for debugging:
 
 ```sh
 # Print a full atlas summary: shape count, band counts, texture dimensions, gradient list.
@@ -2216,10 +2376,57 @@ slughorn info my_atlas.slug
 
 # Render one shape or composite to a PNG — no GPU required.
 slughorn render my_atlas.slug my_key out.png
+
+# Export a shape's curves and band boundaries as a scalable SVG.
+slughorn svg my_atlas.slug my_key out.svg
 ```
 
 `render` uses the same GLSL emulator as `slughorn.render`, so it faithfully mirrors what
 osgSlug will produce (minus effects and gradients, which are GPU-only).
+
+`slughorn svg` draws every curve in the shape as a quadratic Bézier with control-point
+indicators and overlays the band grid in red. It is the fastest way to inspect raw path
+geometry — especially useful for diagnosing stroke problems, where the curve count alone
+tells you whether tessellation is behaving correctly. To serialize the atlas from C++ for
+use with the CLI, pipe it through `slughorn::serial::writeJSON` or
+`slughorn::serial::write`:
+
+```cpp
+// Serialize to JSON for inspection or CLI use:
+slughorn::serial::writeJSON(*atlas, std::cerr);
+
+// Or write a .slug file the CLI can open directly:
+slughorn::serial::write(*atlas, "debug.slug");
+```
+
+#### Diagnosing stroke geometry with `slughorn svg`
+
+The most effective use of `slughorn svg` is a **before/after comparison**. When a stroke
+renders incorrectly, export the broken shape and a known-good reference and compare raw
+file sizes:
+
+```sh
+# Broken version (large coordinates, stroke looks dashed):
+slughorn svg broken.slug stroke_key broken.svg
+
+# Known-good version (normalized coordinates, stroke looks correct):
+slughorn svg okay.slug stroke_key okay.svg
+
+wc -l broken.svg okay.svg
+# broken.svg:  6237 lines
+# okay.svg:     477 lines
+```
+
+A 10× or greater difference in line count is an immediate red flag: the broken shape has
+far more curves than the good one. Open both in a browser and zoom into the corners — if
+curves are "bunched up" with dozens of points at the same integer coordinate, tessellation
+has exploded. The fix is an adaptive flattenCurve tolerance, not band tuning.
+
+This exact workflow caught the bug described in `ai/bug.md`: the
+`TOLERANCE_BALANCED = 0.001` constant is calibrated for 0–1 em-space. At 0–516 scale,
+corner arcs subdivided to the maximum recursion depth (256 segments per arc) and flooded
+the band tables with degenerate zero-length curves. The SVG diff made it obvious in
+seconds; the fix was one line.
 
 ---
 
@@ -2341,7 +2548,11 @@ at the sizes evaluated, so both variants remain available for further experiment
 
 A typical debug session for a new shape looks like this:
 
-1. **Mode 6** first — confirm the quad is the right size and position. Oversized quads waste
+0. **`slughorn svg`** first if you're working with a Canvas stroke — confirm the curve
+   count is reasonable and corners aren't exploding. A 10× size difference between a
+   working and broken export means it's a geometry problem, not a GPU problem. Fix it
+   there before touching band settings.
+1. **Mode 6** — confirm the quad is the right size and position. Oversized quads waste
    fill rate; undersized quads clip the shape.
 2. **Mode 1** — count the bands. Compare against your `SplitStrategy` expectation.
 3. **Mode 2** — check boundary positions. A boundary in the wrong cell produces a visible

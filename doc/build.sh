@@ -10,10 +10,12 @@ pandoc cover.md UserGuide.md \
 	-H darkmode.tex \
 	-V papersize:letter \
 	-V geometry:margin=1in \
-	-V fontsize=10pt \
-	-V mainfont="DejaVu Serif" \
-	-V sansfont="DejaVu Sans" \
-	-V monofont="DejaVu Sans Mono"
+	-V fontsize=11pt \
+	-V mainfont="Source Serif 4" \
+	-V sansfont="Source Sans 3" \
+	-V monofont="Source Code Pro" \
+	-V monofontoptions="Scale=MatchLowercase" \
+	-V booktabs=true
 
 # Some options for --highlight-style:
 #
