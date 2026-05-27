@@ -263,8 +263,8 @@ struct KeyHash {
 
 struct KeyIterator {
 	KeyIterator(uint32_t _counter=0): counter(_counter) {}
-	KeyIterator(const char* _prefix): prefix(_prefix) {}
-	KeyIterator(std::string _prefix): prefix(std::move(_prefix)) {}
+	KeyIterator(const char* _prefix, bool _force=false): prefix(_prefix), force(_force) {}
+	KeyIterator(std::string _prefix, bool _force=false): prefix(std::move(_prefix)), force(_force) {}
 
 	Key next() {
 		if(prefix.empty()) return Key(counter++);
@@ -275,6 +275,9 @@ struct KeyIterator {
 	std::string prefix;
 
 	uint32_t counter = 0;
+
+	// When true, backends should use next() even when a source element provides its own id.
+	bool force = false;
 };
 
 // ================================================================================================
