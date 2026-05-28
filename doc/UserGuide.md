@@ -2508,11 +2508,11 @@ layer at a time in mode 1 or mode 4 before going back to the full composite.
 
 In early April of 2026, [Glenn Waldron](https://github.com/gwaldron) made a
 comment in Slack that he'd added "Slug text support" to
-[osgEarth](https://github.com/pelicanmapping/osgearth). Having been long
-obsessed with all things *vector graphics* related, I found myself **shocked**
-at not having any idea at what Slug actually was! Once we had extracted the
-Slug-related code out into its own standalone example, the first question we
-began asking ourselves is: *what else can we DO with this!?*
+[osgEarth](https://github.com/pelicanmapping/osgearth). Having long been
+obsessed with all things *vector graphics*, I found myself **shocked** at not
+having any idea what Slug actually was! Once we had extracted the Slug-related
+code out into its own standalone example, the first question we began asking
+ourselves was: *what else can we DO with this!?*
 
 After getting approval to do some research on the subject, the first experiment
 was straightforward: I would "inject" the necessary curve data directly into the
@@ -2523,8 +2523,8 @@ to perform that exact same step).
 
 After that, the floodgates opened. I quickly started partitioning the code into
 reusable pieces of generic C++20, and that became the basis for slughorn itself.
-[osgSlug](https://github.com/AlphaPixel/osgSlug) was begun *alongsize* slughorn,
-serving as the defacto "testbed" for our development and experimentation.
+[osgSlug](https://github.com/AlphaPixel/osgSlug) was begun *alongside* slughorn,
+serving as the de facto "testbed" for our development and experimentation.
 I rapidly added support for ingesting Cairo, Skia, NanoSVG and
 FreeType2 data via a common interface: `slughorn::CurveDecomposer`. Once that all
 fell into place, the natural next step was a slughorn-native authoring API, from
@@ -2543,10 +2543,10 @@ promising).
 
 At this point, we're confident saying that slughorn has an impressive set
 of features, and this guide is almost *certain* to leave many of them out! The
-best way to see what the futures holds--which will be guided **entirely** by
+best way to see what the future holds--which will be guided **entirely** by
 community interest and support--is to check out our evolving
 [What's Next](doc/WhatsNext.pdf). If any of these features would be valuable to
-you *sooner rather than latter*, feel free to reach out and let us know!
+you *sooner rather than later*, feel free to reach out and let us know!
 
 TODO: Chris needs to edit this! :)
 
