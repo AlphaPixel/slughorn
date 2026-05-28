@@ -371,7 +371,7 @@ public:
 		if(ccw) {
 			sweep = startAngle - endAngle;
 
-			if(sweep < 0_cv) sweep += cv(2.0 * M_PI);
+			if(sweep < 0_cv) sweep += 2_cv * PI_CV;
 
 			sweep = -sweep;
 		}
@@ -379,7 +379,7 @@ public:
 		else {
 			sweep = endAngle - startAngle;
 
-			if(sweep < 0_cv) sweep += cv(2.0 * M_PI);
+			if(sweep < 0_cv) sweep += 2_cv * PI_CV;
 		}
 
 		_arcSegments(cx, cy, r, startAngle, sweep);
@@ -467,7 +467,7 @@ public:
 		// Pass 2a: per-segment perpendicular normals.
 		std::vector<std::pair<slug_t, slug_t>> segN(numSegs);
 
-		for(size_t i = 0; i < numSegs; ++i) {
+		for(size_t i = 0; i < numSegs; i++) {
 			const slug_t dx = pts[i + 1].first - pts[i].first;
 			const slug_t dy = pts[i + 1].second - pts[i].second;
 			const slug_t len = std::sqrt(dx * dx + dy * dy);
@@ -517,7 +517,7 @@ public:
 
 		std::vector<PN> pn(pts.size());
 
-		for(size_t i = 0; i < pts.size(); ++i) {
+		for(size_t i = 0; i < pts.size(); i++) {
 			if(!i) pn[i] = isClosed ? calcMiter(numSegs-1, 0) : PN{segN[0].first, segN[0].second};
 
 			else if(i==numSegs) pn[i] = isClosed ?
@@ -531,7 +531,7 @@ public:
 		// Pass 3: build lwall / rwall, then close.
 		Atlas::Curves lwall, rwall;
 
-		for(size_t i = 0; i < numSegs; ++i) {
+		for(size_t i = 0; i < numSegs; i++) {
 			const slug_t p0x = pts[i].first, p0y = pts[i].second;
 			const slug_t p2x = pts[i+1].first, p2y = pts[i+1].second;
 			const slug_t l0x = p0x + h*pn[i].nx, l0y = p0y + h*pn[i].ny;
@@ -636,12 +636,12 @@ private:
 		if(r <= 0_cv || sweep == 0_cv) return;
 
 		const slug_t absSweep = std::abs(sweep);
-		const int nSegs = std::max(1, static_cast<int>(std::ceil(absSweep / cv(M_PI_2))));
+		const size_t nSegs = std::max(size_t{1}, static_cast<size_t>(std::ceil(absSweep / PI_2_CV)));
 		const slug_t segSweep = sweep / cv(nSegs);
 
 		slug_t angle = startAngle;
 
-		for(int i = 0; i < nSegs; ++i) {
+		for(size_t i = 0; i < nSegs; i++) {
 			const slug_t a0 = angle, a1 = angle + segSweep;
 			const slug_t k = (4_cv / 3_cv) * std::tan(segSweep * 0.25_cv);
 			const slug_t cos0 = std::cos(a0), sin0 = std::sin(a0);
@@ -652,9 +652,9 @@ private:
 			const slug_t p1x = p0x - k*r*sin0, p1y = p0y + k*r*cos0;
 			const slug_t p2x = p3x + k*r*sin1, p2y = p3y - k*r*cos1;
 
-			if(i == 0 && _activeCurves.empty() && _pendingCurves.empty()) moveTo(p0x, p0y);
+			if(!i && _activeCurves.empty() && _pendingCurves.empty()) moveTo(p0x, p0y);
 
-			else if(i == 0) {
+			else if(!i) {
 				const slug_t dx = p0x - _penX, dy = p0y - _penY;
 
 				if(dx*dx + dy*dy > 1e-10_cv) lineTo(p0x, p0y);
@@ -690,7 +690,7 @@ private:
 
 			_lut.resize(_pts.size(), 0_cv);
 
-			for(size_t i = 1; i < _pts.size(); ++i) {
+			for(size_t i = 1; i < _pts.size(); i++) {
 				const slug_t dx = _pts[i].first - _pts[i-1].first;
 				const slug_t dy = _pts[i].second - _pts[i-1].second;
 

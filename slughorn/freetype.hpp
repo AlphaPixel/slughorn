@@ -811,7 +811,7 @@ static PaintResult traversePaint(
 		// -----------------------------------------------------------------
 		case FT_COLR_PAINTFORMAT_ROTATE: {
 			const auto& r = paint.u.rotate;
-			const slug_t theta = cv(r.angle) / 65536_cv * cv(M_PI);
+			const slug_t theta = cv(r.angle) / 65536_cv * PI_CV;
 			const slug_t c = cv(std::cos(static_cast<double>(theta)));
 			const slug_t s = cv(std::sin(static_cast<double>(theta)));
 			const slug_t cx = cv(r.center_x) / 65536_cv * emScale;
@@ -839,8 +839,8 @@ static PaintResult traversePaint(
 		// -----------------------------------------------------------------
 		case FT_COLR_PAINTFORMAT_SKEW: {
 			const auto& sk = paint.u.skew;
-			const slug_t tax = cv(std::tan(static_cast<double>(cv(sk.x_skew_angle) / 65536_cv * cv(M_PI))));
-			const slug_t tay = cv(std::tan(static_cast<double>(cv(sk.y_skew_angle) / 65536_cv * cv(M_PI))));
+			const slug_t tax = cv(std::tan(static_cast<double>(cv(sk.x_skew_angle) / 65536_cv * PI_CV)));
+			const slug_t tay = cv(std::tan(static_cast<double>(cv(sk.y_skew_angle) / 65536_cv * PI_CV)));
 			const slug_t cx = cv(sk.center_x) / 65536_cv * emScale;
 			const slug_t cy = cv(sk.center_y) / 65536_cv * emScale;
 
@@ -950,7 +950,7 @@ static PaintResult traversePaint(
 
 			parentMatrix.apply(cx, cy, cx, cy);
 
-			const slug_t tau = 2_cv * cv(M_PI);
+			const slug_t tau = 2_cv * PI_CV;
 			const slug_t startAngle = cv(sg.start_angle) / 65536_cv * tau;
 			const slug_t arcSpan = cv(sg.end_angle) / 65536_cv * tau - startAngle;
 
