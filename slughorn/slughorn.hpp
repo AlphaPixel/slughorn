@@ -53,6 +53,9 @@ namespace literals {
 
 using namespace literals;
 
+inline constexpr slug_t PI_CV = cv(std::numbers::pi_v<slug_t>);
+inline constexpr slug_t PI_2_CV = cv(std::numbers::pi_v<slug_t> / 2_cv);
+
 // ================================================================================================
 // Color
 //
@@ -61,9 +64,9 @@ using namespace literals;
 // boundary.
 // ================================================================================================
 struct Color {
-	slug_t r = cv(0);
-	slug_t g = cv(0);
-	slug_t b = cv(0);
+	slug_t r = 0_cv;
+	slug_t g = 0_cv;
+	slug_t b = 0_cv;
 	slug_t a = 1_cv;
 };
 
@@ -83,9 +86,9 @@ struct Color {
 // in the same coordinate space as the points being transformed (em-units for glyph work).
 // ================================================================================================
 struct Matrix {
-	slug_t xx = 1_cv, yx = cv(0); // first column
-	slug_t xy = cv(0), yy = 1_cv; // second column
-	slug_t dx = cv(0), dy = cv(0); // translation
+	slug_t xx = 1_cv, yx = 0_cv; // first column
+	slug_t xy = 0_cv, yy = 1_cv; // second column
+	slug_t dx = 0_cv, dy = 0_cv; // translation
 
 	static Matrix identity() { return {}; }
 
@@ -331,7 +334,7 @@ struct CompositeShape {
 
 	// Usage is obvious in text situations; in "pure shape" modes, can be used to help arrange
 	// groups of `Shape` instances horizontally.
-	slug_t advance = cv(0);
+	slug_t advance = 0_cv;
 };
 
 // ================================================================================================
@@ -989,10 +992,10 @@ struct CurveDecomposer {
 	// em-normalized [0,1] geometry.
 	slug_t tolerance = TOLERANCE_EXACT;
 
-	slug_t _x = cv(0);
-	slug_t _y = cv(0);
-	slug_t _sx = cv(0);
-	slug_t _sy = cv(0);
+	slug_t _x = 0_cv;
+	slug_t _y = 0_cv;
+	slug_t _sx = 0_cv;
+	slug_t _sy = 0_cv;
 
 	CurveDecomposer(Atlas::Curves& c): curves(c) {}
 
