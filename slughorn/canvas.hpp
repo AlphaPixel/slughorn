@@ -764,17 +764,71 @@ public:
 	Path path() const { return _path; }
 
 	// -------------------------------------------------------------------------
-	// Transform stack (forwarded to internal Path)
+	// Transform stack
+	//
+	// Two parallel CTMs are maintained and kept in sync:
+	//   _path._ctm  - bakes transforms into internal path geometry at moveTo/lineTo time
+	//   _ctm        - applied as a placement transform for external-Path commit verbs
+	//
+	// Internal path commits (fill(Color), stroke(width, Color), etc.) rely on geometry
+	// already baked by _path._ctm, so they do not additionally compose _ctm.
+	// External path commits (fill(Path, Color), etc.) compose _ctm into the layer
+	// transform so that translate/rotate/scale correctly position pre-built paths.
+	// Text always composes _ctm since glyph positions are computed in canvas space.
+	// save() / restore() checkpoint both CTMs together.
 	// -------------------------------------------------------------------------
 
-	void save() { _path.save(); }
-	void restore() { _path.restore(); }
-	void resetTransform() { _path.resetTransform(); }
-	void setTransform(const Matrix& m) { _path.setTransform(m); }
-	void transform(const Matrix& m) { _path.transform(m); }
-	void translate(slug_t tx, slug_t ty) { _path.translate(tx, ty); }
-	void rotate(slug_t angle) { _path.rotate(angle); }
-	void scale(slug_t sx, slug_t sy) { _path.scale(sx, sy); }
+	void save() {
+		_path.save();
+		_ctmStack.push_back(_ctm);
+	}
+
+	void restore() {
+		_path.restore();
+
+		if(!_ctmStack.empty()) {
+			_ctm = _ctmStack.back();
+
+			_ctmStack.pop_back();
+		}
+	}
+
+	void resetTransform() { _path.resetTransform(); _ctm = Matrix::identity(); }
+	void setTransform(const Matrix& m) { _path.setTransform(m); _ctm = m; }
+	void transform(const Matrix& m) { _path.transform(m); _ctm = _ctm * m; }
+
+	void translate(slug_t tx, slug_t ty) {
+		_path.translate(tx, ty);
+
+		Matrix m;
+
+		m.dx = tx; m.dy = ty;
+
+		_ctm = _ctm * m;
+	}
+
+	void rotate(slug_t angle) {
+		_path.rotate(angle);
+
+		const slug_t c = std::cos(angle), s = std::sin(angle);
+
+		Matrix m;
+
+		m.xx = c; m.xy = -s;
+		m.yx = s; m.yy = c;
+
+		_ctm = _ctm * m;
+	}
+
+	void scale(slug_t sx, slug_t sy) {
+		_path.scale(sx, sy);
+
+		Matrix m;
+
+		m.xx = sx; m.yy = sy;
+
+		_ctm = _ctm * m;
+	}
 
 	// -------------------------------------------------------------------------
 	// Path commands (forwarded to internal Path)
@@ -817,7 +871,9 @@ public:
 
 	struct GradientHandle {
 		GradientInfo::Type type = GradientInfo::Type::Linear;
-		slug_t x0 = 0, y0 = 0, x1 = 1, y1 = 0;
+
+		slug_t x0 = 0_cv, y0 = 0_cv, x1 = 1_cv, y1 = 0_cv;
+
 		std::vector<GradientStop> stops;
 	};
 
@@ -861,6 +917,7 @@ public:
 
 	void setSplitStrategy(Atlas::SplitStrategy strategy) {
 		_splitStrategy = std::move(strategy);
+
 		_splitsX.clear();
 		_splitsY.clear();
 	}
@@ -868,6 +925,7 @@ public:
 	void clearSplits() {
 		_splitsX.clear();
 		_splitsY.clear();
+
 		_splitStrategy = {};
 	}
 
@@ -966,13 +1024,13 @@ public:
 	Key fill(const Path& p, Color color, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={}) {
 		if(!p.hasPendingPath()) return Key(0u);
 
-		return _commitFill(_merged(p), color, scale, _key.next(), origin);
+		return _commitFill(_merged(p), color, scale, _key.next(), origin, _ctm);
 	}
 
 	Key fill(const Path& p, Color color, slug_t scale, Key key, Atlas::ShapeInfo::Origin origin={}) {
 		if(!p.hasPendingPath()) return Key(0u);
 
-		return _commitFill(_merged(p), color, scale, key, origin);
+		return _commitFill(_merged(p), color, scale, key, origin, _ctm);
 	}
 
 	bool defineShape(const Path& p, Key key, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={}) {
@@ -986,7 +1044,7 @@ public:
 
 		if(!copy.strokePath(width)) return Key(0u);
 
-		return _commitFill(_merged(copy), color, scale, _key.next(), origin);
+		return _commitFill(_merged(copy), color, scale, _key.next(), origin, _ctm);
 	}
 
 	Key stroke(const Path& p, slug_t width, Color color, slug_t scale, Key key, Atlas::ShapeInfo::Origin origin={}) {
@@ -994,19 +1052,19 @@ public:
 
 		if(!copy.strokePath(width)) return Key(0u);
 
-		return _commitFill(_merged(copy), color, scale, key, origin);
+		return _commitFill(_merged(copy), color, scale, key, origin, _ctm);
 	}
 
 	Key fillGradient(const Path& p, const GradientHandle& handle, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={}) {
 		if(!p.hasPendingPath()) return Key(0u);
 
-		return _commitGradient(_merged(p), handle, scale, _key.next(), origin);
+		return _commitGradient(_merged(p), handle, scale, _key.next(), origin, _ctm);
 	}
 
 	Key fillGradient(const Path& p, const GradientHandle& handle, slug_t scale, Key key, Atlas::ShapeInfo::Origin origin={}) {
 		if(!p.hasPendingPath()) return Key(0u);
 
-		return _commitGradient(_merged(p), handle, scale, key, origin);
+		return _commitGradient(_merged(p), handle, scale, key, origin, _ctm);
 	}
 
 	// -------------------------------------------------------------------------
@@ -1121,7 +1179,8 @@ private:
 		Color color,
 		slug_t scale,
 		Key key,
-		Atlas::ShapeInfo::Origin origin
+		Atlas::ShapeInfo::Origin origin,
+		const Matrix& placement=Matrix::identity()
 	) {
 		if(curves.empty()) return Key(0u);
 
@@ -1158,7 +1217,7 @@ private:
 
 		layer.key = key;
 		layer.color = color;
-		layer.transform = transform;
+		layer.transform = placement * transform;
 
 		_composite.layers.push_back(layer);
 
@@ -1212,7 +1271,8 @@ private:
 		const GradientHandle& handle,
 		slug_t scale,
 		Key key,
-		Atlas::ShapeInfo::Origin origin
+		Atlas::ShapeInfo::Origin origin,
+		const Matrix& placement = Matrix::identity()
 	) {
 		if(curves.empty()) return Key(0u);
 
@@ -1280,7 +1340,7 @@ private:
 
 		layer.key = key;
 		layer.color = {};
-		layer.transform = transform;
+		layer.transform = placement * transform;
 		layer.gradientId = gid;
 
 		_composite.layers.push_back(layer);
@@ -1371,6 +1431,8 @@ private:
 	KeyIterator _key;
 	Path _path;
 	CompositeShape _composite;
+	Matrix _ctm = Matrix::identity();
+	std::vector<Matrix> _ctmStack;
 	std::vector<slug_t> _splitsX;
 	std::vector<slug_t> _splitsY;
 	Atlas::SplitStrategy _splitStrategy;

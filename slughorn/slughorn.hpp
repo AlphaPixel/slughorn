@@ -12,9 +12,9 @@
 // TODO: Something like `slugi_t` for `uint32_t`, since it SEEMS to be the only non-float type
 // we're using (beyond `size_t`).
 
-constexpr uint8_t SLUGHORN_VERSION_MAJOR = 0;
-constexpr uint8_t SLUGHORN_VERSION_MINOR = 0;
-constexpr uint8_t SLUGHORN_VERSION_PATCH = 1;
+inline constexpr uint8_t SLUGHORN_VERSION_MAJOR = 0;
+inline constexpr uint8_t SLUGHORN_VERSION_MINOR = 0;
+inline constexpr uint8_t SLUGHORN_VERSION_PATCH = 1;
 
 namespace slughorn {
 
