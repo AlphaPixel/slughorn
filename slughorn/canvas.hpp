@@ -1088,8 +1088,12 @@ public:
 	) {
 		if(str.empty() || fontSize == 0_cv) return;
 
+		// Apply CTM so text() uses the same coordinate space as path operations.
+		slug_t tx, ty;
+		_ctm.apply(x, y, tx, ty);
+
 		// Baseline dy in em-space, adjusted for vertical anchor
-		slug_t dy = y / fontSize;
+		slug_t dy = ty / fontSize;
 
 		switch(anchorY) {
 			case TextAnchorY::Baseline: break;
@@ -1099,7 +1103,7 @@ public:
 		}
 
 		// Starting dx in em-space; two-pass only for Center/Right
-		slug_t dx = x / fontSize;
+		slug_t dx = tx / fontSize;
 
 		if(alignX != TextAlignX::Left) {
 			slug_t totalAdvance = 0_cv;
