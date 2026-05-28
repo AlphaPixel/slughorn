@@ -1,7 +1,7 @@
 # slughorn User Guide
 
 **TODO**: Insert *AlphaPixel* branding here, as well as anything else we might
-liek to highlight (like Github link, `TODO.md`, etc, etc)
+like to highlight (like Github link, `TODO.md`, etc, etc)
 
 # What Is Slug
 
@@ -636,7 +636,7 @@ nsvgDelete(image);
 ```cpp
 for(const auto* shape = image->shapes; shape; shape = shape->next) {
     slughorn::Matrix m = slughorn::nanosvg::loadShape(
-        shape, atlas, Key(keyBase++), 1_cv / image->width
+        shape, atlas, keyIterator, 1_cv / image->width
     );
 
     // Store m in Layer::transform for correct composite positioning.
@@ -980,18 +980,18 @@ canvas.lineTo(0.9_cv, 0.1_cv);
 canvas.lineTo(0.1_cv, 0.1_cv);
 canvas.closePath();
 canvas.fill(RED);
-canvas.finalize(Key("my_triangle"));
+canvas.finalize("my_triangle");
 ```
 
 ### Pattern 2 — Named Shape
 
 Use when you need the shape directly addressable after `build()`, e.g. for
-`atlas.getShape(Key("circle_shape"))` or the CLI `render` subcommand.
+`atlas.getShape("circle_shape")` or the CLI `render` subcommand.
 
 ```cpp
 canvas.circle(0.5_cv, 0.5_cv, 0.4_cv);
-canvas.fill(BLUE, 1_cv, Key("circle_shape"));
-canvas.finalize(Key("circle_composite"));
+canvas.fill(BLUE, 1_cv, "circle_shape");
+canvas.finalize("circle_composite");
 ```
 
 ### Pattern 3 — Multi-layer Composite
@@ -1005,14 +1005,14 @@ canvas.circle(0.5_cv, 0.5_cv, 0.35_cv);
 canvas.fill(BLUE);
 canvas.roundedRect(0.25_cv, 0.25_cv, 0.5_cv, 0.5_cv, 0.08_cv);
 canvas.fill(GREEN);
-canvas.finalize(Key("layered_icon"));
+canvas.finalize("layered_icon");
 ```
 
 ### Pattern 4 — Geometry-only Shape
 
 ```cpp
 canvas.roundedRect(0.1_cv, 0.1_cv, 0.8_cv, 0.8_cv, 0.15_cv);
-canvas.defineShape(Key("rrect_geom"));
+canvas.defineShape("rrect_geom");
 // No Layer; the shape lives in the Atlas with no color attached.
 ```
 
@@ -1024,7 +1024,7 @@ canvas.moveTo(0.1_cv, 0.5_cv);
 canvas.quadTo(0.25_cv, 0.05_cv, 0.5_cv, 0.5_cv);
 canvas.quadTo(0.75_cv, 0.95_cv, 0.9_cv, 0.5_cv);
 canvas.stroke(0.06_cv, WHITE);
-canvas.finalize(Key("scurve_stroke"));
+canvas.finalize("scurve_stroke");
 ```
 
 ### Pattern 6 — strokePath + defineShape (Geometry-only Stroke)
@@ -1039,7 +1039,7 @@ canvas.beginPath();
 canvas.moveTo(0.2_cv, 0.85_cv);
 canvas.quadTo(0.1_cv, 0.5_cv, 0.5_cv, 0.5_cv);
 canvas.strokePath(0.08_cv);
-canvas.defineShape(Key("scurve_geom"));
+canvas.defineShape("scurve_geom");
 ```
 
 ### Pattern 7 — Transform stack (Baked Tick Marks)
@@ -1081,11 +1081,11 @@ canvas.lineTo(CX, CY + HAND_LENGTH);
 
 canvas.stroke(
     HAND_WIDTH, HAND_COLOR, 1_cv,
-    Key("clock_hand"),
+    "clock_hand",
     Origin(CX, CY) // pivot = stroke base, stored in Layer::transform.dx/dy
 );
 
-canvas.finalize(Key("clock_hand_composite"));
+canvas.finalize("clock_hand_composite");
 ```
 
 ### Pattern 9 — Standalone Path + Arc-length Sampling
@@ -1106,7 +1106,7 @@ for(size_t i = 0; i <= 10; i++) {
 
 // Commit via explicit-path overload — p is unchanged.
 canvas.stroke(p, 0.06_cv, WHITE);
-canvas.finalize(Key("sample_path"));
+canvas.finalize("sample_path");
 ```
 
 ## The Scale Parameter
@@ -1132,17 +1132,19 @@ The glyphs must already exist in the Atlas (loaded via a font backend before
 // defined in slughorn.hpp, no FreeType types anywhere in the struct.
 slughorn::FontMetrics m = font->metrics();
 
+// Coordinates are in canvas space — the same space as moveTo/lineTo.
+// If a Y-flip CTM is active (SVG-style authoring), pass SVG-space coordinates.
 canvas.text(
-    "AXO",
+    "String",
     70_cv, // fontSize in canvas units
-    180_cv, 55_cv, // x (anchor), y (anchor)
-    {1_cv, 1_cv, 1_cv, 1_cv}, // color
+    180_cv, 305_cv, // x (anchor), y (anchor) — SVG canvas coords
+    {1_cv, 1_cv, 1_cv, 1_cv},
     m,
-    slughorn::canvas::TextAnchorY::Baseline, // y = text baseline (default)
-    slughorn::canvas::TextAlignX::Center // x = horizontal center of run
+    slughorn::canvas::TextAnchorY::Baseline,
+    slughorn::canvas::TextAlignX::Center
 );
 
-canvas.finalize(Key("card_text"));
+canvas.finalize("card_text");
 ```
 
 ### Vertical Anchoring — `TextAnchorY`
@@ -1155,9 +1157,7 @@ canvas.finalize(Key("card_text"));
 | `XCenter` | vertical centre of lowercase letters | `xHeightRatio` |
 
 All ratios are fractions of the em-square stored in `slughorn::FontMetrics`. Multiply
-by `fontSize` to get world-space distances. The axolotl card demo, for example, uses
-`CapCenter` so that "AXO" sits exactly centred in the lower half of the card regardless
-of which font or size is chosen.
+by `fontSize` to get world-space distances.
 
 ### Horizontal Alignment — `TextAlignX`
 
@@ -1171,6 +1171,21 @@ of which font or size is chosen.
 twice — once to measure total advance, once to place. The advance values come from
 the Atlas shapes loaded by the font backend; if a glyph is not present in the Atlas
 a 0.6 em fallback is used.
+
+### Coordinate Space
+
+`canvas.text()` applies the current CTM to `(x, y)` before converting to em-space, so
+it obeys the same coordinate space as every other canvas verb. If you set up a Y-flip
+for SVG-style authoring:
+
+```cpp
+canvas.translate(0_cv, H);
+canvas.scale(1_cv, -1_cv);
+```
+
+then pass SVG-space coordinates to `text()` just as you would to `moveTo`. The CTM
+handles the conversion to world space internally. Passing raw world-space coordinates
+to `text()` while a flip CTM is active will place the text at the mirror position.
 
 ### Dependency Design
 
@@ -1204,6 +1219,104 @@ auto g = canvas.createSweepGradient(cx, cy, startAngle, endAngle, stops);
 
 Stops are `{t, Color}` pairs with $t \in [0, 1]$. See [Gradients](#gradients) for the
 full treatment of gradient transforms, aspect-ratio correction, and COLRv1 integration.
+
+# Mixing Backends
+
+The dependency design pays off as soon as you need text alongside canvas geometry.
+Load glyphs with a font backend, draw shapes with `Canvas`, and commit everything into
+the same `Atlas` — the two cooperate through `FontMetrics` without either knowing about
+the other.
+
+## Single Atlas, One Font
+
+The common case: one `Atlas` holds both canvas shapes and font glyphs. Load the font
+before calling `canvas.text()` (so advance widths are available for the centering pass),
+then call `atlas.build()`:
+
+```cpp
+slughorn::canvas::Canvas canvas(*atlas);
+
+canvas.translate(0_cv, 520_cv);
+canvas.scale(1_cv, -1_cv); // SVG-style Y-down authoring
+
+// ... path drawing, canvas.fill(), canvas.stroke() ...
+canvas.finalize("card");
+
+auto font = osgx::make_ref<osgSlug::Font>("Sans.ttf", atlas);
+
+font->load();
+atlas->build();
+atlas->packTextures();
+
+// Coordinates are in SVG canvas space — the active CTM is applied internally.
+canvas.text(
+    "String",
+    70_cv,
+    180_cv, 305_cv,
+    {1_cv, 1_cv, 1_cv, 1_cv},
+    font->metrics(),
+    slughorn::canvas::TextAnchorY::Baseline,
+    slughorn::canvas::TextAlignX::Center
+);
+
+canvas.finalize("title");
+```
+
+One `Atlas`, one `build()` call, one `ShapeDrawable` — canvas shapes and text are
+indistinguishable at the GPU level.
+
+## Multi-Font Scenes
+
+Loading two fonts into one `Atlas` has a hard constraint: `Font::load()` registers each
+glyph under its Unicode codepoint as the Atlas key. Two fonts covering the same codepoints
+— a regular and an italic variant of the same family, for instance — cannot coexist in one
+Atlas. The second `load()` silently skips every codepoint already registered.
+
+The current solution is **one Atlas per font family**, with all canvas geometry for that
+family in the same Atlas.
+
+> **Future: per-font key offset**
+>
+> The planned fix is a key offset on the `Font` object:
+>
+> ```cpp
+> auto fontRegular = osgx::make_ref<osgSlug::Font>("Sans.ttf", atlas);
+> auto fontItalic = osgx::make_ref<osgSlug::Font>("Sans-Italic.ttf", atlas, /*keyOffset=*/0x10000);
+> ```
+>
+> Glyphs from `fontItalic` would be stored at keys `0x10000 + codepoint`, leaving
+> the regular range untouched. `canvas.text()` would accept a `Font*` (or a `FontMetrics`
+> carrying the offset) to look up the correct range at placement time. Unicode codepoints
+> top out at `0x10FFFF`, leaving ample room for many independent namespaces in a single
+> Atlas. See `WhatsNext` for current status.
+
+## Multiple Atlases in a Scene (osgSlug)
+
+When each font family lives in its own `Atlas`, each `ShapeDrawable` also needs its own
+Atlas state. The key constraint is that `SSBOShapeDrawable::compile()` writes the layer
+SSBO and the GLSL program into the drawable's own `StateSet` via `getOrCreateStateSet()`.
+The Atlas-specific state — shape SSBO, textures, uniforms — comes from
+`createDefaultStateSet()`. These must be *merged* into the drawable's existing `StateSet`,
+not used to replace it:
+
+```cpp
+sd->compile();
+sd->getOrCreateStateSet()->merge(*atlas->createDefaultStateSet());
+
+sdItalic->compile();
+sdItalic->getOrCreateStateSet()->merge(*atlasItalic->createDefaultStateSet());
+
+auto geode = osgx::make_ref<osg::Geode>();
+
+geode->addDrawable(sd);
+geode->addDrawable(sdItalic); // drawn in addDrawable() order
+// no StateSet on the Geode — each drawable is self-contained
+```
+
+Calling `sd->setStateSet(atlas->createDefaultStateSet())` instead would replace
+the drawable's `StateSet` entirely, discarding the compiled layer SSBO and making the
+drawable invisible. Use `getOrCreateStateSet()->merge()`; both drawables can share a
+single `Geode`.
 
 # Gradients
 
@@ -2481,7 +2594,7 @@ at the sizes evaluated, so both variants remain available for further experiment
 > animations, and HUD shapes; a pre-rendered FreeType bitmap atlas takes over below a
 > configurable size threshold. The crossover is invisible when both sides use grayscale AA
 > and a matched gamma. Subpixel LCD rendering in the fragment shader (a deferred milestone)
-> is the alternative path that would narrow the gap without a fallback. See `TODO.md` for
+> is the alternative path that would narrow the gap without a fallback. See `WhatsNext` for
 > detail.
 
 ## Workflow Notes
