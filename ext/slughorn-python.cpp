@@ -697,6 +697,10 @@ PYBIND11_MODULE(slughorn, m) {
 		.def("__repr__", [](const slughorn::Key& k) { return streamRepr(k); })
 	;
 
+	// TODO: Why are these necessary!?
+	py::implicitly_convertible<std::string, slughorn::Key>();
+	py::implicitly_convertible<uint32_t, slughorn::Key>();
+
 	// =========================================================================
 	// slughorn.KeyIterator
 	// =========================================================================

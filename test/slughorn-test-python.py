@@ -103,7 +103,9 @@ def test_core_types_and_curve_decomposer():
 def test_atlas_build_decode_and_render_surface():
 	atlas = slughorn.Atlas()
 
-	shape_key = slughorn.Key("rect")
+	# Make sure keys are "implictly convertible"...
+	# shape_key = slughorn.Key("rect")
+	shape_key = 0x1234
 	composite_key = slughorn.Key("rect_composite")
 
 	info = slughorn.ShapeInfo()
@@ -234,7 +236,9 @@ def test_canvas_commit_paths_gradients_and_composites():
 	fill_key = canvas.fill(
 		slughorn.Color(1.0, 0.0, 0.0, 1.0),
 		1.0,
-		slughorn.Key("fill_rect"),
+		# Again, make sure that the slughorn.Key ctor is "imlicitly" called...
+		# slughorn.Key("fill_rect"),
+		"fill_rect",
 		slughorn.ShapeInfo.Origin(slughorn.ShapeInfo.Origin.Type.Centered),
 	)
 
@@ -295,6 +299,87 @@ def test_canvas_commit_paths_gradients_and_composites():
 
 	assert len(gradients) == 2
 	assert atlas.gradient_texture.width > 0
+
+def test_key_implicit_str_conversion():
+	# All canvas methods that accept a Key should also accept a plain Python str.
+	atlas = slughorn.Atlas()
+	canvas = slughorn.canvas.Canvas(atlas, slughorn.KeyIterator())
+
+	# fill() with str key
+	canvas.begin_path()
+	canvas.rect(0.1, 0.1, 0.9, 0.9)
+	fill_key = canvas.fill(slughorn.Color(1.0, 0.0, 0.0, 1.0), 1.0, "implicit_fill")
+
+	assert fill_key == slughorn.Key("implicit_fill")
+
+	# stroke() (current-path) with str key
+	canvas.begin_path()
+	canvas.circle(0.5, 0.5, 0.3)
+	stroke_key = canvas.stroke(0.05, slughorn.Color(0.0, 1.0, 0.0, 1.0), 1.0, "implicit_stroke")
+
+	assert stroke_key == slughorn.Key("implicit_stroke")
+
+	# stroke() (explicit Path) with str key
+	path = slughorn.canvas.Path()
+	path.circle(0.5, 0.5, 0.2)
+	stroke_path_key = canvas.stroke(path, 0.05, slughorn.Color(0.0, 0.0, 1.0, 1.0), 1.0, "implicit_stroke_path")
+
+	assert stroke_path_key == slughorn.Key("implicit_stroke_path")
+
+	atlas.build()
+
+	assert atlas.get_shape("implicit_fill") is not None
+	assert atlas.get_shape("implicit_stroke") is not None
+	assert atlas.get_shape("implicit_stroke_path") is not None
+
+
+def test_canvas_arc_stroke_current_path_with_centered_origin():
+	# Exercises the canvas.arc() + canvas.stroke() (current-path, named key, Centered origin)
+	# pattern used by zora.py. Verifies: shape exists, origin is non-zero (Centered was applied),
+	# and a Layer built from the shape has the correct pivot for vertex-shader rotation.
+	atlas = slughorn.Atlas()
+	canvas = slughorn.canvas.Canvas(atlas, slughorn.KeyIterator())
+
+	Origin = slughorn.ShapeInfo.Origin
+	centered = Origin(Origin.Type.Centered)
+
+	CX, CY, R = 0.5, 0.5, 0.4
+	GAP = math.pi / 6
+
+	canvas.begin_path()
+	canvas.arc(CX, CY, R, GAP / 2, 2 * math.pi - GAP / 2)
+
+	# Both str and Key forms must work here (implicit conversion test).
+	key = canvas.stroke(0.01, slughorn.Color(0.6, 0.85, 1.0, 1.0), 1.0, "arc_ring", centered)
+
+	assert key == slughorn.Key("arc_ring")
+
+	atlas.build()
+
+	shape = atlas.get_shape("arc_ring")
+
+	assert shape is not None
+	assert shape.width > 0.0
+	assert shape.height > 0.0
+
+	# Centered origin: origin_x/y should equal half the bbox width/height (≈ R),
+	# not zero as the default origin would give.
+	assert shape.origin_x == pytest.approx(shape.width / 2, rel=1e-3)
+	assert shape.origin_y == pytest.approx(shape.height / 2, rel=1e-3)
+
+	# A Layer built from this shape with transform.x/y = CX/CY should place its
+	# pivot at (CX, CY) — verify that computeQuad centers correctly.
+	t = slughorn.Transform()
+	t.x = CX
+	t.y = CY
+	quad = shape.compute_quad(t)
+
+	mid_x = (quad.x0 + quad.x1) / 2
+	mid_y = (quad.y0 + quad.y1) / 2
+
+	assert mid_x == pytest.approx(CX, abs=0.02)
+	assert mid_y == pytest.approx(CY, abs=0.02)
+
 
 # =============================================================================
 # NanoSVG backend
@@ -387,7 +472,7 @@ def test_nanosvg_key_chaining():
 	keys = slughorn.KeyIterator()
 
 	composite_a = slughorn.nanosvg.load_string(_SVG_TWO_SOLIDS, atlas, keys)
-	composite_b = slughorn.nanosvg.load_string(_SVG_ONE_SOLID,   atlas, keys)
+	composite_b = slughorn.nanosvg.load_string(_SVG_ONE_SOLID, atlas, keys)
 
 	assert len(composite_a) == 2
 	assert len(composite_b) == 1
