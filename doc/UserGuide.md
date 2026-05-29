@@ -1,7 +1,9 @@
 # slughorn User Guide
 
-**TODO**: Insert *AlphaPixel* branding here, as well as anything else we might
-like to highlight (like Github link, `TODO.md`, etc, etc)
+[slughorn](https://github.com/AlphaPixel/slughorn) and [osgSlug](https://github.com/AlphaPixel/osgSlug)
+are developed by [AlphaPixel](https://alphapixel.com).
+
+![AlphaPixel](data/AlphaPixel4C.svg)
 
 # What Is Slug
 
@@ -9,6 +11,8 @@ like to highlight (like Github link, `TODO.md`, etc, etc)
 machine, delivered as one solid piece to the press. Terathon Software adopted it because
 the library's primary job is exactly that — laying out individual lines of text. The name
 says what it does.
+
+![Linotype (by Antonio Molina)](data/linotype.png)
 
 The algorithm renders vector outlines entirely on the GPU at draw time. There are no
 precomputed glyph images and no signed distance fields. Every outline is composed of
@@ -147,6 +151,12 @@ representation without re-authoring. You do not have to abandon your current wor
 get resolution-independent output. The Canvas API covers the case where you want to author
 shapes directly in C++ with an interface that will feel familiar from HTML Canvas.
 
+**VR and immersive displays.** In VR, fuzzy UI and text cause eye strain and
+user dissatisfaction faster than almost any other visual artifact.
+Fragment-aware rendering stays sharp at any view distance or stereo perspective
+without re-baking — a natural fit for world-space widgets, HMD overlays, and
+spatial UI.
+
 **Offline asset pipelines.** The `.slugb` serialization format lets you pre-bake a font
 atlas or icon set at build time and ship it alongside your application. The runtime never
 needs FreeType or any other font library present — just the atlas file and the shaders.
@@ -206,12 +216,21 @@ Every numeric value in the slughorn API — coordinates, scale factors, color
 components, tolerance thresholds — has type `slug_t`. It is a `typedef` for
 `float`.
 
+The Slug algorithm and its GPU shaders operate entirely in single precision.
+Matching that on the CPU side is not a style choice — it is the only way to
+guarantee that the values you specify are the values that reach the GPU. Early
+in slughorn's development, implicit `double → float` conversions produced subtle
+but real precision bugs: values that looked correct in a C++ debugger but
+arrived at the shader slightly wrong, causing rendering artifacts that were
+genuinely hard to trace back to a narrowing conversion.
+
 The reason this gets its own section is that C++ will silently accept a `double`
 literal wherever a `float` is expected, truncate its precision, issue zero
 warnings, and move on. Write a bare `0.5` where you meant a slughorn value and
 you have a `double` quietly narrowed to `float`. **You do not want to deal with
 `double → float` size issues.** `slug_t`, `_cv`, and `cv()` exist so that you
-never have to.
+never have to. The name `cv` is short for *curve value* — or just *curve*, if
+that is what your brain prefers.
 
 ```cpp
 using namespace slughorn::literals;
@@ -2136,7 +2155,7 @@ per entry. **Runtime-mutable** — see [Interactivity](#interactivity).
 | 0 | `color` | Flat RGBA |
 | 1 | `gradientMeta` | `(gradientId, cx, cy, r0_norm)` |
 | 2 | `gradientXform` | Type-encoded gradient transform |
-| 3 | `effectData` | `(effectId, shapeIndex, unused, worldWidth)` |
+| 3 | `effectData` | `(effectId, originX, originY, userParam)` |
 
 `effectData.y` carries the 0-based index of this layer's shape in the atlas shape
 buffer — the link between binding 1 and binding 0. `effectData.w` carries the
@@ -2286,7 +2305,7 @@ consecutive vec4 entries at offset `layerIndex * 4`:
 | `+ 0` | `color` | New RGBA (premultiplied) |
 | `+ 1` | `gradientMeta` | `x` = new gradientId (0 = flat color) |
 | `+ 2` | `gradientXform` | Gradient transform (normally fixed at compile time) |
-| `+ 3` | `effectData` | `x` = new effectId; `y` = shape index (do not change); `z` = unused; `w` = worldWidth |
+| `+ 3` | `effectData` | `x` = effectId; `y` = origin.x; `z` = origin.y; `w` = userParam |
 
 A typical color-swap in an `UpdateCallback` for `osgSlug` would look like:
 
@@ -2619,9 +2638,8 @@ layer at a time in mode 1 or mode 4 before going back to the full composite.
 
 # How This All Started
 
-In early April of 2026, [Glenn Waldron](https://github.com/gwaldron) made a
-comment in Slack that he'd added "Slug text support" to
-[osgEarth](https://github.com/pelicanmapping/osgearth). Having long been
+In early April of 2026, we noticed that [Pelican Mapping](https://www.pelicanmapping.com)
+had added "Slug text support" to [osgEarth](https://github.com/pelicanmapping/osgearth). Having long been
 obsessed with all things *vector graphics*, I found myself **shocked** at not
 having any idea what Slug actually was! Once we had extracted the Slug-related
 code out into its own standalone example, the first question we began asking
@@ -2669,3 +2687,9 @@ Both slughorn and osgSlug were developed in a "pair-programming" style using bot
 `claude` and `codex`. **Nothing was "vibe-coded"**. Instead, we used AI for
 research, test generation, automating small changes, and exploring how *other
 projects* had solved similar problems.
+
+# Changelog
+
+## v0.1.0 — First Release
+
+Initial public release.
