@@ -495,10 +495,10 @@ int main(int argc, char** argv) {
 
 		if(!hand.layers.empty()) {
 			const auto& t = hand.layers.front().transform;
-			const bool pivotOk = std::abs(t.dx - CX) < 1e-5_cv && std::abs(t.dy - CY) < 1e-5_cv;
+			const bool pivotOk = std::abs(t.x - CX) < 1e-5_cv && std::abs(t.y - CY) < 1e-5_cv;
 
 			std::cerr
-				<< "Pattern 14: hand pivot = (" << t.dx << ", " << t.dy << ")"
+				<< "Pattern 14: hand pivot = (" << t.x << ", " << t.y << ")"
 				<< " expected (" << CX << ", " << CY << ")"
 				<< (pivotOk ? " OK" : " MISMATCH") << "\n"
 			;

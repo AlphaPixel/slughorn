@@ -129,6 +129,24 @@ struct Matrix {
 };
 
 // ================================================================================================
+// Transform
+//
+// Placement descriptor for a Layer. Carries the world-space position of the layer (x, y) and
+// an optional Z offset (z) for depth separation in 3D scenes. Replaces the old Matrix on Layer,
+// which carried four unused linear fields (xx/xy/yx/yy) that computeQuad() explicitly ignored.
+//
+// GradientInfo continues to use Matrix because gradient geometry encoding genuinely uses the 2x2
+// linear part (e.g. AffineRadial B-matrix).
+// ================================================================================================
+struct Transform {
+	slug_t x = 0_cv, y = 0_cv, z = 0_cv;
+};
+
+inline std::ostream& operator<<(std::ostream& os, const Transform& t) {
+	return os << "Transform(x=" << t.x << " y=" << t.y << " z=" << t.z << ")";
+}
+
+// ================================================================================================
 // GradientStop / GradientInfo
 //
 // Describes a color ramp used for gradient fills. GradientInfo is registered with Atlas via
@@ -294,26 +312,15 @@ struct Layer {
 
 	Color color{};
 
-	// dx/dy place the shape on the CPU side via Shape::computeQuad().
-	//
-	// xx/yx/xy/yy carry the linear part of the transform for GPU consumers
-	// (rotation/shear/other per-fragment work). The core slughorn atlas builder
-	// stores and forwards them but does not interpret them for geometry layout.
-	Matrix transform = Matrix::identity();
+	// x/y place the shape in world space via Shape::computeQuad().
+	// z is a depth offset for 3D scene placement (default 0).
+	Transform transform = {};
 
 	// TODO: Document WHEN and HOW this "should" be used!
 	slug_t scale = 1_cv;
 
-	// Shader effect to apply when rendering this layer. 0 = standard Slug coverage fill (default,
-	// no overhead). Non-zero values select an effect branch in the fragment shader; the set of
-	// valid IDs and their semantics are defined there. For example, something like:
-	//
-	// 0 - standard fill (color * slug coverage); this should ALWAYS be the 0/default
-	// 1 - texture fill (texture(slug_effectTexture, v_emCoord) * slug coverage)
-	// 2 - GLSL procedural
-	// 3 - Etc, etc.
-	//
-	// TODO: It is likely this will be called `fillMode` or similar in future versions!
+	// Shader effect to apply when rendering this layer; this value isn't used anywhere directly in
+	// slughorn itself, but rather passed wholesale to the frontend.
 	uint32_t effectId = 0;
 
 	// Gradient fill; 0 = flat color (layer.color used). Non-zero = 1-based index into the atlas
@@ -431,14 +438,14 @@ public:
 		// shape's em-space metrics into world units.
 		//
 		// expand is a small extra em-space margin used to enlarge the quad for
-		// AA fringes or rotated content; callers should not derive it from
-		// scale. computeQuad() does not interpret transform.xx/yx/xy/yy.
+		// AA fringes or rotated content; callers should not derive it from scale.
 		//
 		// The returned quad is relative to (0,0) - scene placement is the
 		// caller's responsibility (e.g. osg::MatrixTransform).
-		Quad computeQuad(const Matrix& transform, slug_t scale=1_cv, slug_t expand=0_cv) const {
-			const slug_t ox = (transform.dx - originX) * scale;
-			const slug_t oy = (transform.dy - originY) * scale;
+		Quad computeQuad(const Transform& transform, slug_t scale=1_cv, slug_t expand=0_cv) const {
+			const slug_t ox = (transform.x - originX) * scale;
+			const slug_t oy = (transform.y - originY) * scale;
+
 			return {
 				ox + (bearingX - expand) * scale,
 				oy + (bearingY - height - expand) * scale,
