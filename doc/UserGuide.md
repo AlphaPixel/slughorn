@@ -2153,7 +2153,7 @@ per entry. **Runtime-mutable** — see [Interactivity](#interactivity).
 | 0 | `color` | Flat RGBA |
 | 1 | `gradientMeta` | `(gradientId, cx, cy, r0_norm)` |
 | 2 | `gradientXform` | Type-encoded gradient transform |
-| 3 | `effectData` | `(effectId, originX, originY, userParam)` |
+| 3 | `effectData` | `(effectId, shapeIndex, 0, userParam)` |
 
 `effectData.y` carries the 0-based index of this layer's shape in the atlas shape
 buffer — the link between binding 1 and binding 0. `effectData.w` carries the
@@ -2303,7 +2303,7 @@ consecutive vec4 entries at offset `layerIndex * 4`:
 | `+ 0` | `color` | New RGBA (premultiplied) |
 | `+ 1` | `gradientMeta` | `x` = new gradientId (0 = flat color) |
 | `+ 2` | `gradientXform` | Gradient transform (normally fixed at compile time) |
-| `+ 3` | `effectData` | `x` = effectId; `y` = origin.x; `z` = origin.y; `w` = userParam |
+| `+ 3` | `effectData` | `x` = effectId; `y` = shapeIndex; `z` = 0 (reserved); `w` = userParam |
 
 A typical color-swap in an `UpdateCallback` for `osgSlug` would look like:
 
