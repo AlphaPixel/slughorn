@@ -332,8 +332,6 @@ public:
 		const slug_t k = 0.5522847498_cv;
 		const slug_t kr = k * r;
 
-		clear();
-
 		moveTo(x + r, y);
 		lineTo(x + w - r, y);
 		bezierTo(x + w - r + kr, y, x + w, y + r - kr, x + w, y + r);
@@ -352,8 +350,6 @@ public:
 		const slug_t k = 0.5522847498_cv;
 		const slug_t kx = k * rx;
 		const slug_t ky = k * ry;
-
-		clear();
 
 		moveTo(cx + rx, cy);
 		bezierTo(cx + rx, cy + ky, cx + kx, cy + ry, cx, cy + ry);
