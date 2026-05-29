@@ -409,7 +409,7 @@ CompositeShape loadImage(const NSVGimage* image, Atlas& atlas, KeyIterator& keys
 		layer.key = key;
 		layer.color = color;
 		layer.gradientId = gradientId;
-		layer.transform = transform;
+		layer.transform = {.x = transform.dx, .y = transform.dy};
 		// layer.scale is intentionally not set - world sizing is the caller's
 		// responsibility. layer.scale remains at its default of 1.0.
 

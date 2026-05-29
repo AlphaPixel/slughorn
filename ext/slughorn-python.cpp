@@ -867,6 +867,19 @@ PYBIND11_MODULE(slughorn, m) {
 	;
 
 	// ============================================================================================
+	// slughorn.Transform
+	// ============================================================================================
+	py::class_<slughorn::Transform>(m, "Transform")
+		.def(py::init([](slug_t x, slug_t y, slug_t z) {
+			return slughorn::Transform{x, y, z};
+		}), py::arg("x") = 0_cv, py::arg("y") = 0_cv, py::arg("z") = 0_cv)
+		.def_readwrite("x", &slughorn::Transform::x)
+		.def_readwrite("y", &slughorn::Transform::y)
+		.def_readwrite("z", &slughorn::Transform::z)
+		.def("__repr__", [](const slughorn::Transform& t) { return streamRepr(t); })
+	;
+
+	// ============================================================================================
 	// slughorn.Layer
 	//
 	// key, color, transform, effectId - all four fields now present.
@@ -878,7 +891,7 @@ PYBIND11_MODULE(slughorn, m) {
 			py::init([](
 				py::object key,
 				slughorn::Color color,
-				slughorn::Matrix transform,
+				slughorn::Transform transform,
 				slug_t scale,
 				uint32_t effectId,
 				uint32_t gradientId
@@ -902,7 +915,7 @@ PYBIND11_MODULE(slughorn, m) {
 			}),
 			py::arg("key"),
 			py::arg("color") = slughorn::Color{},
-			py::arg("transform") = slughorn::Matrix{},
+			py::arg("transform") = slughorn::Transform{},
 			py::arg("scale") = 1_cv,
 			py::arg("effectId") = 0,
 			py::arg("gradientId") = 0
@@ -913,8 +926,7 @@ PYBIND11_MODULE(slughorn, m) {
 		.def_readwrite("color", &slughorn::Layer::color,
 			"RGBA fill color for this layer.")
 		.def_readwrite("transform", &slughorn::Layer::transform,
-			"Local-coords affine transform. dx/dy carry the canvas offset; "
-			"xx/yx/xy/yy carry any additional rotation/scale (COLRv1 paint nodes).")
+			"World-space placement. x/y position the layer; z offsets depth.")
 		.def_readwrite("scale", &slughorn::Layer::scale,
 			"World-scale multiplier.\n"
 			"  Text / FreeType2: set to the font size in world units (e.g. 0.1 for\n"
@@ -1048,7 +1060,7 @@ PYBIND11_MODULE(slughorn, m) {
 			"Use Atlas.compute_adaptive_splits() / Atlas.compute_uniform_splits(), or set manually."
 		)
 		.def_readwrite("origin", &slughorn::Atlas::ShapeInfo::origin,
-			"Where the transform origin (Layer.transform.dx/dy) is placed relative to the geometry.\n"
+			"Where the transform origin (Layer.transform.x/y) is placed relative to the geometry.\n"
 			"Origin() = Default, Origin(Type) = type-only (e.g. Centered), Origin(x, y) = Custom."
 		)
 		.def("__repr__", [](const slughorn::Atlas::ShapeInfo& info) { return streamRepr(info); })
@@ -1056,7 +1068,7 @@ PYBIND11_MODULE(slughorn, m) {
 
 	auto origin_ = py::class_<slughorn::Atlas::ShapeInfo::Origin>(shapeinfo_, "Origin")
 		.def(py::init<>(),
-			"Default origin: Layer.transform.dx/dy = bbox corner (existing behavior)."
+			"Default origin: Layer.transform.x/y = bbox corner (existing behavior)."
 		)
 		.def(py::init<slughorn::Atlas::ShapeInfo::Origin::Type>(),
 			py::arg("type"),
@@ -1065,7 +1077,7 @@ PYBIND11_MODULE(slughorn, m) {
 		.def(py::init<slughorn::slug_t, slughorn::slug_t>(),
 			py::arg("x"), py::arg("y"),
 			"Custom origin: authoring-space pivot. Unambiguously Custom - no other variant "
-			"takes coordinates. Layer.transform.dx/dy will equal (x, y) scaled to em-space."
+			"takes coordinates. Layer.transform.x/y will equal (x, y) scaled to em-space."
 		)
 		.def_readwrite("type", &slughorn::Atlas::ShapeInfo::Origin::type)
 		.def_readwrite("x", &slughorn::Atlas::ShapeInfo::Origin::x)

@@ -689,7 +689,7 @@ int main(int /*argc*/, char** /*argv*/) {
 	layer.key = shapeKey;
 	layer.color = {0.2f, 0.8f, 0.4f, 1.0f};
 	layer.scale = 1.0f;
-	layer.transform = slughorn::Matrix::identity();
+	layer.transform = {};
 	layers.push_back(layer);
 
 	// ------------------------------------------------------------------------

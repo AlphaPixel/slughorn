@@ -442,11 +442,7 @@ json buildJson(
 			layers.push_back({
 				{"key", keyToJson(layer.key)},
 				{"color", {layer.color.r, layer.color.g, layer.color.b, layer.color.a}},
-				{"transform", {
-					layer.transform.xx, layer.transform.yx,
-					layer.transform.xy, layer.transform.yy,
-					layer.transform.dx, layer.transform.dy
-				}},
+				{"transform", {layer.transform.x, layer.transform.y, layer.transform.z}},
 				{"effect_id", layer.effectId},
 				{"gradient_id", layer.gradientId}
 			});
@@ -595,11 +591,7 @@ Atlas atlasFromJson(
 			layer.color = { jcolor[0], jcolor[1], jcolor[2], jcolor[3] };
 
 			const auto& jxform = jl.at("transform");
-			layer.transform = {
-				jxform[0], jxform[1], // xx, yx
-				jxform[2], jxform[3], // xy, yy
-				jxform[4], jxform[5] // dx, dy
-			};
+			layer.transform = {jxform[0], jxform[1], jxform[2]}; // x, y, z
 
 			composite.layers.push_back(layer);
 		}

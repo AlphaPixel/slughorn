@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+#vimrun! pytest ../test/slughorn-test-python.py
 
 from __future__ import annotations
 
@@ -126,7 +127,7 @@ def test_atlas_build_decode_and_render_surface():
 		slughorn.Layer(
 			shape_key,
 			slughorn.Color(0.2, 0.4, 0.8, 1.0),
-			slughorn.Matrix(),
+			slughorn.Transform(),
 			1.0,
 			0,
 			gradient_id,
@@ -149,7 +150,7 @@ def test_atlas_build_decode_and_render_surface():
 	assert shape is not None
 	assert shape.width > 0.0
 	assert shape.height > 0.0
-	assert shape.compute_quad(slughorn.Matrix()).x1 > shape.compute_quad(slughorn.Matrix()).x0
+	assert shape.compute_quad(slughorn.Transform()).x1 > shape.compute_quad(slughorn.Transform()).x0
 	assert shape.em_to_uv(*shape.em_origin) == pytest.approx((0.0, 0.0))
 
 	curve_texture = atlas.curve_texture
@@ -323,9 +324,9 @@ def test_nanosvg_load_string_single_solid():
 		pytest.skip("slughorn.nanosvg not available (build without SLUGHORN_NANOSVG)")
 
 	atlas = slughorn.Atlas()
-	composite, next_key = slughorn.nanosvg.load_string(_SVG_ONE_SOLID, atlas)
+	keys = slughorn.KeyIterator()
+	composite = slughorn.nanosvg.load_string(_SVG_ONE_SOLID, atlas, keys)
 
-	assert next_key == 1, "one shape -> next_key must be 1"
 	assert len(composite) == 1, "one rect -> one layer"
 
 	layer = composite.layers[0]
@@ -345,9 +346,8 @@ def test_nanosvg_load_string_two_solids():
 		pytest.skip("slughorn.nanosvg not available (build without SLUGHORN_NANOSVG)")
 
 	atlas = slughorn.Atlas()
-	composite, next_key = slughorn.nanosvg.load_string(_SVG_TWO_SOLIDS, atlas)
+	composite = slughorn.nanosvg.load_string(_SVG_TWO_SOLIDS, atlas)
 
-	assert next_key == 2, "two shapes -> next_key must be 2"
 	assert len(composite) == 2
 
 def test_nanosvg_load_file_gradient():
@@ -357,10 +357,9 @@ def test_nanosvg_load_file_gradient():
 	svg_path = _SVG_DIR / "gradient-test.svg"
 
 	atlas = slughorn.Atlas()
-	composite, next_key = slughorn.nanosvg.load_file(str(svg_path), atlas)
+	composite = slughorn.nanosvg.load_file(str(svg_path), atlas)
 
 	# gradient-test.svg has 3 rects: 2 linear + 1 radial gradient
-	assert next_key == 3, "gradient-test.svg has 3 shapes"
 	assert len(composite) == 3
 
 	atlas.build()
@@ -375,10 +374,9 @@ def test_nanosvg_load_file_inkscape():
 	svg_path = _SVG_DIR / "inkscape-test.svg"
 
 	atlas = slughorn.Atlas()
-	composite, next_key = slughorn.nanosvg.load_file(str(svg_path), atlas)
+	composite = slughorn.nanosvg.load_file(str(svg_path), atlas)
 
 	# inkscape-test.svg has 1 ellipse with a linear gradient
-	assert next_key == 1, "inkscape-test.svg has 1 shape"
 	assert len(composite) == 1
 
 def test_nanosvg_key_chaining():
@@ -386,11 +384,11 @@ def test_nanosvg_key_chaining():
 		pytest.skip("slughorn.nanosvg not available (build without SLUGHORN_NANOSVG)")
 
 	atlas = slughorn.Atlas()
+	keys = slughorn.KeyIterator()
 
-	composite_a, k = slughorn.nanosvg.load_string(_SVG_TWO_SOLIDS, atlas, base_key=0)
-	composite_b, k = slughorn.nanosvg.load_string(_SVG_ONE_SOLID,   atlas, base_key=k)
+	composite_a = slughorn.nanosvg.load_string(_SVG_TWO_SOLIDS, atlas, keys)
+	composite_b = slughorn.nanosvg.load_string(_SVG_ONE_SOLID,   atlas, keys)
 
-	assert k == 3, "2 + 1 shapes = next_key 3"
 	assert len(composite_a) == 2
 	assert len(composite_b) == 1
 
@@ -410,7 +408,7 @@ def test_nanosvg_renderable():
 		pytest.skip("slughorn.nanosvg not available (build without SLUGHORN_NANOSVG)")
 
 	atlas = slughorn.Atlas()
-	composite, _ = slughorn.nanosvg.load_string(_SVG_ONE_SOLID, atlas)
+	composite = slughorn.nanosvg.load_string(_SVG_ONE_SOLID, atlas)
 
 	atlas.build()
 
@@ -428,8 +426,6 @@ def test_nanosvg_bad_path_returns_empty():
 		pytest.skip("slughorn.nanosvg not available (build without SLUGHORN_NANOSVG)")
 
 	atlas = slughorn.Atlas()
-	composite, next_key = slughorn.nanosvg.load_file("/nonexistent/path.svg", atlas)
+	composite = slughorn.nanosvg.load_file("/nonexistent/path.svg", atlas)
 
-	# NanoSVG returns an empty CompositeShape on parse failure; next_key unchanged
-	assert next_key == 0
 	assert len(composite) == 0

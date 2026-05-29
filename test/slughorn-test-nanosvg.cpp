@@ -242,7 +242,7 @@ void test_Shape() {
 		checkNear("bearingX == 0", s->bearingX, 0_cv);
 		checkNear("bearingY == 1", s->bearingY, 1_cv);
 
-		auto q = s->computeQuad(transform);
+		auto q = s->computeQuad(slughorn::Transform{transform.dx, transform.dy});
 		std::cout << "  " << q << std::endl;
 
 		checkNear("quad.x0 == 0", q.x0, 0_cv);
@@ -432,12 +432,12 @@ void test_CompositeShape() {
 		// Canvas offsets
 		checkNear(
 			("transform.dx [" + std::to_string(i) + "]").c_str(),
-			layer.transform.dx, offsets[i]
+			layer.transform.x, offsets[i]
 		);
 
 		checkNear(
 			("transform.dy [" + std::to_string(i) + "]").c_str(),
-			layer.transform.dy, offsets[i]
+			layer.transform.y, offsets[i]
 		);
 
 		// Quad tiling

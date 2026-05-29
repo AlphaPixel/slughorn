@@ -313,7 +313,7 @@ parameters/state needed to draw that shape once:
 struct Layer {
     Key key; // which Shape to draw
     Color color; // RGBA flat color
-    Matrix transform; // dx/dy = CPU quad placement; xx/yx/xy/yy reserved for future GPU use
+    Transform transform; // x/y = world position; z reserved for depth
     slug_t scale; // em→world scaling (font size for text; 1.0 for SVG/Canvas)
     uint32_t effectId; // 0 = default
     uint32_t gradientId; // 0 = flat color; 1-based ID from addGradient()
@@ -333,11 +333,9 @@ When `gradientId` is non-zero, `color.rgb` is overridden by the gradient; only
 
 ### Layer::Transform
 
-Currently, only `dx` / `dy` are active: `computeQuad()` reads them to place the
-bounding quad in world space, and the frontend should pass them straight to
-`gradientMeta` for gradient lookups. The remaining fields — `xx` / `yx` /
-`xy` / `yy` — are present on the struct but currently unused.
-They are reserved for future GPU-driven interactivity.
+`x` and `y` place the shape in world space: `computeQuad()` reads them to offset
+the bounding quad. The frontend should pass them as the position component of any
+gradient lookup. `z` is a depth offset for 3D scene placement and defaults to `0`.
 
 ## CompositeShape
 
@@ -658,7 +656,7 @@ for(const auto* shape = image->shapes; shape; shape = shape->next) {
         shape, atlas, keyIterator, 1_cv / image->width
     );
 
-    // Store m in Layer::transform for correct composite positioning.
+    // Copy m.dx / m.dy into layer.transform.x / y for correct composite positioning.
 }
 ```
 
@@ -687,7 +685,7 @@ auto [info, transform] = slughorn::cairo::decomposePath(cr, scale);
 // Mid-level: register directly in the Atlas
 Matrix transform = slughorn::cairo::loadShape(cr, atlas, "my_shape", scale);
 
-// Store transform in Layer::transform.
+// Copy transform.dx / dy into layer.transform.x / y.
 ```
 
 `scale` normalizes path coordinates into `[0, 1]` em-space. For a Cairo canvas
@@ -754,12 +752,12 @@ two ordinary quadratics. This is transparent to callers.
 
 All backends share one convention: curves are shifted so the shape's bounding box
 sits at `(0, 0)` inside the Atlas texture. The canvas-space offset that was
-subtracted is returned as a `Matrix` (`dx`/`dy` set; `xx`/`yy` identity). Store
-this matrix in `Layer::transform`; at render time, `Shape::computeQuad` adds
-`dx`/`dy` back to reconstruct the correct world position.
+subtracted is returned as a `Matrix` (`dx`/`dy` set; `xx`/`yy` identity). Copy
+`m.dx` / `m.dy` into `layer.transform.x` / `y`; at render time, `Shape::computeQuad`
+adds them back to reconstruct the correct world position.
 
 Passing `Origin::Centered` to any backend stores the bounding-box center instead
-of the corner, turning `dx`/`dy` into a GPU-side rotation pivot.
+of the corner, turning `layer.transform.x` / `y` into a GPU-side rotation pivot.
 
 # The Canvas API
 
@@ -1089,7 +1087,7 @@ per-tick draw call overhead at render time.
 
 ### Pattern 8 — Explicit Pivot Origin
 
-`Origin(cx, cy)` stores the pivot into `Layer::transform.dx/dy`. The GPU consumer can
+`Origin(cx, cy)` stores the pivot into `Layer::transform.x`/`y`. The GPU consumer can
 then rotate the shape around that exact point without any CPU-side re-layout. This is how
 the clock hand demo works: the hand is authored with its base at `(CX, CY)`, and the GPU
 rotates it there each frame.
@@ -1101,7 +1099,7 @@ canvas.lineTo(CX, CY + HAND_LENGTH);
 canvas.stroke(
     HAND_WIDTH, HAND_COLOR, 1_cv,
     "clock_hand",
-    Origin(CX, CY) // pivot = stroke base, stored in Layer::transform.dx/dy
+    Origin(CX, CY) // pivot = stroke base, stored in Layer::transform.x/y
 );
 
 canvas.finalize("clock_hand_composite");
@@ -2424,7 +2422,7 @@ all anchor at the same world point, and one shape (the hand) driven by `effectId
 TODO: Clock image!
 
 The key lesson from the clock: `Origin::Centered` (or a custom `Origin` at the
-shared pivot) makes all layers in the composite share the same `transform.dx/dy`,
+shared pivot) makes all layers in the composite share the same `transform.x`/`y`,
 so `computeQuad` places all quads around the same world point without any manual
 coordinate arithmetic.
 

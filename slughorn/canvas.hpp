@@ -1127,7 +1127,7 @@ public:
 
 			layer.key = Key(cp);
 			layer.color = color;
-			layer.transform = Matrix{.dx = dx, .dy = dy};
+			layer.transform = {.x = dx, .y = dy};
 			layer.scale = fontSize;
 
 			_composite.layers.push_back(layer);
@@ -1221,7 +1221,7 @@ private:
 
 		layer.key = key;
 		layer.color = color;
-		layer.transform = placement * transform;
+		placement.apply(transform.dx, transform.dy, layer.transform.x, layer.transform.y);
 
 		_composite.layers.push_back(layer);
 
@@ -1344,7 +1344,7 @@ private:
 
 		layer.key = key;
 		layer.color = {};
-		layer.transform = placement * transform;
+		placement.apply(transform.dx, transform.dy, layer.transform.x, layer.transform.y);
 		layer.gradientId = gid;
 
 		_composite.layers.push_back(layer);
