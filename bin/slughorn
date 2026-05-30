@@ -4,6 +4,7 @@ import argparse
 import code
 import contextlib
 import importlib
+import json
 import sys
 import time
 from pathlib import Path
@@ -76,9 +77,20 @@ def resolve_key_arg(raw: str | None, ord_char: str | None) -> slughorn.Key:
 	return make_key(raw)
 
 
-def format_key(key) -> str:
+def key_type_name(key) -> str:
 	type_obj = key.type
-	type_name = type_obj.name if hasattr(type_obj, "name") else str(type_obj)
+	return type_obj.name if hasattr(type_obj, "name") else str(type_obj)
+
+
+def key_to_serial_json(key) -> dict:
+	if key_type_name(key) == "Codepoint":
+		return {"type": "codepoint", "value": key.codepoint}
+
+	return {"type": "name", "value": key.name}
+
+
+def format_key(key) -> str:
+	type_name = key_type_name(key)
 
 	if type_name == "Codepoint":
 		cp = key.codepoint
@@ -96,6 +108,81 @@ def load_atlas(path: str):
 		return slughorn.read(path)
 	except Exception as exc:  # pragma: no cover
 		fail(f"failed to load atlas from {path}: {exc}")
+
+
+def read_serial_json(path: str) -> str:
+	try:
+		data = Path(path).read_bytes()
+	except OSError as exc:
+		fail(f"failed to read atlas from {path}: {exc}")
+
+	stripped = data.lstrip()
+	if stripped.startswith(b"{"):
+		return data.decode("utf-8")
+
+	if not data.startswith(b"SLUG"):
+		fail("unrecognised format (expected '{' for .slug or 'SLUG' for .slugb)", 2)
+
+	if len(data) < 20:
+		fail("invalid .slugb file: truncated header", 2)
+
+	json_length = int.from_bytes(data[12:16], "little")
+	json_type = data[16:20]
+
+	if json_type != b"JSON":
+		fail("invalid .slugb file: expected JSON chunk first", 2)
+
+	json_start = 20
+	json_end = json_start + json_length
+
+	if len(data) < json_end:
+		fail("invalid .slugb file: truncated JSON chunk", 2)
+
+	return data[json_start:json_end].decode("utf-8").rstrip()
+
+
+def filter_serial_json_by_key(serial_json: str, key) -> str:
+	target = key_to_serial_json(key)
+
+	try:
+		data = json.loads(serial_json)
+	except json.JSONDecodeError as exc:
+		fail(f"failed to parse serialized atlas JSON: {exc}")
+
+	shapes = [s for s in data.get("shapes", []) if s.get("key") == target]
+	composites = [c for c in data.get("composites", []) if c.get("key") == target]
+
+	if not shapes and not composites:
+		fail(f"key not found: {format_key(key)}")
+
+	result = {"key": target}
+
+	if shapes:
+		result["shapes"] = shapes
+
+	if composites:
+		result["composites"] = composites
+
+		shape_by_key = {json.dumps(s.get("key"), sort_keys=True): s for s in data.get("shapes", [])}
+		layer_shapes = []
+		seen = set()
+
+		for composite in composites:
+			for layer in composite.get("layers", []):
+				serialized_key = json.dumps(layer.get("key"), sort_keys=True)
+
+				if serialized_key in seen:
+					continue
+
+				shape = shape_by_key.get(serialized_key)
+				if shape is not None:
+					layer_shapes.append(shape)
+					seen.add(serialized_key)
+
+		if layer_shapes:
+			result["layer_shapes"] = layer_shapes
+
+	return json.dumps(result, separators=(",", ":"))
 
 
 def ensure_serial_support() -> None:
@@ -405,6 +492,16 @@ def decode_or_fail(atlas, key):
 
 
 def command_info(args) -> int:
+	if args.json:
+		serial_json = read_serial_json(args.atlas)
+
+		if args.key is not None or args.ord is not None:
+			key = resolve_key_arg(args.key, args.ord)
+			serial_json = filter_serial_json_by_key(serial_json, key)
+
+		print(serial_json)
+		return 0
+
 	atlas = load_atlas(args.atlas)
 	shapes = atlas.get_shapes()
 	composites = atlas.get_composite_shapes()
@@ -631,6 +728,7 @@ def build_parser() -> argparse.ArgumentParser:
 	info.add_argument("atlas", help="Path to a .slug or .slugb atlas file.")
 	info.add_argument("key", nargs="?", help="Optional shape/composite key.")
 	info.add_argument("--ord", metavar="CHAR", help="Resolve a single character to its codepoint (alternative to a hex key).")
+	info.add_argument("--json", action="store_true", help="Print the serialized atlas JSON metadata.")
 	info.set_defaults(func=command_info)
 
 	list_cmd = sub.add_parser("list", help="List keys stored in an atlas.")

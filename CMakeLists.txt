@@ -20,6 +20,7 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
 		"-Wshadow"
 		"-Wconversion"
 		"-Wpedantic"
+		"-Wextra"
 		"-Werror"
 		"-Wno-unused-parameter"
 	)
@@ -30,6 +31,7 @@ else()
 		"-Wshadow"
 		"-Wsign-conversion"
 		"-Wpedantic"
+		"-Wextra"
 		"-Werror"
 		"-Wno-unused-parameter"
 	)
