@@ -66,6 +66,16 @@ def make_key(raw: str) -> slughorn.Key:
 		return slughorn.Key(raw)
 
 
+def resolve_key_arg(raw: str | None, ord_char: str | None) -> slughorn.Key:
+	if ord_char is not None:
+		if len(ord_char) != 1:
+			fail(f"--ord requires a single character, got: {ord_char!r}")
+		return slughorn.Key(ord(ord_char))
+	if raw is None:
+		fail("a key argument or --ord is required")
+	return make_key(raw)
+
+
 def format_key(key) -> str:
 	type_obj = key.type
 	type_name = type_obj.name if hasattr(type_obj, "name") else str(type_obj)
@@ -166,9 +176,8 @@ def save_image(grid, filename: str, flip_y: bool=False) -> str:
 	return f"Saved {w}x{h} image -> {filename}"
 
 
-def save_curves_svg(
+def build_curves_svg_string(
 	decoded,
-	filename: str,
 	scale: int=1024,
 	margin: float=0.0,
 	flip_y: bool=True,
@@ -275,6 +284,18 @@ def save_curves_svg(
 	svg += '\t<rect width="100%" height="100%" fill="#1E1E1E"/>\n'
 	svg += '\n'.join(f"\t{e}" for e in elements)
 	svg += "\n</svg>"
+
+	return svg
+
+
+def save_curves_svg(
+	decoded,
+	filename: str,
+	scale: int=1024,
+	margin: float=0.0,
+	flip_y: bool=True,
+) -> str:
+	svg = build_curves_svg_string(decoded, scale=scale, margin=margin, flip_y=flip_y)
 
 	with open(filename, "w", encoding="utf-8") as f:
 		f.write(svg)
@@ -390,24 +411,25 @@ def command_info(args) -> int:
 	curve_tex = atlas.curve_texture
 	band_tex = atlas.band_texture
 	grad_tex = atlas.gradient_texture
+	has_key = args.key is not None or args.ord is not None
 
-	print(f"Atlas: {args.atlas}")
-	print(f"  shapes:       {len(shapes)}")
-	print(f"  composites:   {len(composites)}")
-	print(f"  curve tex:    {curve_tex.width}x{curve_tex.height} {curve_tex.format}")
-	print(f"  band tex:     {band_tex.width}x{band_tex.height} {band_tex.format}")
+	if not has_key:
+		print(f"Atlas: {args.atlas}")
+		print(f"  shapes:       {len(shapes)}")
+		print(f"  composites:   {len(composites)}")
+		print(f"  curve tex:    {curve_tex.width}x{curve_tex.height} {curve_tex.format}")
+		print(f"  band tex:     {band_tex.width}x{band_tex.height} {band_tex.format}")
 
-	if grad_tex.width > 0:
-		print(f"  gradient tex: {grad_tex.width}x{grad_tex.height} {grad_tex.format}")
+		if grad_tex.width > 0:
+			print(f"  gradient tex: {grad_tex.width}x{grad_tex.height} {grad_tex.format}")
 
-	print(f"  packing:      {atlas.packing_stats}")
+		print(f"  packing:      {atlas.packing_stats}")
 
-	if args.key is not None:
-		key = make_key(args.key)
+	if has_key:
+		key = resolve_key_arg(args.key, args.ord)
 		shape = atlas.get_shape(key)
 		composite = atlas.get_composite_shape(key)
 
-		print("")
 		print(f"Key: {format_key(key)}")
 
 		if shape is not None:
@@ -415,8 +437,37 @@ def command_info(args) -> int:
 			print(f"  em_origin:   {shape.em_origin}")
 			print(f"  em_size:     {shape.em_size}")
 
+			try:
+				decoded = atlas.decode(key)
+				indir_x = bytes(decoded.indir_x)
+				indir_y = bytes(decoded.indir_y)
+				print(f"  curves:      {len(decoded.curves)}")
+				print(f"  bands:       {len(indir_x)}x{len(indir_y)}")
+			except Exception:
+				pass
+
 		if composite is not None:
 			print(f"  composite:   layers={len(composite.layers)} advance={composite.advance}")
+
+			for i, layer in enumerate(composite.layers):
+				lshape = atlas.get_shape(layer.key)
+				print(f"\n  Layer {i}: {format_key(layer.key)}")
+
+				if lshape is not None:
+					print(f"    shape:     {lshape}")
+					print(f"    em_origin: {lshape.em_origin}")
+					print(f"    em_size:   {lshape.em_size}")
+
+					try:
+						ldecoded = atlas.decode(layer.key)
+						indir_x = bytes(ldecoded.indir_x)
+						indir_y = bytes(ldecoded.indir_y)
+						print(f"    curves:    {len(ldecoded.curves)}")
+						print(f"    bands:     {len(indir_x)}x{len(indir_y)}")
+					except Exception:
+						pass
+				else:
+					print(f"    (shape not found in atlas)")
 
 		if shape is None and composite is None:
 			fail(f"key not found: {format_key(key)}")
@@ -449,9 +500,9 @@ def command_list(args) -> int:
 
 def command_render(args) -> int:
 	atlas = load_atlas(args.atlas)
-	key = make_key(args.key)
+	key = resolve_key_arg(args.key, args.ord)
 	decoded = decode_or_fail(atlas, key)
-	output = args.output or default_output_path(args.key, ".png")
+	output = args.output or default_output_path(args.key or args.ord, ".png")
 
 	with timer(args.time, "render"):
 		grid = decoded.render_grid(size=args.size, margin=args.margin, banded=not args.reference)
@@ -465,9 +516,9 @@ def command_render(args) -> int:
 
 def command_svg(args) -> int:
 	atlas = load_atlas(args.atlas)
-	key = make_key(args.key)
+	key = resolve_key_arg(args.key, args.ord)
 	decoded = decode_or_fail(atlas, key)
-	output = args.output or default_output_path(args.key, ".svg")
+	output = args.output or default_output_path(args.key or args.ord, ".svg")
 
 	with timer(args.time, "write"):
 		message = save_curves_svg(
@@ -492,7 +543,7 @@ def command_shell(args) -> int:
 	}
 
 	if args.key is not None:
-		key = make_key(args.key)
+		key = resolve_key_arg(args.key, args.ord)
 		ns["key"] = key
 		ns["shape"] = atlas.get_shape(key)
 		if ns["shape"] is not None:
@@ -579,6 +630,7 @@ def build_parser() -> argparse.ArgumentParser:
 	info = sub.add_parser("info", help="Show atlas summary, or details for one key.")
 	info.add_argument("atlas", help="Path to a .slug or .slugb atlas file.")
 	info.add_argument("key", nargs="?", help="Optional shape/composite key.")
+	info.add_argument("--ord", metavar="CHAR", help="Resolve a single character to its codepoint (alternative to a hex key).")
 	info.set_defaults(func=command_info)
 
 	list_cmd = sub.add_parser("list", help="List keys stored in an atlas.")
@@ -589,29 +641,32 @@ def build_parser() -> argparse.ArgumentParser:
 
 	render = sub.add_parser("render", help="Render a shape to grayscale PNG.")
 	render.add_argument("atlas", help="Path to a .slug or .slugb atlas file.")
-	render.add_argument("key", help="Shape key to render.")
+	render.add_argument("key", nargs="?", help="Shape key to render.")
 	render.add_argument("output", nargs="?", help="Output PNG path. Default: <key>.png")
 	render.add_argument("--size", type=int, default=256, help="Maximum output dimension.")
 	render.add_argument("--margin", type=float, default=0.0, help="Margin fraction around the shape.")
 	render.add_argument("--reference", action="store_true", help="Use the brute-force reference path instead of the banded path.")
 	render.add_argument("--flip-y", action="store_true", help="Flip the output image vertically before saving.")
 	render.add_argument("--time", action="store_true", help="Print timing for render/write stages.")
+	render.add_argument("--ord", metavar="CHAR", help="Resolve a single character to its codepoint (alternative to a hex key).")
 	render.set_defaults(func=command_render)
 
 	svg = sub.add_parser("svg", help="Export decoded curves and band boundaries as SVG.")
 	svg.add_argument("atlas", help="Path to a .slug or .slugb atlas file.")
-	svg.add_argument("key", help="Shape key to export.")
+	svg.add_argument("key", nargs="?", help="Shape key to export.")
 	svg.add_argument("output", nargs="?", help="Output SVG path. Default: <key>.svg")
 	svg.add_argument("--size", type=int, default=1024, help="Maximum output dimension.")
 	svg.add_argument("--margin", type=float, default=0.0, help="Margin fraction around the shape.")
 	svg.add_argument("--no-flip-y", action="store_true", help="Keep the authored Y direction instead of SVG-style flipped output.")
 	svg.add_argument("--time", action="store_true", help="Print timing for write stage.")
+	svg.add_argument("--ord", metavar="CHAR", help="Resolve a single character to its codepoint (alternative to a hex key).")
 	svg.set_defaults(func=command_svg)
 
 	shell = sub.add_parser("shell", help="Open an interactive shell with an atlas loaded.")
 	shell.add_argument("atlas", help="Path to a .slug or .slugb atlas file.")
 	shell.add_argument("key", nargs="?", help="Optional key to pre-decode.")
 	shell.add_argument("--plain", action="store_true", help="Force the stdlib REPL even if IPython is installed.")
+	shell.add_argument("--ord", metavar="CHAR", help="Resolve a single character to its codepoint (alternative to a hex key).")
 	shell.set_defaults(func=command_shell)
 
 	font = sub.add_parser("font", help="Pack font glyphs into a .slug or .slugb atlas.")
