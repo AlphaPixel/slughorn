@@ -720,6 +720,21 @@ public:
 	// replaces the previous definition.
 	void addCompositeShape(Key key, CompositeShape composite);
 
+	// Force all shapes in @p keys to share the same em-space bounding box.
+	//
+	// Must be called after addShape() but before build(). Keys not present in the atlas
+	// or shapes with no curves (e.g. whitespace) are silently skipped.
+	//
+	// When all valid shapes share the same advance (tabular/monospaced), the cell width
+	// equals that advance and height/bearingY are the union of all shapes. When advances
+	// differ, the cell is the axis-aligned union of all per-shape bounding boxes.
+	//
+	// Only the layout fields (bearingX/Y, width, height, advance) are updated. Per-shape
+	// band transforms (bandScale*, bandOffset*, bandMax*) are left intact; the GPU quad
+	// is determined by the shared metrics while each shape's coverage is still computed
+	// from its own band data. This is the correct invariant for setLayerShapeIndex cycling.
+	void normalizeShapeMetrics(const std::vector<Key>& keys);
+
 	// --------------------------------------------------------------------------------------------
 	// Build (call once, then the atlas is frozen for geometry)
 	// --------------------------------------------------------------------------------------------

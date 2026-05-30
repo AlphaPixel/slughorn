@@ -514,3 +514,101 @@ def test_nanosvg_bad_path_returns_empty():
 	composite = slughorn.nanosvg.load_file("/nonexistent/path.svg", atlas)
 
 	assert len(composite) == 0
+
+# ============================================================================
+# normalize_shape_metrics
+# ============================================================================
+
+def _freetype_available():
+	return hasattr(slughorn, "freetype")
+
+_MONO_FONT   = "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf"
+_PROP_FONT   = "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
+_DIGIT_CPS   = [ord(c) for c in "0123456789"]
+
+def test_normalize_canvas_shapes():
+	"""Two canvas shapes with different sizes → normalize → identical declared metrics post-build."""
+	atlas  = slughorn.Atlas()
+	canvas = slughorn.canvas.Canvas(atlas)
+
+	# Small square: curves span ~[0, 0.3] x [0, 0.3]
+	canvas.begin_path()
+	canvas.rect(0, 0, 0.3, 0.3)
+	k_small = canvas.fill(slughorn.Color(1, 0, 0), 1.0)
+	canvas.finalize()
+
+	# Large square: curves span ~[0, 0.7] x [0, 0.7]
+	canvas.begin_path()
+	canvas.rect(0, 0, 0.7, 0.7)
+	k_large = canvas.fill(slughorn.Color(0, 1, 0), 1.0)
+	canvas.finalize()
+
+	# Shapes have different widths before normalization.
+	# After normalization they must share identical declared metrics.
+	atlas.normalize_shape_metrics([k_small, k_large])
+	atlas.build()
+
+	s_small = atlas.get_shape(k_small)
+	s_large = atlas.get_shape(k_large)
+
+	assert s_small is not None and s_large is not None
+
+	assert s_small.width   == pytest.approx(s_large.width,   abs=1e-5)
+	assert s_small.height  == pytest.approx(s_large.height,  abs=1e-5)
+	assert s_small.advance == pytest.approx(s_large.advance, abs=1e-5)
+
+	# Band transforms must differ — each shape still has its own coverage data.
+	assert s_small.band_scale_x != pytest.approx(s_large.band_scale_x, abs=1e-5)
+
+	# Both shapes must still render (non-zero coverage).
+	for key in (k_small, k_large):
+		grid = atlas.decode(key).render_grid(32, 0.0, True)
+		assert float(grid.max()) > 0.1, f"shape {key} should have non-zero coverage"
+
+def test_normalize_freetype_tabular():
+	"""Monospaced font digits: normalize produces a shared cell; band transforms differ."""
+	if not _freetype_available():
+		pytest.skip("slughorn.freetype not available")
+
+	from pathlib import Path
+	if not Path(_MONO_FONT).exists():
+		pytest.skip(f"font not found: {_MONO_FONT}")
+
+	atlas = slughorn.Atlas()
+	slughorn.freetype.load_font_glyphs(_MONO_FONT, _DIGIT_CPS, atlas)  # no uniform=True
+
+	atlas.normalize_shape_metrics([slughorn.Key(cp) for cp in _DIGIT_CPS])
+	atlas.build()
+
+	shapes = [atlas.get_shape(slughorn.Key(cp)) for cp in _DIGIT_CPS]
+	assert all(s is not None for s in shapes)
+
+	ref = shapes[0]
+	for s in shapes[1:]:
+		assert s.width   == pytest.approx(ref.width,   abs=1e-5)
+		assert s.height  == pytest.approx(ref.height,  abs=1e-5)
+		assert s.advance == pytest.approx(ref.advance, abs=1e-5)
+
+def test_normalize_freetype_nontabular():
+	"""Proportional font digits: non-tabular path; all shapes get the union cell."""
+	if not _freetype_available():
+		pytest.skip("slughorn.freetype not available")
+
+	from pathlib import Path
+	if not Path(_PROP_FONT).exists():
+		pytest.skip(f"font not found: {_PROP_FONT}")
+
+	atlas = slughorn.Atlas()
+	slughorn.freetype.load_font_glyphs(_PROP_FONT, _DIGIT_CPS, atlas)
+
+	atlas.normalize_shape_metrics([slughorn.Key(cp) for cp in _DIGIT_CPS])
+	atlas.build()
+
+	shapes = [atlas.get_shape(slughorn.Key(cp)) for cp in _DIGIT_CPS]
+	assert all(s is not None for s in shapes)
+
+	ref = shapes[0]
+	for s in shapes[1:]:
+		assert s.width   == pytest.approx(ref.width,   abs=1e-5)
+		assert s.height  == pytest.approx(ref.height,  abs=1e-5)
+		assert s.advance == pytest.approx(ref.advance, abs=1e-5)

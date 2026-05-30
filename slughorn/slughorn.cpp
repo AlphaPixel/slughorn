@@ -284,6 +284,94 @@ void Atlas::addCompositeShape(Key key, CompositeShape composite) {
 }
 
 // ================================================================================================
+// Atlas::normalizeShapeMetrics
+// ================================================================================================
+
+void Atlas::normalizeShapeMetrics(const std::vector<Key>& keys) {
+	if(_built) return;
+
+	// Collect valid entries: present in _build and have at least one curve.
+	struct Entry { Key key; ShapeBuild* build; };
+
+	std::vector<Entry> entries;
+	entries.reserve(keys.size());
+
+	for(const auto& key : keys) {
+		auto it = _build.find(key);
+
+		if(it == _build.end() || it->second.curves.empty()) continue;
+
+		entries.push_back({key, &it->second});
+	}
+
+	if(entries.size() < 2) return;
+
+	// Detect tabular: all shapes share the same advance within floating-point epsilon.
+	const slug_t refAdvance = entries[0].build->metrics.advance;
+	bool tabular = true;
+
+	for(const auto& e : entries) {
+		if(std::abs(e.build->metrics.advance - refAdvance) > 1e-6_cv) {
+			tabular = false;
+
+			break;
+		}
+	}
+
+	// Compute cell dimensions.
+	slug_t cellBearingX, cellBearingY, cellWidth, cellHeight, cellAdvance;
+
+	if(tabular) {
+		cellBearingX = 0_cv;
+		cellWidth = refAdvance;
+		cellAdvance = refAdvance;
+		cellBearingY = 0_cv;
+		cellHeight = 0_cv;
+
+		for(const auto& e : entries) {
+			const auto& m = e.build->metrics;
+
+			if(m.bearingY > cellBearingY) cellBearingY = m.bearingY;
+			if(m.height > cellHeight) cellHeight = m.height;
+		}
+	}
+
+	else {
+		slug_t minLeft = std::numeric_limits<slug_t>::max();
+		slug_t maxRight = -std::numeric_limits<slug_t>::max();
+
+		cellBearingY = 0_cv;
+		cellHeight = 0_cv;
+		cellAdvance = 0_cv;
+
+		for(const auto& e : entries) {
+			const auto& m = e.build->metrics;
+			const slug_t right = m.bearingX + m.width;
+
+			if(m.bearingX < minLeft) minLeft = m.bearingX;
+			if(right > maxRight) maxRight = right;
+			if(m.bearingY > cellBearingY) cellBearingY = m.bearingY;
+			if(m.height > cellHeight) cellHeight = m.height;
+			if(m.advance > cellAdvance) cellAdvance = m.advance;
+		}
+
+		cellBearingX = minLeft;
+		cellWidth = maxRight - minLeft;
+	}
+
+	// Write back. Only layout fields are touched; band transforms stay per-shape.
+	for(auto& e : entries) {
+		auto& m = e.build->metrics;
+
+		m.bearingX = cellBearingX;
+		m.bearingY = cellBearingY;
+		m.width = cellWidth;
+		m.height = cellHeight;
+		m.advance = cellAdvance;
+	}
+}
+
+// ================================================================================================
 // Atlas::build
 // ================================================================================================
 

@@ -1269,6 +1269,19 @@ PYBIND11_MODULE(slughorn, m) {
 			"May be called before or after build()."
 		)
 
+		.def("normalize_shape_metrics",
+			&slughorn::Atlas::normalizeShapeMetrics,
+			py::arg("keys"),
+			"Force all shapes in keys to share the same em-space bounding box.\n\n"
+			"Must be called after add_shape() but before build(). Keys not present\n"
+			"in the atlas or shapes with no curves are silently skipped.\n\n"
+			"When all shapes share the same advance (tabular/monospaced), the cell\n"
+			"width equals that advance. Otherwise the cell is the union bbox.\n\n"
+			"Only layout fields (bearing, width, height, advance) are updated.\n"
+			"Per-shape band transforms are left intact — required for\n"
+			"setLayerShapeIndex cycling across shapes from different backends."
+		)
+
 		.def("build", &slughorn::Atlas::build,
 			"Pack all registered shapes into the texture buffers. "
 			"Idempotent - subsequent calls are no-ops."
