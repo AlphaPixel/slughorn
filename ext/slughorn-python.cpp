@@ -84,12 +84,14 @@ namespace py = pybind11;
 PYBIND11_MAKE_OPAQUE(std::vector<slughorn::Layer>);
 
 // ================================================================================================
-// Internal helpers
+// detail - internal helpers and Python trampolines (not exposed to Python directly)
 // ================================================================================================
+
+namespace detail {
 
 // Zero-copy memoryview over a vector<uint8_t>.
 // The vector must outlive the view - caller's responsibility.
-static py::memoryview bytesView(const std::vector<uint8_t>& v) {
+py::memoryview bytesView(const std::vector<uint8_t>& v) {
 	return py::memoryview::from_memory(
 		const_cast<uint8_t*>(v.data()),
 		static_cast<py::ssize_t>(v.size())
@@ -97,7 +99,7 @@ static py::memoryview bytesView(const std::vector<uint8_t>& v) {
 }
 
 template<typename T>
-static py::memoryview vectorView1D(const std::vector<T>& v) {
+py::memoryview vectorView1D(const std::vector<T>& v) {
 	const auto fmt = py::format_descriptor<T>::format();
 	const std::vector<py::ssize_t> shape = {static_cast<py::ssize_t>(v.size())};
 	const std::vector<py::ssize_t> strides = {static_cast<py::ssize_t>(sizeof(T))};
@@ -112,7 +114,7 @@ static py::memoryview vectorView1D(const std::vector<T>& v) {
 }
 
 template<typename T, size_t N>
-static py::memoryview arrayView1D(const std::array<T, N>& v) {
+py::memoryview arrayView1D(const std::array<T, N>& v) {
 	const auto fmt = py::format_descriptor<T>::format();
 	const std::vector<py::ssize_t> shape = {static_cast<py::ssize_t>(N)};
 	const std::vector<py::ssize_t> strides = {static_cast<py::ssize_t>(sizeof(T))};
@@ -126,7 +128,7 @@ static py::memoryview arrayView1D(const std::array<T, N>& v) {
 	);
 }
 
-static py::memoryview curveView2D(const std::vector<slughorn::Atlas::Curve>& curves) {
+py::memoryview curveView2D(const std::vector<slughorn::Atlas::Curve>& curves) {
 	const auto fmt = py::format_descriptor<slughorn::slug_t>::format();
 	const std::vector<py::ssize_t> shape = {static_cast<py::ssize_t>(curves.size()), 6};
 	const std::vector<py::ssize_t> strides = {
@@ -145,7 +147,7 @@ static py::memoryview curveView2D(const std::vector<slughorn::Atlas::Curve>& cur
 
 // Use the C++ operator<< to build a repr string for any type that has one.
 template<typename T>
-static std::string streamRepr(const T& v, const std::string& prefix="") {
+std::string streamRepr(const T& v, const std::string& prefix="") {
 	std::ostringstream ss;
 
 	if(!prefix.empty()) ss << prefix << ".";
@@ -478,7 +480,7 @@ struct Sampler {
 	}
 };
 
-static Sampler decodeShape(const slughorn::Atlas& atlas, const slughorn::Key& key) {
+Sampler decodeShape(const slughorn::Atlas& atlas, const slughorn::Key& key) {
 	const auto* shape = atlas.getShape(key);
 
 	if(!shape) throw py::key_error("Key not found in atlas (or atlas not built yet)");
@@ -644,6 +646,39 @@ struct CurveDecomposerRef {
 	}
 };
 
+#ifdef SLUGHORN_HAS_FREETYPE
+inline slughorn::freetype::LoadConfig makeLoadConfig(
+	std::optional<slughorn::Atlas::SplitStrategy> strategy,
+	bool uniform,
+	std::optional<slughorn::freetype::LogCallback> log
+) {
+	slughorn::freetype::LoadConfig config;
+
+	if(strategy) config.strategy = *strategy;
+
+	config.uniform = uniform;
+
+	if(log) config.log = *log;
+
+	return config;
+}
+#endif
+
+} // namespace detail
+
+// Bring detail helpers into file scope so existing call sites in PYBIND11_MODULE need no change.
+// makeLoadConfig is intentionally left out; call sites should say detail::makeLoadConfig explicitly.
+using detail::bytesView;
+using detail::vectorView1D;
+using detail::arrayView1D;
+using detail::curveView2D;
+using detail::streamRepr;
+using detail::decodeShape;
+using detail::Sample;
+using detail::Sampler;
+using detail::PyCurveDecomposer;
+using detail::CurveDecomposerRef;
+
 // ================================================================================================
 // Module
 // ================================================================================================
@@ -712,7 +747,7 @@ PYBIND11_MODULE(slughorn, m) {
 		.def(py::init([](std::string prefix, bool force) {
 			return slughorn::KeyIterator(prefix, force);
 		}), py::arg("prefix"), py::arg("force") = false,
-			"String key iterator: produces prefix_0, prefix_1, …\n"
+			"String key iterator: produces prefix_0, prefix_1, ...\n"
 			"If force=True, the iterator name is always used even when the source\n"
 			"element (e.g. an SVG path) provides its own id attribute."
 		)
@@ -2259,22 +2294,28 @@ PYBIND11_MODULE(slughorn, m) {
 		[](
 			const std::string& fontPath,
 			slughorn::Atlas& atlas,
-			std::optional<slughorn::Atlas::SplitStrategy> strategy
+			std::optional<slughorn::Atlas::SplitStrategy> strategy,
+			bool uniform,
+			std::optional<slughorn::freetype::LogCallback> log
 		) {
 			return slughorn::freetype::loadAsciiFont(
 				fontPath,
 				atlas,
-				strategy ? *strategy : slughorn::Atlas::SplitStrategy{}
+				detail::makeLoadConfig(strategy, uniform, log)
 			);
 		},
 		py::arg("font_path"),
 		py::arg("atlas"),
 		py::arg("strategy") = py::none(),
+		py::arg("uniform") = false,
+		py::arg("log") = py::none(),
 		"Load printable ASCII (codepoints 32-126) from font_path into atlas.\n"
 		"Creates and destroys an FT_Library/FT_Face internally.\n"
 		"strategy: optional callable(curves) -> (splits_x, splits_y), e.g.:\n"
 		"    lambda c: slughorn.Atlas.compute_adaptive_splits(c, 8, 8)\n"
-		"Pass None (default) to use the uniform fast path.\n"
+		"uniform: if True, all glyphs share the same em-space bounding box\n"
+		"    (required for setLayerShapeIndex glyph-swap cycling).\n"
+		"log: optional callable(level: int, msg: str) for load-time diagnostics.\n"
 		"Returns True on success, False if the font cannot be opened."
 	);
 
@@ -2283,23 +2324,29 @@ PYBIND11_MODULE(slughorn, m) {
 			const std::string& fontPath,
 			const std::vector<uint32_t>& codepoints,
 			slughorn::Atlas& atlas,
-			std::optional<slughorn::Atlas::SplitStrategy> strategy
+			std::optional<slughorn::Atlas::SplitStrategy> strategy,
+			bool uniform,
+			std::optional<slughorn::freetype::LogCallback> log
 		) {
 			return slughorn::freetype::loadFontGlyphs(
 				fontPath,
 				codepoints,
 				atlas,
-				strategy ? *strategy : slughorn::Atlas::SplitStrategy{}
+				detail::makeLoadConfig(strategy, uniform, log)
 			);
 		},
 		py::arg("font_path"),
 		py::arg("codepoints"),
 		py::arg("atlas"),
 		py::arg("strategy") = py::none(),
+		py::arg("uniform") = false,
+		py::arg("log") = py::none(),
 		"Load an explicit list of Unicode codepoints from font_path into atlas.\n"
 		"Creates and destroys an FT_Library/FT_Face internally.\n"
 		"strategy: optional callable(curves) -> (splits_x, splits_y).\n"
-		"Pass None (default) to use the uniform fast path.\n"
+		"uniform: if True, all glyphs share the same em-space bounding box\n"
+		"    (required for setLayerShapeIndex glyph-swap cycling).\n"
+		"log: optional callable(level: int, msg: str) for load-time diagnostics.\n"
 		"Returns the number of glyphs successfully added."
 	);
 
@@ -2307,21 +2354,27 @@ PYBIND11_MODULE(slughorn, m) {
 		[](
 			const std::string& fontPath,
 			slughorn::Atlas& atlas,
-			std::optional<slughorn::Atlas::SplitStrategy> strategy
+			std::optional<slughorn::Atlas::SplitStrategy> strategy,
+			bool uniform,
+			std::optional<slughorn::freetype::LogCallback> log
 		) {
 			return slughorn::freetype::loadAllFontGlyphs(
 				fontPath,
 				atlas,
-				strategy ? *strategy : slughorn::Atlas::SplitStrategy{}
+				detail::makeLoadConfig(strategy, uniform, log)
 			);
 		},
 		py::arg("font_path"),
 		py::arg("atlas"),
 		py::arg("strategy") = py::none(),
+		py::arg("uniform") = false,
+		py::arg("log") = py::none(),
 		"Load every mapped codepoint from font_path into atlas.\n"
 		"Creates and destroys an FT_Library/FT_Face internally.\n"
 		"strategy: optional callable(curves) -> (splits_x, splits_y).\n"
-		"Pass None (default) to use the uniform fast path.\n"
+		"uniform: if True, all glyphs share the same em-space bounding box\n"
+		"    (required for setLayerShapeIndex glyph-swap cycling).\n"
+		"log: optional callable(level: int, msg: str) for load-time diagnostics.\n"
 		"Returns the number of glyphs successfully added."
 	);
 
@@ -2329,7 +2382,9 @@ PYBIND11_MODULE(slughorn, m) {
 		const std::string& fontPath,
 		const std::vector<uint32_t>& codepoints,
 		slughorn::Atlas& atlas,
-		std::optional<slughorn::Atlas::SplitStrategy> strategy
+		std::optional<slughorn::Atlas::SplitStrategy> strategy,
+		bool uniform,
+		std::optional<slughorn::freetype::LogCallback> log
 	) -> py::dict {
 		std::map<uint32_t, slughorn::CompositeShape> colorGlyphs;
 
@@ -2338,7 +2393,7 @@ PYBIND11_MODULE(slughorn, m) {
 			codepoints,
 			atlas,
 			colorGlyphs,
-			strategy ? *strategy : slughorn::Atlas::SplitStrategy{}
+			detail::makeLoadConfig(strategy, uniform, log)
 		);
 
 		py::dict result;
@@ -2351,11 +2406,13 @@ PYBIND11_MODULE(slughorn, m) {
 		py::arg("codepoints"),
 		py::arg("atlas"),
 		py::arg("strategy") = py::none(),
+		py::arg("uniform") = false,
+		py::arg("log") = py::none(),
 		"Load COLR emoji from font_path for the given codepoints into atlas.\n"
 		"codepoints is a list of uint32_t Unicode codepoints.\n"
 		"Creates and destroys an FT_Library/FT_Face internally.\n"
 		"strategy: optional callable(curves) -> (splits_x, splits_y).\n"
-		"Pass None (default) to use the uniform fast path.\n"
+		"log: optional callable(level: int, msg: str) for load-time diagnostics.\n"
 		"Returns a dict mapping codepoint (int) -> CompositeShape "
 		"for each successfully loaded glyph."
 	);

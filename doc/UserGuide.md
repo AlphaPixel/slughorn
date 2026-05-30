@@ -581,21 +581,44 @@ slughorn::freetype::loadEmojiFont(
 `CompositeShape::layers` for each emoji just as you would for any other
 `CompositeShape`.
 
-### Logging
+### LoadConfig
 
-The FreeType2 backend is complex enough--and can fail in so many different
-ways--that for now, sluhorn provides an optional log callback that can be used
-to help detect any errors that might occur. Set it once before
-any other calls:
+All loading functions accept a `LoadConfig` struct as their final (optional)
+argument. Default construction is zero-cost and correct for the common case:
 
 ```cpp
-slughorn::freetype::setLogCallback([](int level, const std::string& msg) {
-    if(level >= slughorn::freetype::LOG_WARN) std::cerr << msg << "\n";
+struct LoadConfig {
+    Atlas::SplitStrategy strategy = {}; // optional band-split callable
+    LogCallback          log      = {}; // optional diagnostic callback
+    bool                 uniform  = false; // shared em-space bbox for all glyphs
+};
+```
+
+**Logging** — pass a `log` callback to diagnose failures without global state:
+
+```cpp
+slughorn::freetype::loadAsciiFont(fontPath, atlas, {
+    .log = [](int level, const std::string& msg) {
+        if(level >= slughorn::freetype::LOG_WARN) std::cerr << msg << "\n";
+    }
 });
 ```
 
-Log levels: `LOG_INFO = 0`, `LOG_NOTICE = 1`, `LOG_WARN = 2`. The default
-callback prints `LOG_WARN` and above to `stderr`.
+Log levels: `LOG_INFO = 0`, `LOG_NOTICE = 1`, `LOG_WARN = 2`.
+
+**Uniform bounding box** — set `uniform = true` when all glyphs in a batch must
+share the same em-space bounding box. This is required for `setLayerShapeIndex`
+glyph-swap cycling (e.g. an animated digit counter). The backend auto-detects
+tabular advances and falls back to union-bbox centering when they differ:
+
+```cpp
+slughorn::freetype::loadFontGlyphs(
+    fontPath,
+    { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' },
+    atlas,
+    { .uniform = true }
+);
+```
 
 ## NanoSVG (`slughorn/nanosvg.hpp`)
 
@@ -1616,16 +1639,17 @@ using SplitStrategy = std::function<
 ```
 
 It takes the shape's curves and returns `{splitsX, splitsY}` as normalized fractions.
-The FreeType backend accepts a `SplitStrategy` as an optional argument to all of its
-loading functions:
+The FreeType backend accepts a `LoadConfig` with an optional `strategy` field:
 
 ```cpp
 slughorn::freetype::loadAsciiFont(
     fontPath,
     atlas,
-    [](const Atlas::Curves& curves) {
-        int n = std::min(16, std::max(1, (int)curves.size() / 2));
-        return Atlas::computeAdaptiveSplits(curves, n, n);
+    {
+        .strategy = [](const Atlas::Curves& curves) {
+            int n = std::min(16, std::max(1, (int)curves.size() / 2));
+            return Atlas::computeAdaptiveSplits(curves, n, n);
+        }
     }
 );
 ```
@@ -2007,9 +2031,21 @@ atlas.build()
 slughorn.write(atlas, "hello.slugb")
 ```
 
-The `strategy` parameter on every loader accepts an optional callable
-`(curves) -> (splits_x, splits_y)` for custom band placement — the same
-`SplitStrategy` hook available from C++.
+All loaders accept three optional keyword arguments mirroring `LoadConfig`:
+
+- `strategy`: optional callable `(curves) -> (splits_x, splits_y)` for custom band placement
+- `uniform`: if `True`, all glyphs share one em-space bounding box (required for `setLayerShapeIndex` cycling)
+- `log`: optional callable `(level: int, msg: str)` for load-time diagnostics
+
+```python
+slughorn.freetype.load_font_glyphs(
+    "/path/to/font.ttf",
+    [ord(c) for c in "0123456789"],
+    atlas,
+    uniform=True,
+    log=lambda level, msg: print(f"[ft:{level}] {msg}"),
+)
+```
 
 ### slughorn.nanosvg
 

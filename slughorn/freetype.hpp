@@ -49,18 +49,23 @@ namespace slughorn {
 namespace freetype {
 
 // =============================================================================
-// Logging
+// Configuration
 // =============================================================================
+
+using LogCallback = std::function<void(int level, const std::string& msg)>;
 
 static constexpr int LOG_INFO = 0;
 static constexpr int LOG_NOTICE = 1;
 static constexpr int LOG_WARN = 2;
 
-using LogCallback = std::function<void(int level, const std::string& msg)>;
+// Passed to all load functions. Default construction is silent, non-uniform, no custom splitting.
+struct LoadConfig {
+	Atlas::SplitStrategy strategy = {};
 
-// Set the log callback used by all ft2 functions in this translation unit. Thread-safety: set once
-// before any calls; not synchronized.
-void setLogCallback(LogCallback cb);
+	LogCallback log = {};
+
+	bool uniform = false;
+};
 
 // =============================================================================
 // Font metrics
@@ -102,8 +107,11 @@ bool decomposeGlyph(
 // Decompose a single Unicode codepoint from @p face and add it to @p atlas. Skips codepoints
 // already present in the atlas. Returns true on success, false if the glyph is missing or
 // decomposition fails.
+// Uniform-bounding-box note: set config.uniform=true to force all glyphs in a batch to share
+// the same em-space bounding box, required for setLayerShapeIndex. Auto-detects tabular advances
+// (Option C) and falls back to union bbox + centering (Option A) when advances differ.
 bool loadGlyph(FT_Face face, uint32_t codepoint, Atlas& atlas,
-	const Atlas::SplitStrategy& strategy = {});
+	const LoadConfig& config={});
 
 // Convenience: load a contiguous range of codepoints [first, last]. Returns the number of glyphs
 // successfully added.
@@ -112,7 +120,7 @@ size_t loadGlyphRange(
 	uint32_t first,
 	uint32_t last,
 	Atlas& atlas,
-	const Atlas::SplitStrategy& strategy = {}
+	const LoadConfig& config={}
 );
 
 // Convenience: load an explicit list of Unicode codepoints. Returns the number of glyphs
@@ -121,7 +129,7 @@ size_t loadGlyphs(
 	FT_Face face,
 	const std::vector<uint32_t>& codepoints,
 	Atlas& atlas,
-	const Atlas::SplitStrategy& strategy = {}
+	const LoadConfig& config={}
 );
 
 // Convenience: iterate the face's full charmap and load every mapped codepoint. Returns the number
@@ -129,7 +137,7 @@ size_t loadGlyphs(
 size_t loadAllGlyphs(
 	FT_Face face,
 	Atlas& atlas,
-	const Atlas::SplitStrategy& strategy = {}
+	const LoadConfig& config={}
 );
 
 // =============================================================================
@@ -154,7 +162,7 @@ bool loadColorGlyph(
 	FT_Color* palette,
 	Atlas& atlas,
 	CompositeShape& out,
-	const Atlas::SplitStrategy& strategy = {}
+	const LoadConfig& config={}
 );
 
 // Convenience: load a list of emoji codepoints. Populates colorGlyphs (keyed by codepoint) for
@@ -165,7 +173,7 @@ size_t loadColorGlyphs(
 	FT_Color* palette,
 	Atlas& atlas,
 	std::map<uint32_t, CompositeShape>& colorGlyphs,
-	const Atlas::SplitStrategy& strategy = {}
+	const LoadConfig& config={}
 );
 
 // =============================================================================
@@ -174,8 +182,10 @@ size_t loadColorGlyphs(
 
 // Load printable ASCII (codepoints 32-126) from @p fontPath into @p atlas. Creates and destroys an
 // FT_Library / FT_Face internally. Returns false if the font cannot be opened.
-bool loadAsciiFont(const std::string& fontPath, Atlas& atlas,
-	const Atlas::SplitStrategy& strategy = {});
+bool loadAsciiFont(
+	const std::string& fontPath,
+	Atlas& atlas,
+	const LoadConfig& config={});
 
 // Load an explicit list of codepoints from @p fontPath into @p atlas. Creates and destroys an
 // FT_Library / FT_Face internally. Returns the number of glyphs successfully added.
@@ -183,7 +193,7 @@ size_t loadFontGlyphs(
 	const std::string& fontPath,
 	const std::vector<uint32_t>& codepoints,
 	Atlas& atlas,
-	const Atlas::SplitStrategy& strategy = {}
+	const LoadConfig& config={}
 );
 
 // Load every mapped codepoint from @p fontPath into @p atlas. Creates and destroys an
@@ -191,7 +201,7 @@ size_t loadFontGlyphs(
 size_t loadAllFontGlyphs(
 	const std::string& fontPath,
 	Atlas& atlas,
-	const Atlas::SplitStrategy& strategy = {}
+	const LoadConfig& config={}
 );
 
 // Load COLR emoji from @p fontPath for the given codepoints. Creates and destroys an FT_Library /
@@ -201,7 +211,7 @@ bool loadEmojiFont(
 	const std::vector<uint32_t>& codepoints,
 	Atlas& atlas,
 	std::map<uint32_t, CompositeShape>& colorGlyphs,
-	const Atlas::SplitStrategy& strategy = {}
+	const LoadConfig& config={}
 );
 
 }
@@ -219,46 +229,14 @@ bool loadEmojiFont(
 namespace slughorn {
 namespace freetype {
 
-// =============================================================================
-// Logging
-//
-// TODO: Either REMOVE THIS or add it to the other backends; one or the other. It's only here
-// because of how important the messages can be during development (honestly, this was easily the
-// most difficult backend yet).
-//
-// TODO: If we DO decide to globalize logging, consider using `spdlog`.
-// =============================================================================
+static void doLog(const LogCallback& log, int level, const auto&... args) {
+	if(!log) return;
 
-static LogCallback& logCallbackRef() {
-	static LogCallback cb = [](int level, const std::string& msg) {
-		if(level >= LOG_WARN) {
-			const char* prefix =
-				level >= LOG_WARN ? "[slughorn-freetype WARN] " :
-				level >= LOG_NOTICE ? "[slughorn-freetype] " :
-				"[slughorn-freetype info] "
-			;
-
-			// fputs(prefix, stderr);
-			// fputs(msg.c_str(), stderr);
-			// fputc('\n', stderr);
-
-			std::cerr << prefix << msg << std::endl;
-		}
-	};
-
-	return cb;
-}
-
-void setLogCallback(LogCallback cb) {
-	logCallbackRef() = std::move(cb);
-}
-
-static void log(int level, const auto&... args) {
 	std::ostringstream oss;
 
-	((oss << args), ...) << std::endl;
+	((oss << args), ...);
 
-	if(logCallbackRef()) logCallbackRef()(level, oss.str());
+	log(level, oss.str());
 }
 
 // =============================================================================
@@ -273,9 +251,9 @@ struct LibraryHandle {
 		if(value) FT_Done_FreeType(value);
 	}
 
-	bool init(const char* caller) {
+	bool init(const char* caller, const LogCallback& log) {
 		if(FT_Init_FreeType(&value)) {
-			log(LOG_WARN, caller, ": failed to initialise FreeType");
+			doLog(log, LOG_WARN, caller, ": failed to initialise FreeType");
 
 			return false;
 		}
@@ -291,9 +269,9 @@ struct FaceHandle {
 		if(value) FT_Done_Face(value);
 	}
 
-	bool open(FT_Library library, const std::string& fontPath, const char* caller) {
+	bool open(FT_Library library, const std::string& fontPath, const char* caller, const LogCallback& log) {
 		if(FT_New_Face(library, fontPath.c_str(), 0, &value)) {
-			log(LOG_WARN, caller, ": failed to open font: ", fontPath);
+			doLog(log, LOG_WARN, caller, ": failed to open font: ", fontPath);
 
 			return false;
 		}
@@ -307,15 +285,16 @@ static Result withFace(
 	const std::string& fontPath,
 	const char* caller,
 	Result failureValue,
+	const LoadConfig& config,
 	F&& fn
 ) {
 	LibraryHandle library;
 
-	if(!library.init(caller)) return failureValue;
+	if(!library.init(caller, config.log)) return failureValue;
 
 	FaceHandle face;
 
-	if(!face.open(library.value, fontPath, caller)) return failureValue;
+	if(!face.open(library.value, fontPath, caller, config.log)) return failureValue;
 
 	return std::forward<F>(fn)(face.value);
 }
@@ -371,7 +350,7 @@ static slug_t measureGlyphHeight(FT_Face face, uint32_t codepoint) {
 	return cv(face->glyph->metrics.height) / cv(face->units_per_EM);
 }
 
-static FT_Color* selectPalette(FT_Face face) {
+[[maybe_unused]] static FT_Color* selectPalette(FT_Face face) {
 	FT_Color* palette = nullptr;
 	FT_Palette_Data paletteData = {};
 
@@ -484,13 +463,13 @@ static Color resolveColor(FT_Color* palette, uint32_t colorIndex) {
 // COLRv0
 // -------------------------------------------------------------------------
 
-static void processColorGlyphV0(
+[[maybe_unused]] static void processColorGlyphV0(
 	FT_Face face,
 	uint32_t codepoint,
 	FT_Color* palette,
 	Atlas& atlas,
 	CompositeShape& out,
-	const Atlas::SplitStrategy& strategy
+	const LoadConfig& config
 ) {
 	const auto glyphIndex = FT_Get_Char_Index(face, codepoint);
 	const slug_t emScale = 1_cv / cv(face->units_per_EM);
@@ -526,8 +505,8 @@ static void processColorGlyphV0(
 
 			decomposeOutline(face->glyph->outline, data.curves, emScale);
 
-			if(strategy && !data.curves.empty()) {
-				auto [sx, sy] = strategy(data.curves);
+			if(config.strategy && !data.curves.empty()) {
+				auto [sx, sy] = config.strategy(data.curves);
 				data.splitsX = std::move(sx);
 				data.splitsY = std::move(sy);
 			}
@@ -593,7 +572,7 @@ static PaintResult traversePaint(
 	uint8_t& layerIdx,
 	Atlas& atlas,
 	CompositeShape& out,
-	const Atlas::SplitStrategy& strategy
+	const LoadConfig& config
 );
 
 // -------------------------------------------------------------------------
@@ -617,7 +596,7 @@ static PaintResult traversePaint(
 	uint8_t& layerIdx,
 	Atlas& atlas,
 	CompositeShape& out,
-	const Atlas::SplitStrategy& strategy
+	const LoadConfig& config
 ) {
 	const auto white = Color{1_cv, 1_cv, 1_cv, 1_cv};
 
@@ -640,7 +619,7 @@ static PaintResult traversePaint(
 				traversePaint(
 					face, &childPaint, palette,
 					emScale, advance, parentMatrix,
-					codepoint, layerIdx, atlas, out, strategy
+					codepoint, layerIdx, atlas, out, config
 				);
 			}
 
@@ -658,7 +637,7 @@ static PaintResult traversePaint(
 			PaintResult result = traversePaint(
 				face, &paint.u.glyph.paint, palette,
 				emScale, advance, parentMatrix,
-				codepoint, layerIdx, atlas, out, strategy
+				codepoint, layerIdx, atlas, out, config
 			);
 
 			if(FT_Load_Glyph(face, gi, FT_LOAD_NO_SCALE)) break;
@@ -689,8 +668,8 @@ static PaintResult traversePaint(
 
 			if(data.curves.empty()) break;
 
-			if(strategy) {
-				auto [sx, sy] = strategy(data.curves);
+			if(config.strategy) {
+				auto [sx, sy] = config.strategy(data.curves);
 				data.splitsX = std::move(sx);
 				data.splitsY = std::move(sy);
 			}
@@ -737,7 +716,7 @@ static PaintResult traversePaint(
 				return traversePaint(
 					face, &paint.u.transform.paint, palette,
 					emScale, advance, parentMatrix,
-					codepoint, layerIdx, atlas, out, strategy
+					codepoint, layerIdx, atlas, out, config
 				);
 			}
 
@@ -756,7 +735,7 @@ static PaintResult traversePaint(
 			return traversePaint(
 				face, &paint.u.transform.paint, palette,
 				emScale, advance, combined,
-				codepoint, layerIdx, atlas, out, strategy
+				codepoint, layerIdx, atlas, out, config
 			);
 		}
 
@@ -777,7 +756,7 @@ static PaintResult traversePaint(
 			return traversePaint(
 				face, &paint.u.translate.paint, palette,
 				emScale, advance, combined,
-				codepoint, layerIdx, atlas, out, strategy
+				codepoint, layerIdx, atlas, out, config
 			);
 		}
 
@@ -801,7 +780,7 @@ static PaintResult traversePaint(
 			return traversePaint(
 				face, &s.paint, palette,
 				emScale, advance, m * parentMatrix,
-				codepoint, layerIdx, atlas, out, strategy
+				codepoint, layerIdx, atlas, out, config
 			);
 		}
 
@@ -829,7 +808,7 @@ static PaintResult traversePaint(
 			return traversePaint(
 				face, &r.paint, palette,
 				emScale, advance, m * parentMatrix,
-				codepoint, layerIdx, atlas, out, strategy
+				codepoint, layerIdx, atlas, out, config
 			);
 		}
 
@@ -856,7 +835,7 @@ static PaintResult traversePaint(
 			return traversePaint(
 				face, &sk.paint, palette,
 				emScale, advance, m * parentMatrix,
-				codepoint, layerIdx, atlas, out, strategy
+				codepoint, layerIdx, atlas, out, config
 			);
 		}
 
@@ -869,13 +848,13 @@ static PaintResult traversePaint(
 			traversePaint(
 				face, &paint.u.composite.backdrop_paint, palette,
 				emScale, advance, parentMatrix,
-				codepoint, layerIdx, atlas, out, strategy
+				codepoint, layerIdx, atlas, out, config
 			);
 
 			return traversePaint(
 				face, &paint.u.composite.source_paint, palette,
 				emScale, advance, parentMatrix,
-				codepoint, layerIdx, atlas, out, strategy
+				codepoint, layerIdx, atlas, out, config
 			);
 		}
 
@@ -967,14 +946,17 @@ static PaintResult traversePaint(
 		// ColrGlyph reference - TODO
 		// -----------------------------------------------------------------
 		case FT_COLR_PAINTFORMAT_COLR_GLYPH: {
-			log(LOG_INFO, "COLRv1 PaintColrGlyph - not yet implemented");
+			doLog(config.log, LOG_INFO, "COLRv1 PaintColrGlyph - not yet implemented");
 
 			break;
 		}
 
 		// -----------------------------------------------------------------
 		default: {
-			log(LOG_INFO, "COLRv1 unhandled paint format ", paint.format, " - skipped");
+			doLog(
+				config.log, LOG_INFO,
+				"COLRv1 unhandled paint format ", paint.format, " - skipped"
+			);
 
 			break;
 		}
@@ -983,13 +965,13 @@ static PaintResult traversePaint(
 	return {white};
 }
 
-static void processColorGlyphV1(
+[[maybe_unused]] static void processColorGlyphV1(
 	FT_Face face,
 	uint32_t codepoint,
 	FT_Color* palette,
 	Atlas& atlas,
 	CompositeShape& out,
-	const Atlas::SplitStrategy& strategy
+	const LoadConfig& config
 ) {
 	const FT_UInt glyphIndex = FT_Get_Char_Index(face, codepoint);
 	const slug_t emScale = 1_cv / cv(face->units_per_EM);
@@ -1007,7 +989,7 @@ static void processColorGlyphV1(
 	traversePaint(
 		face, &rootPaint, palette,
 		emScale, out.advance, Matrix::identity(),
-		codepoint, layerIdx, atlas, out, strategy
+		codepoint, layerIdx, atlas, out, config
 	);
 }
 
@@ -1058,6 +1040,7 @@ std::optional<slughorn::FontMetrics> loadFontMetrics(const std::string& fontPath
 		fontPath,
 		"loadFontMetrics",
 		std::optional<slughorn::FontMetrics>{},
+		LoadConfig{},
 		[](FT_Face face) -> std::optional<slughorn::FontMetrics> {
 			return readFontMetrics(face);
 		}
@@ -1093,7 +1076,7 @@ bool decomposeGlyph(
 }
 
 bool loadGlyph(FT_Face face, uint32_t codepoint, Atlas& atlas,
-	const Atlas::SplitStrategy& strategy
+	const LoadConfig& config
 ) {
 	if(atlas.hasKey(codepoint)) return true; // already present - not an error
 
@@ -1115,8 +1098,8 @@ bool loadGlyph(FT_Face face, uint32_t codepoint, Atlas& atlas,
 
 	detail::decomposeOutline(face->glyph->outline, data.curves, emScale);
 
-	if(strategy && !data.curves.empty()) {
-		auto [sx, sy] = strategy(data.curves);
+	if(config.strategy && !data.curves.empty()) {
+		auto [sx, sy] = config.strategy(data.curves);
 		data.splitsX = std::move(sx);
 		data.splitsY = std::move(sy);
 	}
@@ -1131,11 +1114,16 @@ size_t loadGlyphRange(
 	uint32_t first,
 	uint32_t last,
 	Atlas& atlas,
-	const Atlas::SplitStrategy& strategy
+	const LoadConfig& config
 ) {
+	if(config.uniform) {
+		std::vector<uint32_t> cps;
+		for(uint32_t cp = first; cp <= last; cp++) cps.push_back(cp);
+		return loadGlyphs(face, cps, atlas, config);
+	}
+
 	return detail::countRange(first, last, [&](uint32_t cp) {
-		// TODO: Add log() calls here? Probably...
-		return loadGlyph(face, cp, atlas, strategy);
+		return loadGlyph(face, cp, atlas, config);
 	});
 }
 
@@ -1143,20 +1131,180 @@ size_t loadGlyphs(
 	FT_Face face,
 	const std::vector<uint32_t>& codepoints,
 	Atlas& atlas,
-	const Atlas::SplitStrategy& strategy
+	const LoadConfig& config
 ) {
-	return detail::countCodepoints(codepoints, [&](uint32_t cp) {
-		return loadGlyph(face, cp, atlas, strategy);
-	});
+	if(!config.uniform) {
+		return detail::countCodepoints(codepoints, [&](uint32_t cp) {
+			return loadGlyph(face, cp, atlas, config);
+		});
+	}
+
+	// uniform=true: two-pass load so all glyphs share the same em-space bounding box.
+	// Auto-detects tabular advances (Option C); falls back to union bbox + centering (Option A).
+	if(codepoints.empty()) return 0;
+
+	const slug_t emScale = 1_cv / cv(face->units_per_EM);
+
+	// Pass 1: collect per-glyph FT metrics.
+	struct GlyphMeta {
+		uint32_t codepoint;
+
+		slug_t bearingX, bearingY, width, height, advance;
+
+		bool valid = false;
+	};
+
+	std::vector<GlyphMeta> meta;
+
+	meta.reserve(codepoints.size());
+
+	for(uint32_t cp : codepoints) {
+		GlyphMeta m;
+
+		m.codepoint = cp;
+
+		const FT_UInt gi = FT_Get_Char_Index(face, cp);
+
+		if((!gi && cp != 0) || FT_Load_Glyph(face, gi, FT_LOAD_NO_SCALE)) {
+			meta.push_back(m);
+
+			continue;
+		}
+
+		m.bearingX = cv(face->glyph->metrics.horiBearingX) * emScale;
+		m.bearingY = cv(face->glyph->metrics.horiBearingY) * emScale;
+		m.width = cv(face->glyph->metrics.width) * emScale;
+		m.height = cv(face->glyph->metrics.height) * emScale;
+		m.advance = cv(face->glyph->metrics.horiAdvance) * emScale;
+		m.valid = true;
+
+		meta.push_back(m);
+	}
+
+	// Detect tabular: all valid glyphs share the same horiAdvance.
+	slug_t refAdvance = -1_cv;
+	bool tabular = true;
+
+	for(const auto& m : meta) {
+		if(!m.valid) continue;
+
+		if(refAdvance < 0_cv) refAdvance = m.advance;
+
+		else if(std::abs(m.advance - refAdvance) > 1e-6_cv) { tabular = false; break; }
+	}
+
+	// Compute uniform cell dimensions.
+	slug_t cellBearingX, cellBearingY, cellWidth, cellHeight, cellAdvance;
+
+	if(tabular) {
+		// Font already handles side-bearings; cell = advance x max ascent+descent.
+		cellBearingX = 0_cv;
+		cellWidth = refAdvance;
+		cellAdvance = refAdvance;
+		cellBearingY = 0_cv;
+		cellHeight = 0_cv;
+
+		for(const auto& m : meta) {
+			if(!m.valid) continue;
+			if(m.bearingY > cellBearingY) cellBearingY = m.bearingY;
+			if(m.height > cellHeight) cellHeight = m.height;
+		}
+
+		doLog(
+			config.log, LOG_NOTICE,
+			"loadGlyphsUniform: tabular advances detected, cell width=", refAdvance
+		);
+	}
+
+	else {
+		// Union bounding box; glyphs will be centered horizontally within the cell.
+		slug_t minLeft = std::numeric_limits<slug_t>::max();
+		slug_t maxRight = -std::numeric_limits<slug_t>::max();
+
+		cellBearingY = 0_cv;
+		cellHeight = 0_cv;
+		cellAdvance = 0_cv;
+
+		for(const auto& m : meta) {
+			if(!m.valid) continue;
+
+			if(m.bearingX < minLeft) minLeft = m.bearingX;
+			if(m.bearingX + m.width > maxRight) maxRight = m.bearingX + m.width;
+			if(m.bearingY > cellBearingY) cellBearingY = m.bearingY;
+			if(m.height > cellHeight) cellHeight = m.height;
+			if(m.advance > cellAdvance) cellAdvance = m.advance;
+		}
+
+		cellBearingX = minLeft;
+		cellWidth = maxRight - minLeft;
+
+		doLog(
+			config.log, LOG_NOTICE,
+			"loadGlyphsUniform: non-tabular, union cell width=", cellWidth,
+			" (centering applied)"
+		);
+	}
+
+	// Pass 2: decompose each glyph with uniform metrics.
+	// Non-tabular path applies a horizontal centering translation via Matrix.
+	size_t count = 0;
+
+	for(const auto& m : meta) {
+		if(!m.valid || atlas.hasKey(m.codepoint)) continue;
+
+		const FT_UInt gi = FT_Get_Char_Index(face, m.codepoint);
+
+		if(FT_Load_Glyph(face, gi, FT_LOAD_NO_SCALE)) continue;
+
+		Atlas::ShapeInfo data;
+
+		data.autoMetrics = false;
+		data.bearingX = cellBearingX;
+		data.bearingY = cellBearingY;
+		data.width = cellWidth;
+		data.height = cellHeight;
+		data.advance = cellAdvance;
+
+		const slughorn::Matrix* matrixPtr = nullptr;
+		slughorn::Matrix centerMatrix;
+
+		if(!tabular) {
+			const slug_t cellCenter = cellBearingX + cellWidth / 2_cv;
+			const slug_t glyphCenter = m.bearingX + m.width / 2_cv;
+
+			centerMatrix.dx = cellCenter - glyphCenter;
+			matrixPtr = &centerMatrix;
+		}
+
+		if(!decomposeGlyph(face, emScale, cellAdvance, matrixPtr, data)) continue;
+
+		if(config.strategy && !data.curves.empty()) {
+			auto [sx, sy] = config.strategy(data.curves);
+
+			data.splitsX = std::move(sx);
+			data.splitsY = std::move(sy);
+		}
+
+		atlas.addShape(m.codepoint, data);
+
+		count++;
+	}
+
+	return count;
+	// -- end loadGlyphsUniform (inlined) --
 }
 
-size_t loadAllGlyphs(
-	FT_Face face,
-	Atlas& atlas,
-	const Atlas::SplitStrategy& strategy
-) {
+size_t loadAllGlyphs(FT_Face face, Atlas& atlas, const LoadConfig& config) {
+	if(config.uniform) {
+		std::vector<uint32_t> cps;
+
+		detail::countCharmap(face, [&](uint32_t cp) { cps.push_back(cp); return true; });
+
+		return loadGlyphs(face, cps, atlas, config);
+	}
+
 	return detail::countCharmap(face, [&](uint32_t cp) {
-		return loadGlyph(face, cp, atlas, strategy);
+		return loadGlyph(face, cp, atlas, config);
 	});
 }
 
@@ -1166,12 +1314,12 @@ bool loadColorGlyph(
 	FT_Color* palette,
 	Atlas& atlas,
 	CompositeShape& out,
-	const Atlas::SplitStrategy& strategy
+	const LoadConfig& config
 ) {
 	const FT_UInt glyphIndex = FT_Get_Char_Index(face, codepoint);
 
 	if(!glyphIndex) {
-		log(LOG_WARN, "U+", std::hex, codepoint, " not found in font");
+		doLog(config.log, LOG_WARN, "U+", std::hex, codepoint, " not found in font");
 
 		return false;
 	}
@@ -1189,10 +1337,11 @@ bool loadColorGlyph(
 #if FREETYPE_MAJOR > 2 || (FREETYPE_MAJOR == 2 && FREETYPE_MINOR >= 11)
 
 	{
-		detail::processColorGlyphV1(face, codepoint, palette, atlas, out, strategy);
+		detail::processColorGlyphV1(face, codepoint, palette, atlas, out, config);
 
 		if(!out.layers.empty()) {
-			log(LOG_NOTICE,
+			doLog(
+				config.log, LOG_NOTICE,
 				"loaded COLRv1 U+",
 				std::hex, codepoint,
 				std::dec, " (", out.layers.size(), " layers)"
@@ -1207,10 +1356,11 @@ bool loadColorGlyph(
 	// -------------------------------------------------------------------------
 	// Fall back to COLRv0
 	// -------------------------------------------------------------------------
-	detail::processColorGlyphV0(face, codepoint, palette, atlas, out, strategy);
+	detail::processColorGlyphV0(face, codepoint, palette, atlas, out, config);
 
 	if(!out.layers.empty()) {
-		log(LOG_NOTICE,
+		doLog(
+			config.log, LOG_NOTICE,
 			"loaded COLRv0 U+",
 			std::hex, codepoint,
 			std::dec, " (", out.layers.size(), " layers)"
@@ -1228,12 +1378,12 @@ size_t loadColorGlyphs(
 	FT_Color* palette,
 	Atlas& atlas,
 	std::map<uint32_t, CompositeShape>& colorGlyphs,
-	const Atlas::SplitStrategy& strategy
+	const LoadConfig& config
 ) {
 	return detail::countCodepoints(codepoints, [&](uint32_t cp) {
 		CompositeShape glyph;
 
-		if(loadColorGlyph(face, cp, palette, atlas, glyph, strategy)) {
+		if(loadColorGlyph(face, cp, palette, atlas, glyph, config)) {
 			colorGlyphs[cp] = std::move(glyph);
 
 			return true;
@@ -1244,10 +1394,10 @@ size_t loadColorGlyphs(
 }
 
 bool loadAsciiFont(const std::string& fontPath, Atlas& atlas,
-	const Atlas::SplitStrategy& strategy
+	const LoadConfig& config
 ) {
-	return detail::withFace(fontPath, "loadAsciiFont", false, [&](FT_Face face) {
-		loadGlyphRange(face, 32, 126, atlas, strategy);
+	return detail::withFace(fontPath, "loadAsciiFont", false, config, [&](FT_Face face) {
+		loadGlyphRange(face, 32, 126, atlas, config);
 
 		return true;
 	});
@@ -1257,20 +1407,20 @@ size_t loadFontGlyphs(
 	const std::string& fontPath,
 	const std::vector<uint32_t>& codepoints,
 	Atlas& atlas,
-	const Atlas::SplitStrategy& strategy
+	const LoadConfig& config
 ) {
-	return detail::withFace(fontPath, "loadFontGlyphs", size_t(0), [&](FT_Face face) {
-		return loadGlyphs(face, codepoints, atlas, strategy);
+	return detail::withFace(fontPath, "loadFontGlyphs", size_t(0), config, [&](FT_Face face) {
+		return loadGlyphs(face, codepoints, atlas, config);
 	});
 }
 
 size_t loadAllFontGlyphs(
 	const std::string& fontPath,
 	Atlas& atlas,
-	const Atlas::SplitStrategy& strategy
+	const LoadConfig& config
 ) {
-	return detail::withFace(fontPath, "loadAllFontGlyphs", size_t(0), [&](FT_Face face) {
-		return loadAllGlyphs(face, atlas, strategy);
+	return detail::withFace(fontPath, "loadAllFontGlyphs", size_t(0), config, [&](FT_Face face) {
+		return loadAllGlyphs(face, atlas, config);
 	});
 }
 
@@ -1279,12 +1429,12 @@ bool loadEmojiFont(
 	const std::vector<uint32_t>& codepoints,
 	Atlas& atlas,
 	std::map<uint32_t, CompositeShape>& colorGlyphs,
-	const Atlas::SplitStrategy& strategy
+	const LoadConfig& config
 ) {
-	return detail::withFace(fontPath, "loadEmojiFont", false, [&](FT_Face face) {
+	return detail::withFace(fontPath, "loadEmojiFont", false, config, [&](FT_Face face) {
 		auto* palette = detail::selectPalette(face);
 
-		loadColorGlyphs(face, codepoints, palette, atlas, colorGlyphs, strategy);
+		loadColorGlyphs(face, codepoints, palette, atlas, colorGlyphs, config);
 
 		return true;
 	});
