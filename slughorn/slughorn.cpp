@@ -559,7 +559,10 @@ void Atlas::buildShapeBands(
 		build.metrics.originY = rangeY / 2_cv;
 	}
 
-	else if(origin.type == ShapeInfo::Origin::Type::Custom) {
+	else if(
+		origin.type == ShapeInfo::Origin::Type::Pivot ||
+		origin.type == ShapeInfo::Origin::Type::Custom
+	) {
 		build.metrics.originX = origin.x;
 		build.metrics.originY = origin.y;
 	}

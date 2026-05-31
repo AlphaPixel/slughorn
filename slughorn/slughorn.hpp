@@ -499,16 +499,24 @@ public:
 		// Layer::transform.dx/dy will equal (px, py) scaled to em-space,
 		// giving the GPU the correct rotation pivot.
 		struct Origin {
-			enum class Type { Default, Centered, Custom };
+			// Default  - quad placed at bbox corner; originData = (0, 0).
+			// Centered - quad placed at bbox center; originData = (width/2, height/2) in local em-space.
+			// Pivot    - quad placed at (px, py) in authoring space; originData = pivot in local
+			//            em-space (bbox-min subtracted). Use with osgSlug_Vertex_Rotate and similar
+			//            helpers that expect a local-em-space anchor.
+			// Custom   - quad placed at bbox corner (same as Default); originData = (px, py) * scale
+			//            stored verbatim. Use when the shader treats origin as raw user data (e.g. an
+			//            ejection direction vector) and you own the coordinate math.
+			enum class Type { Default, Centered, Pivot, Custom };
 
 			Type type;
 
-			// authoring-space pivot; meaningful only when type == Custom
 			slug_t x, y;
 
 			Origin(): type(Type::Default), x(0_cv), y(0_cv) {}
 			Origin(Type t): type(t), x(0_cv), y(0_cv) {}
-			Origin(slug_t px, slug_t py): type(Type::Custom), x(px), y(py) {}
+			Origin(slug_t px, slug_t py): type(Type::Pivot), x(px), y(py) {}
+			Origin(Type t, slug_t px, slug_t py): type(t), x(px), y(py) {}
 
 			bool operator==(const Origin& o) const { return type == o.type && x == o.x && y == o.y; }
 			bool operator!=(const Origin& o) const { return !(*this == o); }
@@ -1280,6 +1288,7 @@ inline std::ostream& operator<<(std::ostream& os, Atlas::ShapeInfo::Origin::Type
 	switch(type) {
 		case Atlas::ShapeInfo::Origin::Type::Default: return os << "Default";
 		case Atlas::ShapeInfo::Origin::Type::Centered: return os << "Centered";
+		case Atlas::ShapeInfo::Origin::Type::Pivot: return os << "Pivot";
 		case Atlas::ShapeInfo::Origin::Type::Custom: return os << "Custom";
 	}
 
