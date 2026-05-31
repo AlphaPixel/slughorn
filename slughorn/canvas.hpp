@@ -1188,7 +1188,7 @@ private:
 
 		Atlas::ShapeInfo::Origin infoOrigin = origin;
 
-		if(origin.type == Atlas::ShapeInfo::Origin::Type::Custom && !scaled.empty()) {
+		if(origin.type == Atlas::ShapeInfo::Origin::Type::Pivot && !scaled.empty()) {
 			slug_t minX_em = std::numeric_limits<slug_t>::max();
 			slug_t minY_em = std::numeric_limits<slug_t>::max();
 
@@ -1199,6 +1199,11 @@ private:
 
 			infoOrigin.x = origin.x * scale - minX_em;
 			infoOrigin.y = origin.y * scale - minY_em;
+		}
+
+		else if(origin.type == Atlas::ShapeInfo::Origin::Type::Custom) {
+			infoOrigin.x = origin.x * scale;
+			infoOrigin.y = origin.y * scale;
 		}
 
 		auto [local, transform] = _toLocalOrigin(scaled, origin, scale);
@@ -1237,7 +1242,7 @@ private:
 
 		Atlas::ShapeInfo::Origin infoOrigin = origin;
 
-		if(origin.type == Atlas::ShapeInfo::Origin::Type::Custom && !scaled.empty()) {
+		if(origin.type == Atlas::ShapeInfo::Origin::Type::Pivot && !scaled.empty()) {
 			slug_t minX_em = std::numeric_limits<slug_t>::max();
 			slug_t minY_em = std::numeric_limits<slug_t>::max();
 
@@ -1248,6 +1253,11 @@ private:
 
 			infoOrigin.x = origin.x * scale - minX_em;
 			infoOrigin.y = origin.y * scale - minY_em;
+		}
+
+		else if(origin.type == Atlas::ShapeInfo::Origin::Type::Custom) {
+			infoOrigin.x = origin.x * scale;
+			infoOrigin.y = origin.y * scale;
 		}
 
 		Atlas::Curves local = _toLocalOrigin(scaled).first;
@@ -1288,9 +1298,14 @@ private:
 
 		Atlas::ShapeInfo::Origin infoOrigin = origin;
 
-		if(origin.type == Atlas::ShapeInfo::Origin::Type::Custom) {
+		if(origin.type == Atlas::ShapeInfo::Origin::Type::Pivot) {
 			infoOrigin.x = origin.x * scale - minX;
 			infoOrigin.y = origin.y * scale - minY;
+		}
+
+		else if(origin.type == Atlas::ShapeInfo::Origin::Type::Custom) {
+			infoOrigin.x = origin.x * scale;
+			infoOrigin.y = origin.y * scale;
 		}
 
 		auto [local, transform] = _toLocalOrigin(scaled, origin, scale);
@@ -1404,9 +1419,17 @@ private:
 			transform.dy = (minY + maxY) * 0.5_cv;
 		}
 
-		else if(origin.type == Atlas::ShapeInfo::Origin::Type::Custom) {
+		else if(origin.type == Atlas::ShapeInfo::Origin::Type::Pivot) {
 			transform.dx = origin.x * scale;
 			transform.dy = origin.y * scale;
+		}
+
+		else if(origin.type == Atlas::ShapeInfo::Origin::Type::Custom) {
+			// computeQuad subtracts originX/Y from transform, so pre-add it here so the
+			// subtraction cancels out and the quad lands at the bbox corner (same as Default).
+			// originX/Y still holds the raw user value for the shader.
+			transform.dx = minX + origin.x * scale;
+			transform.dy = minY + origin.y * scale;
 		}
 
 		else {
