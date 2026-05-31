@@ -1100,7 +1100,7 @@ PYBIND11_MODULE(slughorn, m) {
 		)
 		.def_readwrite("origin", &slughorn::Atlas::ShapeInfo::origin,
 			"Where the transform origin (Layer.transform.x/y) is placed relative to the geometry.\n"
-			"Origin() = Default, Origin(Type) = type-only (e.g. Centered), Origin(x, y) = Custom."
+			"Origin() = Default, Origin(Type) = type-only (e.g. Centered), Origin(x, y) = Pivot, Origin(Type, x, y) = explicit type + coords."
 		)
 		.def("__repr__", [](const slughorn::Atlas::ShapeInfo& info) { return streamRepr(info); })
 	;
@@ -1115,8 +1115,13 @@ PYBIND11_MODULE(slughorn, m) {
 		)
 		.def(py::init<slughorn::slug_t, slughorn::slug_t>(),
 			py::arg("x"), py::arg("y"),
-			"Custom origin: authoring-space pivot. Unambiguously Custom - no other variant "
-			"takes coordinates. Layer.transform.x/y will equal (x, y) scaled to em-space."
+			"Pivot origin: authoring-space pivot (bbox-min subtracted). "
+			"Layer.transform.x/y will equal (x, y) scaled to local em-space."
+		)
+		.def(py::init<slughorn::Atlas::ShapeInfo::Origin::Type, slughorn::slug_t, slughorn::slug_t>(),
+			py::arg("type"), py::arg("x"), py::arg("y"),
+			"Explicit type + coords. Use Origin.Type.Custom to store (x, y) * scale verbatim "
+			"with no em-space adjustment (e.g. raw ejection direction vectors)."
 		)
 		.def_readwrite("type", &slughorn::Atlas::ShapeInfo::Origin::type)
 		.def_readwrite("x", &slughorn::Atlas::ShapeInfo::Origin::x)
@@ -1131,6 +1136,7 @@ PYBIND11_MODULE(slughorn, m) {
 	py::enum_<slughorn::Atlas::ShapeInfo::Origin::Type>(origin_, "Type")
 		.value("Default", slughorn::Atlas::ShapeInfo::Origin::Type::Default)
 		.value("Centered", slughorn::Atlas::ShapeInfo::Origin::Type::Centered)
+		.value("Pivot", slughorn::Atlas::ShapeInfo::Origin::Type::Pivot)
 		.value("Custom", slughorn::Atlas::ShapeInfo::Origin::Type::Custom)
 		.export_values()
 	;
