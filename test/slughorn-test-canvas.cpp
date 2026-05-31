@@ -49,6 +49,18 @@
 // +-------------------------+---------------------------------+------------------------------+
 // | stadium_composite       | composite [stadium_arcto]       | 9                            |
 // +-------------------------+---------------------------------+------------------------------+
+// | three_rect_raw          | shape (named)                   | 19 - multi-subpath raw cmds  |
+// +-------------------------+---------------------------------+------------------------------+
+// | three_rect_raw_comp     | composite [three_rect_raw]      | 19                           |
+// +-------------------------+---------------------------------+------------------------------+
+// | three_rect_helpers      | shape (named)                   | 20 - multi-subpath rect()    |
+// +-------------------------+---------------------------------+------------------------------+
+// | three_rect_helpers_comp | composite [three_rect_helpers]  | 20                           |
+// +-------------------------+---------------------------------+------------------------------+
+// | add_path_xform          | shape (named)                   | 21 - addPath(p, transform)   |
+// +-------------------------+---------------------------------+------------------------------+
+// | add_path_xform_comp     | composite [add_path_xform]      | 21                           |
+// +-------------------------+---------------------------------+------------------------------+
 
 #include "slughorn/canvas.hpp"
 
@@ -636,6 +648,95 @@ int main(int argc, char** argv) {
 		;
 
 		canvas.finalize(Key("text_centered"));
+	}
+
+	// ============================================================================================
+	// Pattern 19: Multi-subpath shape via raw path commands.
+	//
+	// Three disconnected rects built with explicit moveTo/lineTo/closePath after a single
+	// beginPath(). All three sub-paths land in one shape. The bounding box of the resulting
+	// shape should span the union of all three rects (x: 0.1→0.9, y: 0.25→0.75).
+	//
+	// This is the general-purpose proof that disconnected sub-paths work correctly.
+	// ============================================================================================
+	{
+		auto addRect = [&](slug_t x, slug_t y, slug_t w, slug_t h) {
+			canvas.moveTo(x,     y);
+			canvas.lineTo(x + w, y);
+			canvas.lineTo(x + w, y + h);
+			canvas.lineTo(x,     y + h);
+			canvas.closePath();
+		};
+
+		canvas.beginPath();
+		addRect(0.1_cv, 0.25_cv, 0.2_cv, 0.5_cv);
+		addRect(0.4_cv, 0.25_cv, 0.2_cv, 0.5_cv);
+		addRect(0.7_cv, 0.25_cv, 0.2_cv, 0.5_cv);
+		canvas.fill(WHITE, 1_cv, Key("three_rect_raw"));
+
+		const auto comp19 = canvas.finalize();
+
+		atlas.addCompositeShape(Key("three_rect_raw_comp"), comp19);
+
+		std::cerr
+			<< "Pattern 19: three_rect_raw layers="
+			<< comp19.layers.size() << " (expected 1)\n"
+		;
+	}
+
+	// ============================================================================================
+	// Pattern 20: Multi-subpath shape via rect() helpers — BUG-1 regression test.
+	//
+	// Three canvas.rect() calls after a single beginPath() must accumulate, NOT wipe each
+	// other. rect() must not call clear() internally (matches HTML Canvas spec).
+	//
+	// The resulting shape must be identical to Pattern 19 (same union bounding box).
+	// ============================================================================================
+	{
+		canvas.beginPath();
+		canvas.rect(0.1_cv, 0.25_cv, 0.2_cv, 0.5_cv);
+		canvas.rect(0.4_cv, 0.25_cv, 0.2_cv, 0.5_cv);
+		canvas.rect(0.7_cv, 0.25_cv, 0.2_cv, 0.5_cv);
+		canvas.fill(WHITE, 1_cv, Key("three_rect_helpers"));
+
+		const auto comp20 = canvas.finalize();
+
+		atlas.addCompositeShape(Key("three_rect_helpers_comp"), comp20);
+
+		std::cerr
+			<< "Pattern 20: three_rect_helpers layers="
+			<< comp20.layers.size() << " (expected 1)\n"
+		;
+	}
+
+	// ============================================================================================
+	// Pattern 21: addPath(path, transform) — BUG-2 regression test.
+	//
+	// A single rect Path stamped three times via addPath() with translate transforms.
+	// Must produce the same union bounding box as Patterns 19/20 (width ~0.8, height ~0.5).
+	// ============================================================================================
+	{
+		slughorn::canvas::Path rect;
+		rect.moveTo(0_cv,    0_cv);
+		rect.lineTo(0.2_cv,  0_cv);
+		rect.lineTo(0.2_cv,  0.5_cv);
+		rect.lineTo(0_cv,    0.5_cv);
+		rect.closePath();
+
+		canvas.beginPath();
+		canvas.addPath(rect, slughorn::Matrix::translate(0.1_cv, 0.25_cv));
+		canvas.addPath(rect, slughorn::Matrix::translate(0.4_cv, 0.25_cv));
+		canvas.addPath(rect, slughorn::Matrix::translate(0.7_cv, 0.25_cv));
+		canvas.fill(WHITE, 1_cv, Key("add_path_xform"));
+
+		const auto comp21 = canvas.finalize();
+
+		atlas.addCompositeShape(Key("add_path_xform_comp"), comp21);
+
+		std::cerr
+			<< "Pattern 21: add_path_xform layers="
+			<< comp21.layers.size() << " (expected 1)\n"
+		;
 	}
 
 	// ============================================================================================

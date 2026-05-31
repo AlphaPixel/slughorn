@@ -809,6 +809,15 @@ PYBIND11_MODULE(slughorn, m) {
 	py::class_<slughorn::Matrix>(m, "Matrix")
 		.def(py::init<>(), "Default: identity.")
 		.def_static("identity", &slughorn::Matrix::identity, "Return the identity matrix.")
+		.def_static("translate", &slughorn::Matrix::translate, py::arg("tx"), py::arg("ty"),
+			"Return a pure-translation matrix."
+		)
+		.def_static("scale", &slughorn::Matrix::scale, py::arg("sx"), py::arg("sy"),
+			"Return a pure-scale matrix."
+		)
+		.def_static("rotate", &slughorn::Matrix::rotate, py::arg("angle"),
+			"Return a pure-rotation matrix (angle in radians, CCW positive)."
+		)
 		.def_readwrite("xx", &slughorn::Matrix::xx)
 		.def_readwrite("yx", &slughorn::Matrix::yx)
 		.def_readwrite("xy", &slughorn::Matrix::xy)
@@ -1714,9 +1723,17 @@ PYBIND11_MODULE(slughorn, m) {
 				.def("clear", &Path::clear,
 					"Reset all geometry state. The CTM (transform) is NOT cleared,\n"
 					"matching HTML Canvas beginPath() semantics.")
-				.def("add_path", &Path::addPath, py::arg("other"),
-					"Append all curves from other into this path's accumulator.\n"
-					"Does not affect other.")
+				.def("add_path",
+					py::overload_cast<const Path&>(&Path::addPath),
+					py::arg("other"),
+					"Append all curves from other into this path's accumulator. Does not affect other."
+				)
+				.def("add_path",
+					py::overload_cast<const Path&, const slughorn::Matrix&>(&Path::addPath),
+					py::arg("other"), py::arg("transform"),
+					"Append curves from other with each control point transformed by transform.\n"
+					"Matches HTML Canvas Path2D.addPath(path, DOMMatrix) semantics."
+				)
 
 				// Transform stack
 				.def("save", &Path::save, "Push the current transform onto the stack.")
@@ -1821,8 +1838,16 @@ PYBIND11_MODULE(slughorn, m) {
 			.def("begin_path", &slughorn::canvas::Canvas::beginPath,
 				"Discard any accumulated path state and start fresh."
 			)
-			.def("add_path", &slughorn::canvas::Canvas::addPath, py::arg("other"),
+			.def("add_path",
+				py::overload_cast<const slughorn::canvas::Path&>(&slughorn::canvas::Canvas::addPath),
+				py::arg("other"),
 				"Append all curves from an explicit Path into the canvas's internal path."
+			)
+			.def("add_path",
+				py::overload_cast<const slughorn::canvas::Path&, const slughorn::Matrix&>(&slughorn::canvas::Canvas::addPath),
+				py::arg("other"), py::arg("transform"),
+				"Append curves from an explicit Path with each control point transformed by transform.\n"
+				"Matches HTML Canvas Path2D.addPath(path, DOMMatrix) semantics."
 			)
 			.def("move_to", &slughorn::canvas::Canvas::moveTo, py::arg("x"), py::arg("y"))
 			.def("line_to", &slughorn::canvas::Canvas::lineTo, py::arg("x"), py::arg("y"))

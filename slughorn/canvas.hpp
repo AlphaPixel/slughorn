@@ -191,6 +191,23 @@ public:
 		_lutDirty = true;
 	}
 
+	// Append curves from @p other with each control point transformed by @p transform.
+	// Matches HTML Canvas Path2D.addPath(path, DOMMatrix) semantics.
+	void addPath(const Path& other, const slughorn::Matrix& transform) {
+		auto xform = [&](const slughorn::Atlas::Curve& c) {
+			slughorn::Atlas::Curve out;
+			transform.apply(c.x1, c.y1, out.x1, out.y1);
+			transform.apply(c.x2, c.y2, out.x2, out.y2);
+			transform.apply(c.x3, c.y3, out.x3, out.y3);
+			return out;
+		};
+
+		for(const auto& c : other._pendingCurves) _pendingCurves.push_back(xform(c));
+		for(const auto& c : other._activeCurves)  _pendingCurves.push_back(xform(c));
+
+		_lutDirty = true;
+	}
+
 	// -------------------------------------------------------------------------
 	// Transform stack
 	//
@@ -310,13 +327,12 @@ public:
 	// -------------------------------------------------------------------------
 	// Convenience shape helpers
 	//
-	// Each calls clear() implicitly; they are self-contained path descriptions.
-	// For compound shapes (e.g. a rect with a hole) call clear() manually and
-	// use the path commands above.
+	// These do NOT reset path state. Call clear() / beginPath() first if you
+	// want a fresh path. Multiple helpers can be chained after a single clear()
+	// to build compound shapes (e.g. a rect with a circular hole).
 	// -------------------------------------------------------------------------
 
 	void rect(slug_t x, slug_t y, slug_t w, slug_t h) {
-		clear();
 		moveTo(x, y);
 		lineTo(x + w, y);
 		lineTo(x + w, y + h);
@@ -789,6 +805,7 @@ public:
 		}
 	}
 
+	const Matrix& getTransform() const { return _ctm; }
 	void resetTransform() { _path.resetTransform(); _ctm = Matrix::identity(); }
 	void setTransform(const Matrix& m) { _path.setTransform(m); _ctm = m; }
 	void transform(const Matrix& m) { _path.transform(m); _ctm = _ctm * m; }
@@ -832,6 +849,7 @@ public:
 
 	void beginPath() { _path.clear(); }
 	void addPath(const Path& other) { _path.addPath(other); }
+	void addPath(const Path& other, const Matrix& transform) { _path.addPath(other, transform); }
 	void moveTo(slug_t x, slug_t y) { _path.moveTo(x, y); }
 	void lineTo(slug_t x, slug_t y) { _path.lineTo(x, y); }
 	void quadTo(slug_t cx, slug_t cy, slug_t x, slug_t y) { _path.quadTo(cx, cy, x, y); }

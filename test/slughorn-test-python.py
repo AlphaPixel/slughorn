@@ -612,3 +612,119 @@ def test_normalize_freetype_nontabular():
 		assert s.width   == pytest.approx(ref.width,   abs=1e-5)
 		assert s.height  == pytest.approx(ref.height,  abs=1e-5)
 		assert s.advance == pytest.approx(ref.advance, abs=1e-5)
+
+# ============================================================================
+# Multi-subpath accumulation (BUG-1 regression)
+# ============================================================================
+
+def _build_three_rect_atlas(use_rect_helper: bool):
+	"""
+	Build an atlas with a single shape made of three side-by-side rects.
+	x: 0.1→0.3, 0.4→0.6, 0.7→0.9  |  y: 0.25→0.75
+	Union bounding box: width=0.8, height=0.5
+
+	use_rect_helper=True  → canvas.rect() calls (BUG-1 regression path)
+	use_rect_helper=False → raw moveTo/lineTo/closePath (reference path)
+	"""
+	atlas  = slughorn.Atlas()
+	canvas = slughorn.canvas.Canvas(atlas)
+
+	def add_rect(x, y, w, h):
+		canvas.move_to(x,     y)
+		canvas.line_to(x + w, y)
+		canvas.line_to(x + w, y + h)
+		canvas.line_to(x,     y + h)
+		canvas.close_path()
+
+	canvas.begin_path()
+
+	if use_rect_helper:
+		canvas.rect(0.1, 0.25, 0.2, 0.5)
+		canvas.rect(0.4, 0.25, 0.2, 0.5)
+		canvas.rect(0.7, 0.25, 0.2, 0.5)
+	else:
+		add_rect(0.1, 0.25, 0.2, 0.5)
+		add_rect(0.4, 0.25, 0.2, 0.5)
+		add_rect(0.7, 0.25, 0.2, 0.5)
+
+	key  = canvas.fill(slughorn.Color(1, 1, 1, 1), 1.0, "three_rects")
+	comp = canvas.finalize()
+
+	atlas.add_composite_shape(slughorn.Key("three_rects_comp"), comp)
+	atlas.build()
+
+	return atlas, key, comp
+
+
+def test_multi_subpath_raw_commands():
+	"""Three sub-paths via raw moveTo/lineTo/closePath produce one shape spanning all three rects."""
+	atlas, key, comp = _build_three_rect_atlas(use_rect_helper=False)
+
+	# One fill() call → one layer in the composite.
+	assert len(comp) == 1
+
+	shape = atlas.get_shape(key)
+	assert shape is not None
+
+	# Union bbox: x spans 0.1→0.9 (width 0.8), y spans 0.25→0.75 (height 0.5).
+	assert shape.width  == pytest.approx(0.8, abs=1e-4)
+	assert shape.height == pytest.approx(0.5, abs=1e-4)
+
+	# Render and confirm non-zero coverage (shape is actually filled, not empty).
+	grid = atlas.decode(key).render_grid(32, 0.0, True)
+	assert float(grid.max()) > 0.5, "compound shape must have high coverage inside rects"
+
+
+def test_multi_subpath_rect_helper():
+	"""Three canvas.rect() calls after begin_path() must accumulate — BUG-1 regression."""
+	atlas, key, comp = _build_three_rect_atlas(use_rect_helper=True)
+
+	# Same assertions as the raw-command version — results must be identical.
+	assert len(comp) == 1
+
+	shape = atlas.get_shape(key)
+	assert shape is not None
+
+	assert shape.width  == pytest.approx(0.8, abs=1e-4)
+	assert shape.height == pytest.approx(0.5, abs=1e-4)
+
+	grid = atlas.decode(key).render_grid(32, 0.0, True)
+	assert float(grid.max()) > 0.5, "rect() helpers must accumulate sub-paths, not wipe them"
+
+
+def test_add_path_with_transform():
+	"""addPath(path, transform) stamps a path at three positions — BUG-2 regression."""
+	atlas  = slughorn.Atlas()
+	canvas = slughorn.canvas.Canvas(atlas)
+
+	# A single 0.2 x 0.5 rect authored at the origin.
+	rect = slughorn.canvas.Path()
+	rect.move_to(0.0,  0.0)
+	rect.line_to(0.2,  0.0)
+	rect.line_to(0.2,  0.5)
+	rect.line_to(0.0,  0.5)
+	rect.close_path()
+
+	# Stamp it three times via translate transforms — same geometry as the multi-subpath tests.
+	canvas.begin_path()
+	canvas.add_path(rect, slughorn.Matrix.translate(0.1, 0.25))
+	canvas.add_path(rect, slughorn.Matrix.translate(0.4, 0.25))
+	canvas.add_path(rect, slughorn.Matrix.translate(0.7, 0.25))
+
+	key  = canvas.fill(slughorn.Color(1, 1, 1, 1), 1.0, "add_path_xform")
+	comp = canvas.finalize()
+
+	atlas.add_composite_shape(slughorn.Key("add_path_xform_comp"), comp)
+	atlas.build()
+
+	assert len(comp) == 1
+
+	shape = atlas.get_shape(key)
+	assert shape is not None
+
+	# Union bbox must match the three-rect tests: width=0.8, height=0.5.
+	assert shape.width  == pytest.approx(0.8, abs=1e-4)
+	assert shape.height == pytest.approx(0.5, abs=1e-4)
+
+	grid = atlas.decode(key).render_grid(32, 0.0, True)
+	assert float(grid.max()) > 0.5, "addPath(path, transform) must place geometry at correct positions"

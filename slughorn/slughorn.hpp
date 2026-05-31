@@ -91,6 +91,9 @@ struct Matrix {
 	slug_t dx = 0_cv, dy = 0_cv; // translation
 
 	static Matrix identity() { return {}; }
+	static Matrix translate(slug_t tx, slug_t ty) { Matrix m; m.dx = tx; m.dy = ty; return m; }
+	static Matrix scale(slug_t sx, slug_t sy) { Matrix m; m.xx = sx; m.yy = sy; return m; }
+	static Matrix rotate(slug_t angle) { const slug_t c = std::cos(angle), s = std::sin(angle); Matrix m; m.xx = c; m.xy = -s; m.yx = s; m.yy = c; return m; }
 
 	bool isIdentity() const {
 		constexpr slug_t eps = 1e-6_cv;
