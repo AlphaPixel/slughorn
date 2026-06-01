@@ -158,12 +158,12 @@ inline std::ostream& operator<<(std::ostream& os, const Transform& t) {
 //
 // The transform matrix encodes gradient geometry in local em-space:
 //
-// Linear:       t = m.xx * emX + m.xy * emY + m.dx (build with buildLinearGradientMatrix)
-// Radial:       m.dx/dy = center; m.xx = outerRadius; innerRadius field = inner radius
-//               t = (length(emCoord - center) - innerRadius) / (outerRadius - innerRadius)
-//               (build with buildRadialGradientMatrix; set innerRadius separately)
+// Linear: t = m.xx * emX + m.xy * emY + m.dx (build with buildLinearGradientMatrix)
+// Radial: m.dx/dy = center; m.xx = outerRadius; innerRadius field = inner radius
+//         t = (length(emCoord - center) - innerRadius) / (outerRadius - innerRadius)
+//         (build with buildRadialGradientMatrix; set innerRadius separately)
 // AffineRadial: m.dx/dy = center; m.xx/xy/yx/yy = 2x2 inverse affine B matrix
-//               t = length(B * (emCoord - center)) - innerRadius  (innerRadius in B-space)
+//               t = length(B * (emCoord - center)) - innerRadius (innerRadius in B-space)
 //               (build with buildAffineRadialGradientMatrix; innerRadius usually 0)
 //               B maps em-space deltas back to normalized gradient space; length(B*d)=1 at outer ellipse.
 // ================================================================================================
@@ -212,9 +212,9 @@ class Atlas;
 //
 // Discriminated union identifying a shape or composite shape in the Atlas. Two flavors:
 //
-// Key(uint32_t cp)         - a Unicode codepoint (or any uint32_t ID).
-// Key(const std::string&)  - a named shape / composite ("logo", "axolotl", ...)
-// Key(const char*)         - string-literal convenience overload.
+// Key(uint32_t cp) - a Unicode codepoint (or any uint32_t ID).
+// Key(const std::string&) - a named shape / composite ("logo", "axolotl", ...)
+// Key(const char*) - string-literal convenience overload.
 //
 // The hash is computed once at construction and stored; KeyHash just returns it. operator== uses
 // the hash as a fast pre-check, then falls back to value comparison. The two namespaces are kept
@@ -330,6 +330,11 @@ struct Layer {
 	// gradient list (registered via addGradient()). When non-zero, layer.color.rgb is ignored and
 	// layer.color.a acts as a global opacity multiplier.
 	uint32_t gradientId = 0;
+
+	// Extra em-space margin added to the quad on each side (and subtracted/added to em-coords).
+	// The default (0.01) prevents gap artifacts at quad boundaries. Set to 0 for shapes that
+	// use setAutoMetrics(false) so that em-coords stay exactly in [0,1] for GPU tiling.
+	slug_t expand = 0.01_cv;
 };
 
 // ================================================================================================

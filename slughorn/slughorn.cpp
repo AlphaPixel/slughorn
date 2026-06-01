@@ -389,8 +389,8 @@ void Atlas::setShapeMetrics(const Key& key, slug_t bearingX, slug_t bearingY, sl
 
 	m.bearingX = bearingX;
 	m.bearingY = bearingY;
-	m.width    = width;
-	m.height   = height;
+	m.width = width;
+	m.height = height;
 }
 #endif
 
@@ -637,6 +637,21 @@ void Atlas::buildShapeBands(
 	}
 
 	build.metrics.origin = origin;
+
+	// When metrics are overridden, use the declared extent as the band spatial range so that
+	// band transforms and indirection tables are consistent with the layout bounds, not the
+	// tight curve bbox. This is required for correct coverage outside the curve bbox (e.g. tiling).
+	if(overrideMetrics) {
+		minX = build.metrics.bearingX;
+		maxX = build.metrics.bearingX + build.metrics.width;
+		minY = build.metrics.bearingY - build.metrics.height;
+		maxY = build.metrics.bearingY;
+		rangeX = build.metrics.width;
+		rangeY = build.metrics.height;
+
+		if(rangeX < 1e-6_cv) rangeX = 1e-6_cv;
+		if(rangeY < 1e-6_cv) rangeY = 1e-6_cv;
+	}
 
 	// --------------------------------------------------------------------------------------------
 	// Band transform
