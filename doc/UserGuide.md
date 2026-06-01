@@ -1986,10 +1986,6 @@ print(sample.fill)
 all decoded curves (the reference path); `render_sample_banded` mirrors the actual GPU
 shader path, and is what `render_grid` uses by default.
 
-> `slughorn.render` will eventually be promoted to a first-class C++ interface
-> (`slughorn/render.hpp`), at which point the Python submodule will simply wrap that
-> — the Python API will not change.
-
 ### slughorn.canvas
 
 The HTML Canvas-style drawing context, identical in capability to the C++ `Canvas`
@@ -2462,6 +2458,118 @@ The key lesson from the clock: `Origin::Centered` (or a custom `Origin` at the
 shared pivot) makes all layers in the composite share the same `transform.x`/`y`,
 so `computeQuad` places all quads around the same world point without any manual
 coordinate arithmetic.
+
+# CPU Rendering
+
+`slughorn/render.hpp` is a pure C++ port of the GPU coverage formula — the same analytic
+Slug algorithm that runs in the fragment shader, re-implemented for the CPU. It has no
+GPU dependency and no Python dependency; it is a standalone header.
+
+## What It Is
+
+`render.hpp` exposes three types in the `slughorn::render` namespace:
+
+| Type | Purpose |
+|---|---|
+| `Sample` | Result of evaluating coverage at a single (x, y) point |
+| `Sampler` | Per-shape decoding context; owns the reconstructed curve list |
+| `Grid` | Row-major `float` grid returned by `renderGrid()` |
+
+A `Sampler` is created by calling one of two `decode()` overloads:
+
+```cpp
+#include "slughorn/render.hpp"
+
+// Primary overload — requires a fully-built atlas
+slughorn::render::Sampler s = slughorn::render::decode(atlas, key);
+
+// Serial overload — reconstructs from raw texture data; no full atlas needed
+slughorn::render::Sampler s = slughorn::render::decode(shape, curveTex, bandTex);
+```
+
+Once you have a `Sampler`, you can render:
+
+```cpp
+// Single point — returns a Sample with fill, xcov, ycov, xwgt, ywgt, iters
+slughorn::render::Sample p = s.renderSample(x, y);
+
+// Single point using band-accelerated path (faster on glyphs with many bands)
+slughorn::render::Sample p = s.renderSampleBanded(x, y);
+
+// Full grid — returns a Grid (row-major float vector, width×height)
+slughorn::render::Grid g = s.renderGrid(width, height);
+
+// Access a pixel: row = y, col = x
+float coverage = g.at(row, col);
+```
+## What It's For
+
+**Primary use cases:**
+
+- **Debugging band placement.** Render a shape CPU-side and overlay the band boundaries to
+  see exactly what the GPU sees. The `bin/slughorn svg` subcommand uses this path.
+- **Testing.** `test/slughorn-test-render` uses `renderGrid()` to verify that shapes produce
+  non-zero coverage and produce recognizable ASCII art — a fast sanity check with no GPU.
+- **Advanced Processing.** The curve data reconstructed by `decode()` is the
+  same data stored directly on `Atlas::Shape::curves` (populated at `build()` time and
+  at `serial::read()` time). Both C++ and Python callers can access raw glyph geometry
+  without re-running a font backend.
+
+**Future use cases:**
+
+- **SDF generation.** Phase 2 of the SDF plan adds `Sampler::renderSdf()` — renders at N×
+  tile resolution, applies a distance transform, and returns a normalized float grid suitable
+  for packing into an SDF atlas. The CPU render path is the correct source: it uses the exact
+  same formula as the GPU shader, so SDF quality is guaranteed to match the analytic result.
+- **MSDF.** If single-channel SDF ever proves insufficient, the `Sampler::curves` field
+  (reconstructed contour list) is the input `msdfgen` needs. No separate curve ingestion step
+  is required.
+
+## Python Surface
+
+The `slughorn.render` submodule wraps `render.hpp` directly. The API is unchanged from
+before the C++ extraction — the speedup (0.8–1.0 s → 0.118 s per shape) is a side-effect
+of moving the hot coverage loop out of pybind11's shadow, where the compiler can vectorize it.
+
+```python
+import slughorn
+import slughorn.render as sr
+
+atlas = slughorn.Atlas()
+# ... load shapes, build ...
+
+sampler = atlas.decode(key) # → slughorn.render.Sampler
+grid = sampler.render_grid(64) # → float32 numpy array, shape (64, 64)
+sample = sampler.render_sample(0.5, 0.5) # → slughorn.render.Sample
+print(sample.fill, sample.xcov, sample.ycov)
+```
+`atlas.decode(key)` is the Python spelling of `slughorn::render::decode(atlas, key)`.
+
+## `Atlas::Shape::curves`
+
+Raw em-space curves are stored permanently on every `Atlas::Shape` after `build()` or
+`serial::read()`:
+
+```cpp
+Atlas::Shape shape = *atlas.getShape(key);
+// shape.curves is now always valid — no need to call decode() just to get geometry
+```
+Two public accessors expose this at the Atlas level, working at any point in the build lifecycle:
+
+```cpp
+// Flat list — all contours in sequence, no subpath markers.
+// Returns nullptr if the key is not registered.
+const Atlas::Curves* curves = atlas.getShapeCurves(key);
+
+// Pre-split into closed contours. Contour breaks are detected where
+// p3 of curve[i] != p1 of curve[i+1]. Always returns a vector (empty if not found).
+Atlas::Contours contours = atlas.getShapeContours(key);
+```
+Use `getShapeCurves` when passing data to a pixel-level rasterizer (order doesn't matter).
+Use `getShapeContours` when building a `Path` for stroking or filling — each contour must
+be handled independently to avoid phantom connector strokes across subpath breaks.
+
+`Canvas::strokeText()` uses `getShapeContours()` internally for exactly this reason.
 
 # Debugging & Diagnostics
 
