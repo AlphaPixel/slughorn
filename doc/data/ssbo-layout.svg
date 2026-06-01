@@ -1,0 +1,179 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 580" width="900" height="580">
+  <rect width="900" height="580" fill="#2E3440"/>
+
+  <!-- Title -->
+  <text x="20" y="28" font-size="14" font-weight="bold" fill="#ECEFF4" font-family="monospace">SSBO Vertex Layout</text>
+  <text x="220" y="28" font-size="12" fill="#4C566A" font-family="monospace">  SSBO path · 2 × vec4 vertex attrs + 2 SSBOs</text>
+
+  <!-- Legend -->
+  <rect x="20"  y="40" width="12" height="12" rx="2" fill="#4C6FA5"/>
+  <text x="36"  y="51" font-size="11" fill="#D8DEE9" font-family="sans-serif">Quad Geometry</text>
+  <rect x="175" y="40" width="12" height="12" rx="2" fill="#4A7A55"/>
+  <text x="191" y="51" font-size="11" fill="#D8DEE9" font-family="sans-serif">Slug Algorithm</text>
+  <rect x="330" y="40" width="12" height="12" rx="2" fill="#6B4A8A"/>
+  <text x="346" y="51" font-size="11" fill="#D8DEE9" font-family="sans-serif">Shading / Color</text>
+  <rect x="485" y="40" width="12" height="12" rx="2" fill="#8A4E32"/>
+  <text x="501" y="51" font-size="11" fill="#D8DEE9" font-family="sans-serif">Effects &amp; Interactivity</text>
+
+  <!-- Column headers -->
+  <text x="22"  y="73" font-size="10" fill="#4C566A" font-family="monospace" font-weight="bold">LOC</text>
+  <text x="62"  y="73" font-size="10" fill="#4C566A" font-family="monospace" font-weight="bold">ATTRIBUTE</text>
+  <text x="309" y="73" font-size="10" fill="#4C566A" font-family="monospace" font-weight="bold" text-anchor="middle">.x</text>
+  <text x="473" y="73" font-size="10" fill="#4C566A" font-family="monospace" font-weight="bold" text-anchor="middle">.y</text>
+  <text x="637" y="73" font-size="10" fill="#4C566A" font-family="monospace" font-weight="bold" text-anchor="middle">.z</text>
+  <text x="801" y="73" font-size="10" fill="#4C566A" font-family="monospace" font-weight="bold" text-anchor="middle">.w</text>
+  <line x1="10" y1="79" x2="890" y2="79" stroke="#3B4252" stroke-width="1"/>
+
+  <!-- ROW 0: a_position -->
+  <rect x="10" y="83" width="880" height="46" rx="3" fill="#313a4b"/>
+  <text x="28" y="111" font-size="20" font-weight="bold" fill="#4C566A" font-family="monospace">0</text>
+  <text x="60" y="103" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace">a_position</text>
+  <text x="60" y="117" font-size="9" fill="#4C566A" font-family="monospace">vec4</text>
+  <rect x="230" y="85" width="158" height="42" rx="3" fill="#4C6FA5"/>
+  <text x="238" y="97"  font-size="9" fill="#A0BEDD" font-family="monospace">.x</text>
+  <text x="309" y="112" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">pos.x</text>
+  <rect x="394" y="85" width="158" height="42" rx="3" fill="#4C6FA5"/>
+  <text x="402" y="97"  font-size="9" fill="#A0BEDD" font-family="monospace">.y</text>
+  <text x="473" y="112" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">pos.y</text>
+  <rect x="558" y="85" width="158" height="42" rx="3" fill="#4C6FA5"/>
+  <text x="566" y="97"  font-size="9" fill="#A0BEDD" font-family="monospace">.z</text>
+  <text x="637" y="112" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">pos.z</text>
+  <rect x="722" y="85" width="158" height="42" rx="3" fill="#8A4E32"/>
+  <text x="730" y="97"  font-size="9" fill="#D4906F" font-family="monospace">.w</text>
+  <text x="801" y="112" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">layer idx</text>
+
+  <!-- ROW 1: a_emCoord -->
+  <rect x="10" y="135" width="880" height="46" rx="3" fill="#2b3141"/>
+  <text x="28" y="163" font-size="20" font-weight="bold" fill="#4C566A" font-family="monospace">1</text>
+  <text x="60" y="155" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace">a_emCoord</text>
+  <text x="60" y="169" font-size="9" fill="#4C566A" font-family="monospace">vec4</text>
+  <rect x="230" y="137" width="158" height="42" rx="3" fill="#4A7A55"/>
+  <text x="238" y="149" font-size="9" fill="#88BB99" font-family="monospace">.x</text>
+  <text x="309" y="164" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">em.x</text>
+  <rect x="394" y="137" width="158" height="42" rx="3" fill="#4A7A55"/>
+  <text x="402" y="149" font-size="9" fill="#88BB99" font-family="monospace">.y</text>
+  <text x="473" y="164" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">em.y</text>
+  <rect x="558" y="137" width="158" height="42" rx="3" fill="#8A4E32"/>
+  <text x="566" y="149" font-size="9" fill="#D4906F" font-family="monospace">.z</text>
+  <text x="637" y="164" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">uv.x</text>
+  <rect x="722" y="137" width="158" height="42" rx="3" fill="#8A4E32"/>
+  <text x="730" y="149" font-size="9" fill="#D4906F" font-family="monospace">.w</text>
+  <text x="801" y="164" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">uv.y</text>
+
+  <!-- SSBO section divider -->
+  <line x1="10" y1="189" x2="890" y2="189" stroke="#4C566A" stroke-width="1" stroke-dasharray="4,3"/>
+  <rect x="10" y="193" width="435" height="22" rx="3" fill="#252C3A"/>
+  <text x="227" y="208" font-size="10" font-weight="bold" fill="#7A8A9A" font-family="monospace" text-anchor="middle">STATIC SSBO  ·  binding 0  ·  AtlasShapeData</text>
+  <rect x="451" y="193" width="439" height="22" rx="3" fill="#252C3A"/>
+  <text x="670" y="208" font-size="10" font-weight="bold" fill="#7A8A9A" font-family="monospace" text-anchor="middle">DYNAMIC SSBO  ·  binding 1  ·  LayerData</text>
+  <line x1="445" y1="189" x2="445" y2="575" stroke="#4C566A" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <!-- STATIC SSBO rows (left half) -->
+
+  <!-- bandXform -->
+  <rect x="10" y="221" width="430" height="46" rx="3" fill="#313a4b"/>
+  <text x="60" y="241" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace">bandXform</text>
+  <text x="60" y="255" font-size="9" fill="#4C566A" font-family="monospace">vec4  flat</text>
+  <rect x="168" y="223" width="60" height="42" rx="3" fill="#4A7A55"/>
+  <text x="174" y="235" font-size="9" fill="#88BB99" font-family="monospace">.x</text>
+  <text x="198" y="250" font-size="11" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">scale.x</text>
+  <rect x="233" y="223" width="60" height="42" rx="3" fill="#4A7A55"/>
+  <text x="239" y="235" font-size="9" fill="#88BB99" font-family="monospace">.y</text>
+  <text x="263" y="250" font-size="11" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">scale.y</text>
+  <rect x="298" y="223" width="66" height="42" rx="3" fill="#4A7A55"/>
+  <text x="304" y="235" font-size="9" fill="#88BB99" font-family="monospace">.z</text>
+  <text x="331" y="250" font-size="11" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">off.x</text>
+  <rect x="369" y="223" width="66" height="42" rx="3" fill="#4A7A55"/>
+  <text x="375" y="235" font-size="9" fill="#88BB99" font-family="monospace">.w</text>
+  <text x="402" y="250" font-size="11" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">off.y</text>
+
+  <!-- shapeData -->
+  <rect x="10" y="273" width="430" height="46" rx="3" fill="#2b3141"/>
+  <text x="60" y="293" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace">shapeData</text>
+  <text x="60" y="307" font-size="9" fill="#4C566A" font-family="monospace">vec4  flat</text>
+  <rect x="168" y="275" width="60" height="42" rx="3" fill="#4A7A55"/>
+  <text x="174" y="287" font-size="9" fill="#88BB99" font-family="monospace">.x</text>
+  <text x="198" y="302" font-size="11" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">atl.x</text>
+  <rect x="233" y="275" width="60" height="42" rx="3" fill="#4A7A55"/>
+  <text x="239" y="287" font-size="9" fill="#88BB99" font-family="monospace">.y</text>
+  <text x="263" y="302" font-size="11" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">atl.y</text>
+  <rect x="298" y="275" width="66" height="42" rx="3" fill="#4A7A55"/>
+  <text x="304" y="287" font-size="9" fill="#88BB99" font-family="monospace">.z</text>
+  <text x="331" y="302" font-size="11" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">bnd.x</text>
+  <rect x="369" y="275" width="66" height="42" rx="3" fill="#4A7A55"/>
+  <text x="375" y="287" font-size="9" fill="#88BB99" font-family="monospace">.w</text>
+  <text x="402" y="302" font-size="11" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">bnd.y</text>
+
+  <!-- DYNAMIC SSBO rows (right half) -->
+
+  <!-- color -->
+  <rect x="451" y="221" width="439" height="46" rx="3" fill="#313a4b"/>
+  <text x="460" y="241" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace">color</text>
+  <text x="460" y="255" font-size="9" fill="#4C566A" font-family="monospace">vec4</text>
+  <rect x="560" y="223" width="76" height="42" rx="3" fill="#6B4A8A"/>
+  <text x="566" y="235" font-size="9" fill="#B08ED0" font-family="monospace">.x</text>
+  <text x="598" y="250" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">R</text>
+  <rect x="641" y="223" width="76" height="42" rx="3" fill="#6B4A8A"/>
+  <text x="647" y="235" font-size="9" fill="#B08ED0" font-family="monospace">.y</text>
+  <text x="679" y="250" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">G</text>
+  <rect x="722" y="223" width="76" height="42" rx="3" fill="#6B4A8A"/>
+  <text x="728" y="235" font-size="9" fill="#B08ED0" font-family="monospace">.z</text>
+  <text x="760" y="250" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">B</text>
+  <rect x="803" y="223" width="76" height="42" rx="3" fill="#6B4A8A"/>
+  <text x="809" y="235" font-size="9" fill="#B08ED0" font-family="monospace">.w</text>
+  <text x="841" y="250" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">A</text>
+
+  <!-- gradientMeta -->
+  <rect x="451" y="273" width="439" height="46" rx="3" fill="#2b3141"/>
+  <text x="460" y="293" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace">gradientMeta</text>
+  <text x="460" y="307" font-size="9" fill="#4C566A" font-family="monospace">vec4</text>
+  <rect x="560" y="275" width="76" height="42" rx="3" fill="#6B4A8A"/>
+  <text x="566" y="287" font-size="9" fill="#B08ED0" font-family="monospace">.x</text>
+  <text x="598" y="302" font-size="11" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">grad id</text>
+  <rect x="641" y="275" width="76" height="42" rx="3" fill="#6B4A8A"/>
+  <text x="647" y="287" font-size="9" fill="#B08ED0" font-family="monospace">.y</text>
+  <text x="679" y="302" font-size="11" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">ctr.x</text>
+  <rect x="722" y="275" width="76" height="42" rx="3" fill="#6B4A8A"/>
+  <text x="728" y="287" font-size="9" fill="#B08ED0" font-family="monospace">.z</text>
+  <text x="760" y="302" font-size="11" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">ctr.y</text>
+  <rect x="803" y="275" width="76" height="42" rx="3" fill="#6B4A8A"/>
+  <text x="809" y="287" font-size="9" fill="#B08ED0" font-family="monospace">.w</text>
+  <text x="841" y="302" font-size="11" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">r0 norm</text>
+
+  <!-- gradientXform -->
+  <rect x="451" y="325" width="439" height="46" rx="3" fill="#313a4b"/>
+  <text x="460" y="345" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace">gradientXform</text>
+  <text x="460" y="359" font-size="9" fill="#4C566A" font-family="monospace">vec4</text>
+  <rect x="560" y="327" width="76" height="42" rx="3" fill="#6B4A8A"/>
+  <text x="566" y="339" font-size="9" fill="#B08ED0" font-family="monospace">.x</text>
+  <text x="598" y="354" font-size="11" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">xfm.x</text>
+  <rect x="641" y="327" width="76" height="42" rx="3" fill="#6B4A8A"/>
+  <text x="647" y="339" font-size="9" fill="#B08ED0" font-family="monospace">.y</text>
+  <text x="679" y="354" font-size="11" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">xfm.y</text>
+  <rect x="722" y="327" width="76" height="42" rx="3" fill="#6B4A8A"/>
+  <text x="728" y="339" font-size="9" fill="#B08ED0" font-family="monospace">.z</text>
+  <text x="760" y="354" font-size="11" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">xfm.z</text>
+  <rect x="803" y="327" width="76" height="42" rx="3" fill="#6B4A8A"/>
+  <text x="809" y="339" font-size="9" fill="#B08ED0" font-family="monospace">.w</text>
+  <text x="841" y="354" font-size="11" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">0 / + / −</text>
+
+  <!-- effectData -->
+  <rect x="451" y="377" width="439" height="46" rx="3" fill="#2b3141"/>
+  <text x="460" y="397" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace">effectData</text>
+  <text x="460" y="411" font-size="9" fill="#4C566A" font-family="monospace">vec4</text>
+  <rect x="560" y="379" width="76" height="42" rx="3" fill="#8A4E32"/>
+  <text x="566" y="391" font-size="9" fill="#D4906F" font-family="monospace">.x</text>
+  <text x="598" y="406" font-size="11" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">eff id</text>
+  <rect x="641" y="379" width="76" height="42" rx="3" fill="#8A4E32"/>
+  <text x="647" y="391" font-size="9" fill="#D4906F" font-family="monospace">.y</text>
+  <text x="679" y="406" font-size="11" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">sh.idx</text>
+  <rect x="722" y="379" width="76" height="42" rx="3" fill="#8A4E32" fill-opacity="0.45"/>
+  <text x="728" y="391" font-size="9" fill="#D4906F" font-family="monospace">.z</text>
+  <text x="760" y="406" font-size="11" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">rsvd</text>
+  <rect x="803" y="379" width="76" height="42" rx="3" fill="#8A4E32" fill-opacity="0.45"/>
+  <text x="809" y="391" font-size="9" fill="#D4906F" font-family="monospace">.w</text>
+  <text x="841" y="406" font-size="11" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">param</text>
+
+  <!-- Footer -->
+  <text x="20" y="566" font-size="9" fill="#4C566A" font-family="monospace">Static SSBO: per-shape atlas/band data, written once at compile().  Dynamic SSBO: per-layer appearance, writable by CPU or compute shader at any time.</text>
+</svg>

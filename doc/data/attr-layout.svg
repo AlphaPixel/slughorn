@@ -1,0 +1,173 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 530" width="900" height="530">
+  <rect width="900" height="530" fill="#2E3440"/>
+
+  <!-- Title -->
+  <text x="20" y="28" font-size="14" font-weight="bold" fill="#ECEFF4" font-family="monospace">Vertex Attribute Layout</text>
+  <text x="252" y="28" font-size="12" fill="#4C566A" font-family="monospace">  GL 3.3 core · 8 × vec4 slots</text>
+
+  <!-- Legend -->
+  <rect x="20"  y="40" width="12" height="12" rx="2" fill="#4C6FA5"/>
+  <text x="36"  y="51" font-size="11" fill="#D8DEE9" font-family="sans-serif">Quad Geometry</text>
+  <rect x="175" y="40" width="12" height="12" rx="2" fill="#4A7A55"/>
+  <text x="191" y="51" font-size="11" fill="#D8DEE9" font-family="sans-serif">Slug Algorithm</text>
+  <rect x="330" y="40" width="12" height="12" rx="2" fill="#6B4A8A"/>
+  <text x="346" y="51" font-size="11" fill="#D8DEE9" font-family="sans-serif">Shading / Color</text>
+  <rect x="485" y="40" width="12" height="12" rx="2" fill="#8A4E32"/>
+  <text x="501" y="51" font-size="11" fill="#D8DEE9" font-family="sans-serif">Effects &amp; Interactivity</text>
+
+  <!-- Column headers -->
+  <text x="22"  y="73" font-size="10" fill="#4C566A" font-family="monospace" font-weight="bold">LOC</text>
+  <text x="62"  y="73" font-size="10" fill="#4C566A" font-family="monospace" font-weight="bold">ATTRIBUTE</text>
+  <text x="309" y="73" font-size="10" fill="#4C566A" font-family="monospace" font-weight="bold" text-anchor="middle">.x</text>
+  <text x="473" y="73" font-size="10" fill="#4C566A" font-family="monospace" font-weight="bold" text-anchor="middle">.y</text>
+  <text x="637" y="73" font-size="10" fill="#4C566A" font-family="monospace" font-weight="bold" text-anchor="middle">.z</text>
+  <text x="801" y="73" font-size="10" fill="#4C566A" font-family="monospace" font-weight="bold" text-anchor="middle">.w</text>
+  <line x1="10" y1="79" x2="890" y2="79" stroke="#3B4252" stroke-width="1"/>
+
+  <!-- ROW 0: a_position -->
+  <rect x="10" y="83" width="880" height="46" rx="3" fill="#313a4b"/>
+  <text x="28" y="111" font-size="20" font-weight="bold" fill="#4C566A" font-family="monospace">0</text>
+  <text x="60" y="103" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace">a_position</text>
+  <text x="60" y="117" font-size="9" fill="#4C566A" font-family="monospace">vec4</text>
+  <rect x="230" y="85" width="158" height="42" rx="3" fill="#4C6FA5"/>
+  <text x="238" y="97"  font-size="9" fill="#A0BEDD" font-family="monospace">.x</text>
+  <text x="309" y="112" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">pos.x</text>
+  <rect x="394" y="85" width="158" height="42" rx="3" fill="#4C6FA5"/>
+  <text x="402" y="97"  font-size="9" fill="#A0BEDD" font-family="monospace">.y</text>
+  <text x="473" y="112" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">pos.y</text>
+  <rect x="558" y="85" width="158" height="42" rx="3" fill="#4C6FA5"/>
+  <text x="566" y="97"  font-size="9" fill="#A0BEDD" font-family="monospace">.z</text>
+  <text x="637" y="112" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">pos.z</text>
+  <rect x="722" y="85" width="158" height="42" rx="3" fill="#8A4E32"/>
+  <text x="730" y="97"  font-size="9" fill="#D4906F" font-family="monospace">.w</text>
+  <text x="801" y="112" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">layer idx</text>
+
+  <!-- ROW 1: a_color -->
+  <rect x="10" y="135" width="880" height="46" rx="3" fill="#2b3141"/>
+  <text x="28" y="163" font-size="20" font-weight="bold" fill="#4C566A" font-family="monospace">1</text>
+  <text x="60" y="155" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace">a_color</text>
+  <text x="60" y="169" font-size="9" fill="#4C566A" font-family="monospace">vec4</text>
+  <rect x="230" y="137" width="158" height="42" rx="3" fill="#6B4A8A"/>
+  <text x="238" y="149" font-size="9" fill="#B08ED0" font-family="monospace">.x</text>
+  <text x="309" y="164" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">R</text>
+  <rect x="394" y="137" width="158" height="42" rx="3" fill="#6B4A8A"/>
+  <text x="402" y="149" font-size="9" fill="#B08ED0" font-family="monospace">.y</text>
+  <text x="473" y="164" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">G</text>
+  <rect x="558" y="137" width="158" height="42" rx="3" fill="#6B4A8A"/>
+  <text x="566" y="149" font-size="9" fill="#B08ED0" font-family="monospace">.z</text>
+  <text x="637" y="164" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">B</text>
+  <rect x="722" y="137" width="158" height="42" rx="3" fill="#6B4A8A"/>
+  <text x="730" y="149" font-size="9" fill="#B08ED0" font-family="monospace">.w</text>
+  <text x="801" y="164" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">A</text>
+
+  <!-- ROW 2: a_emCoord -->
+  <rect x="10" y="187" width="880" height="46" rx="3" fill="#313a4b"/>
+  <text x="28" y="215" font-size="20" font-weight="bold" fill="#4C566A" font-family="monospace">2</text>
+  <text x="60" y="207" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace">a_emCoord</text>
+  <text x="60" y="221" font-size="9" fill="#4C566A" font-family="monospace">vec4</text>
+  <rect x="230" y="189" width="158" height="42" rx="3" fill="#4A7A55"/>
+  <text x="238" y="201" font-size="9" fill="#88BB99" font-family="monospace">.x</text>
+  <text x="309" y="216" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">em.x</text>
+  <rect x="394" y="189" width="158" height="42" rx="3" fill="#4A7A55"/>
+  <text x="402" y="201" font-size="9" fill="#88BB99" font-family="monospace">.y</text>
+  <text x="473" y="216" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">em.y</text>
+  <rect x="558" y="189" width="158" height="42" rx="3" fill="#8A4E32"/>
+  <text x="566" y="201" font-size="9" fill="#D4906F" font-family="monospace">.z</text>
+  <text x="637" y="216" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">uv.x</text>
+  <rect x="722" y="189" width="158" height="42" rx="3" fill="#8A4E32"/>
+  <text x="730" y="201" font-size="9" fill="#D4906F" font-family="monospace">.w</text>
+  <text x="801" y="216" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">uv.y</text>
+
+  <!-- ROW 3: a_bandXform -->
+  <rect x="10" y="239" width="880" height="46" rx="3" fill="#2b3141"/>
+  <text x="28" y="267" font-size="20" font-weight="bold" fill="#4C566A" font-family="monospace">3</text>
+  <text x="60" y="259" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace">a_bandXform</text>
+  <text x="60" y="273" font-size="9" fill="#4C566A" font-family="monospace">vec4  flat</text>
+  <rect x="230" y="241" width="158" height="42" rx="3" fill="#4A7A55"/>
+  <text x="238" y="253" font-size="9" fill="#88BB99" font-family="monospace">.x</text>
+  <text x="309" y="268" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">scale.x</text>
+  <rect x="394" y="241" width="158" height="42" rx="3" fill="#4A7A55"/>
+  <text x="402" y="253" font-size="9" fill="#88BB99" font-family="monospace">.y</text>
+  <text x="473" y="268" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">scale.y</text>
+  <rect x="558" y="241" width="158" height="42" rx="3" fill="#4A7A55"/>
+  <text x="566" y="253" font-size="9" fill="#88BB99" font-family="monospace">.z</text>
+  <text x="637" y="268" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">offset.x</text>
+  <rect x="722" y="241" width="158" height="42" rx="3" fill="#4A7A55"/>
+  <text x="730" y="253" font-size="9" fill="#88BB99" font-family="monospace">.w</text>
+  <text x="801" y="268" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">offset.y</text>
+
+  <!-- ROW 4: a_shapeData -->
+  <rect x="10" y="291" width="880" height="46" rx="3" fill="#313a4b"/>
+  <text x="28" y="319" font-size="20" font-weight="bold" fill="#4C566A" font-family="monospace">4</text>
+  <text x="60" y="311" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace">a_shapeData</text>
+  <text x="60" y="325" font-size="9" fill="#4C566A" font-family="monospace">vec4  flat</text>
+  <rect x="230" y="293" width="158" height="42" rx="3" fill="#4A7A55"/>
+  <text x="238" y="305" font-size="9" fill="#88BB99" font-family="monospace">.x</text>
+  <text x="309" y="320" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">atlas.x</text>
+  <rect x="394" y="293" width="158" height="42" rx="3" fill="#4A7A55"/>
+  <text x="402" y="305" font-size="9" fill="#88BB99" font-family="monospace">.y</text>
+  <text x="473" y="320" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">atlas.y</text>
+  <rect x="558" y="293" width="158" height="42" rx="3" fill="#4A7A55"/>
+  <text x="566" y="305" font-size="9" fill="#88BB99" font-family="monospace">.z</text>
+  <text x="637" y="320" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">bands.x</text>
+  <rect x="722" y="293" width="158" height="42" rx="3" fill="#4A7A55"/>
+  <text x="730" y="305" font-size="9" fill="#88BB99" font-family="monospace">.w</text>
+  <text x="801" y="320" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">bands.y</text>
+
+  <!-- ROW 5: a_effectData -->
+  <rect x="10" y="343" width="880" height="46" rx="3" fill="#2b3141"/>
+  <text x="28" y="371" font-size="20" font-weight="bold" fill="#4C566A" font-family="monospace">5</text>
+  <text x="60" y="363" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace">a_effectData</text>
+  <text x="60" y="377" font-size="9" fill="#4C566A" font-family="monospace">vec4</text>
+  <rect x="230" y="345" width="158" height="42" rx="3" fill="#8A4E32"/>
+  <text x="238" y="357" font-size="9" fill="#D4906F" font-family="monospace">.x</text>
+  <text x="309" y="372" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">effect id</text>
+  <rect x="394" y="345" width="158" height="42" rx="3" fill="#8A4E32"/>
+  <text x="402" y="357" font-size="9" fill="#D4906F" font-family="monospace">.y</text>
+  <text x="473" y="372" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">origin.x</text>
+  <rect x="558" y="345" width="158" height="42" rx="3" fill="#8A4E32"/>
+  <text x="566" y="357" font-size="9" fill="#D4906F" font-family="monospace">.z</text>
+  <text x="637" y="372" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">origin.y</text>
+  <rect x="722" y="345" width="158" height="42" rx="3" fill="#8A4E32" fill-opacity="0.45"/>
+  <text x="730" y="357" font-size="9" fill="#D4906F" font-family="monospace">.w</text>
+  <text x="801" y="372" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">param</text>
+
+  <!-- ROW 6: a_gradientMeta -->
+  <rect x="10" y="395" width="880" height="46" rx="3" fill="#313a4b"/>
+  <text x="28" y="423" font-size="20" font-weight="bold" fill="#4C566A" font-family="monospace">6</text>
+  <text x="60" y="415" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace">a_gradientMeta</text>
+  <text x="60" y="429" font-size="9" fill="#4C566A" font-family="monospace">vec4</text>
+  <rect x="230" y="397" width="158" height="42" rx="3" fill="#6B4A8A"/>
+  <text x="238" y="409" font-size="9" fill="#B08ED0" font-family="monospace">.x</text>
+  <text x="309" y="424" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">grad id</text>
+  <rect x="394" y="397" width="158" height="42" rx="3" fill="#6B4A8A"/>
+  <text x="402" y="409" font-size="9" fill="#B08ED0" font-family="monospace">.y</text>
+  <text x="473" y="424" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">center.x</text>
+  <rect x="558" y="397" width="158" height="42" rx="3" fill="#6B4A8A"/>
+  <text x="566" y="409" font-size="9" fill="#B08ED0" font-family="monospace">.z</text>
+  <text x="637" y="424" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">center.y</text>
+  <rect x="722" y="397" width="158" height="42" rx="3" fill="#6B4A8A"/>
+  <text x="730" y="409" font-size="9" fill="#B08ED0" font-family="monospace">.w</text>
+  <text x="801" y="424" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">r0 norm</text>
+
+  <!-- ROW 7: a_gradientXform -->
+  <rect x="10" y="447" width="880" height="46" rx="3" fill="#2b3141"/>
+  <text x="28" y="475" font-size="20" font-weight="bold" fill="#4C566A" font-family="monospace">7</text>
+  <text x="60" y="467" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace">a_gradientXform</text>
+  <text x="60" y="481" font-size="9" fill="#4C566A" font-family="monospace">vec4</text>
+  <rect x="230" y="449" width="158" height="42" rx="3" fill="#6B4A8A"/>
+  <text x="238" y="461" font-size="9" fill="#B08ED0" font-family="monospace">.x</text>
+  <text x="309" y="476" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">xform.x</text>
+  <rect x="394" y="449" width="158" height="42" rx="3" fill="#6B4A8A"/>
+  <text x="402" y="461" font-size="9" fill="#B08ED0" font-family="monospace">.y</text>
+  <text x="473" y="476" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">xform.y</text>
+  <rect x="558" y="449" width="158" height="42" rx="3" fill="#6B4A8A"/>
+  <text x="566" y="461" font-size="9" fill="#B08ED0" font-family="monospace">.z</text>
+  <text x="637" y="476" font-size="12" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">xform.z</text>
+  <rect x="722" y="449" width="158" height="42" rx="3" fill="#6B4A8A"/>
+  <text x="730" y="461" font-size="9" fill="#B08ED0" font-family="monospace">.w</text>
+  <text x="801" y="476" font-size="11" font-weight="bold" fill="#ECEFF4" font-family="monospace" text-anchor="middle">0 / + / −</text>
+
+  <!-- Footer note -->
+  <text x="20" y="516" font-size="9" fill="#4C566A" font-family="monospace">flat = provoking-vertex value, not interpolated.  dim .w on loc 5 = unused spare param slot.</text>
+</svg>

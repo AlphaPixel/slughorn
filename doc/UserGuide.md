@@ -1741,7 +1741,7 @@ empty interior.
 With uniform band placement, the indirection grid divides the shape evenly — placing
 band boundaries straight through the center regardless of whether any curves live there:
 
-![Uniform band placement on a stroked rounded rectangle](uniform-bands.png)
+![Uniform band placement on a stroked rounded rectangle](data/uniform-bands.png)
 
 That empty center is a missed opportunity. Every fragment landing there still performs
 a band lookup and curve-list traversal, even though the result will always be zero
@@ -1774,7 +1774,7 @@ canvas.setSplits(splitsX, splitsY);
 
 The resulting 9×9 grid looks like this:
 
-![Geometry-aware band placement on a stroked rounded rectangle](custom-bands.png)
+![Geometry-aware band placement on a stroked rounded rectangle](data/custom-bands.png)
 
 The inner and outer arcs at each corner sit in their own dedicated cells. The straight
 stroke sides are confined to the thin edge bands. The large empty center — covering the
@@ -2155,7 +2155,7 @@ Two rendering paths are supported in `osgSlug`:
 
 ## The SSBO Path (Default)
 
-![SSBO layout](ssbo-layout.svg)
+![SSBO layout](data/ssbo-layout.svg)
 
 The SSBO path splits per-shape data across two shader storage buffers bound at
 different points. The key insight is that some data is **atlas-static** (fixed once
@@ -2239,7 +2239,7 @@ for(const slughorn::Layer& layer : compositeShape.layers) {
 
 ## The GL3 Path
 
-![Vertex attribute layout](attr-layout.svg)
+![Vertex attribute layout](data/attr-layout.svg)
 
 The GL3 path replicates all per-shape data as per-vertex attributes instead of using
 SSBO buffers. It is the correct choice for GL 3.x hardware or when SSBO support is
@@ -2515,16 +2515,6 @@ float coverage = g.at(row, col);
   at `serial::read()` time). Both C++ and Python callers can access raw glyph geometry
   without re-running a font backend.
 
-**Future use cases:**
-
-- **SDF generation.** Phase 2 of the SDF plan adds `Sampler::renderSdf()` — renders at N×
-  tile resolution, applies a distance transform, and returns a normalized float grid suitable
-  for packing into an SDF atlas. The CPU render path is the correct source: it uses the exact
-  same formula as the GPU shader, so SDF quality is guaranteed to match the analytic result.
-- **MSDF.** If single-channel SDF ever proves insufficient, the `Sampler::curves` field
-  (reconstructed contour list) is the input `msdfgen` needs. No separate curve ingestion step
-  is required.
-
 ## Python Surface
 
 The `slughorn.render` submodule wraps `render.hpp` directly. The API is unchanged from
@@ -2738,7 +2728,7 @@ cursor drift from accumulating across a long text run at small sizes.
 OSGSLUG_TEXT_PIXEL_ALIGN=1 ./my-osgslug-app
 ```
 
-![Text pixel alignment comparison](text-pixel-align.png)
+![Text pixel alignment comparison](data/text-pixel-align.png)
 
 *Each panel shows osgSlug text (top) positioned directly above the equivalent gnome-terminal
 output (bottom) for direct comparison. Mode 0: no snapping — sub-pixel drift accumulates

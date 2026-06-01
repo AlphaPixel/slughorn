@@ -3,7 +3,7 @@
 \vspace*{\fill}
 
 \begin{center}
-\includegraphics[width=0.65\textwidth]{logo.pdf}
+\includegraphics[width=0.65\textwidth]{data/logo.pdf}
 
 \vspace{2em}
 
