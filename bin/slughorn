@@ -265,15 +265,17 @@ def save_image(grid, filename: str, flip_y: bool=False) -> str:
 
 def build_curves_svg_string(
 	decoded,
+	atlas,
+	key,
 	scale: int=1024,
 	margin: float=0.0,
 	flip_y: bool=True,
 ) -> str:
-	shape = decoded.shape
-	curves = decoded.curves
-	indir_x = bytes(decoded.indir_x)
-	indir_y = bytes(decoded.indir_y)
+	shape    = decoded.shape
+	indir_x  = bytes(decoded.indir_x)
+	indir_y  = bytes(decoded.indir_y)
 	indir_size = len(indir_x)
+	contours = atlas.get_shape_contours(key)
 
 	w, h = compute_render_size(shape, scale)
 	xf = EmTransform(shape, w, h, margin)
@@ -320,22 +322,31 @@ def build_curves_svg_string(
 			f'stroke="{color}" fill="none" stroke-width="1" />'
 		)
 
-	for c in curves:
-		p1 = (c.x1, c.y1)
-		p2 = (c.x2, c.y2)
-		p3 = (c.x3, c.y3)
+	for contour in contours:
+		# One closed SVG path per contour (outer outline, counter, etc.)
+		parts = []
 
-		quad_path(p1, p2, p3, "#CCCCCC")
+		for i, (x1e, y1e, x2e, y2e, x3e, y3e) in enumerate(contour):
+			px1, py1 = em_to_px(x1e, y1e)
+			px2, py2 = em_to_px(x2e, y2e)
+			px3, py3 = em_to_px(x3e, y3e)
 
-		px1, py1 = em_to_px(*p1)
-		px2, py2 = em_to_px(*p2)
-		px3, py3 = em_to_px(*p3)
+			if i == 0:
+				parts.append(f"M {px1},{py1}")
 
-		line(px1, py1, px2, py2, "#5050B4")
-		line(px2, py2, px3, py3, "#5050B4")
-		circle(px1, py1, 2, fill="#50DC50")
-		circle(px3, py3, 2, fill="#50DC50")
-		circle(px2, py2, 3, stroke="#6464FF")
+			parts.append(f"Q {px2},{py2} {px3},{py3}")
+
+			# Control point decorations
+			line(px1, py1, px2, py2, "#5050B4")
+			line(px2, py2, px3, py3, "#5050B4")
+			circle(px1, py1, 2, fill="#50DC50")
+			circle(px3, py3, 2, fill="#50DC50")
+			circle(px2, py2, 3, stroke="#6464FF")
+
+		parts.append("Z")
+		elements.append(
+			f'<path d="{" ".join(parts)}" stroke="#CCCCCC" fill="none" stroke-width="1" />'
+		)
 
 	ys = [
 		(q + 1 - shape.band_offset_y) / shape.band_scale_y
@@ -377,12 +388,14 @@ def build_curves_svg_string(
 
 def save_curves_svg(
 	decoded,
+	atlas,
+	key,
 	filename: str,
 	scale: int=1024,
 	margin: float=0.0,
 	flip_y: bool=True,
 ) -> str:
-	svg = build_curves_svg_string(decoded, scale=scale, margin=margin, flip_y=flip_y)
+	svg = build_curves_svg_string(decoded, atlas, key, scale=scale, margin=margin, flip_y=flip_y)
 
 	with open(filename, "w", encoding="utf-8") as f:
 		f.write(svg)
@@ -622,6 +635,8 @@ def command_svg(args) -> int:
 	with timer(args.time, "write"):
 		message = save_curves_svg(
 			decoded,
+			atlas,
+			key,
 			output,
 			scale=args.size,
 			margin=args.margin,

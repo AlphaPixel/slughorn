@@ -878,6 +878,47 @@ PYBIND11_MODULE(slughorn, m) {
 			"Accepts both Key objects and raw uint32_t codepoints."
 		)
 
+		.def("get_shape_curves",
+			[](const slughorn::Atlas& a, slughorn::Key key) -> py::object {
+				const auto* curves = a.getShapeCurves(key);
+
+				if(!curves) return py::none();
+
+				py::list result;
+
+				for(const auto& c : *curves)
+					result.append(py::make_tuple(c.x1, c.y1, c.x2, c.y2, c.x3, c.y3));
+
+				return result;
+			},
+			py::arg("key"),
+			"Return flat list of (x1,y1,x2,y2,x3,y3) curve tuples, or None if not found.\n"
+			"Works at any build lifecycle stage. Use when contour topology does not matter\n"
+			"(e.g. feeding a pixel rasterizer or the SDF pipeline)."
+		)
+
+		.def("get_shape_contours",
+			[](const slughorn::Atlas& a, slughorn::Key key) {
+				py::list result;
+
+				for(const auto& contour : a.getShapeContours(key)) {
+					py::list cl;
+
+					for(const auto& c : contour)
+						cl.append(py::make_tuple(c.x1, c.y1, c.x2, c.y2, c.x3, c.y3));
+
+					result.append(cl);
+				}
+
+				return result;
+			},
+			py::arg("key"),
+			"Return list of contours; each contour is a list of (x1,y1,x2,y2,x3,y3) tuples.\n"
+			"Contour breaks are detected where p3 of curve[i] != p1 of curve[i+1].\n"
+			"Returns an empty list if the key is not found. Use when building paths for\n"
+			"stroking or filling — each contour must be handled independently."
+		)
+
 		.def("get_composite_shape",
 			[](const slughorn::Atlas& a, slughorn::Key key)
 				-> std::optional<slughorn::CompositeShape>
@@ -1784,6 +1825,26 @@ PYBIND11_MODULE(slughorn, m) {
 				"vertical anchoring, and optional horizontal alignment internally.\n\n"
 				"anchor_y controls what y refers to (baseline, cap center, cap top, x-center).\n"
 				"align_x LEFT is single-pass; CENTER and RIGHT do a measure pass first."
+			)
+
+			.def("stroke_text",
+				&slughorn::canvas::Canvas::strokeText,
+				py::arg("s"),
+				py::arg("font_size"),
+				py::arg("stroke_width"),
+				py::arg("x"),
+				py::arg("y"),
+				py::arg("color"),
+				py::arg("metrics"),
+				py::arg("anchor_y") = slughorn::canvas::TextAnchorY::Baseline,
+				py::arg("align_x") = slughorn::canvas::TextAlignX::Left,
+				"Stroke glyph outlines from s into the current composite.\n\n"
+				"Unlike text(), this tessellates each glyph's contours as stroked paths.\n"
+				"Must be called before atlas.build() — stroke shapes are registered via\n"
+				"addShape() which is disabled post-build.\n\n"
+				"For fill+stroke in one CompositeShape, call stroke_text() first (outline\n"
+				"underneath), then text() (fill on top), then finalize().\n\n"
+				"anchor_y and align_x work identically to text()."
 			)
 
 			// Accessors -------------------------------------------------------

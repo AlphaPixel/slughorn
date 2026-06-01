@@ -409,6 +409,7 @@ public:
 	};
 
 	using Curves = std::vector<Curve>;
+	using Contours = std::vector<Curves>;
 
 	// Descriptor passed to addShape().
 	//
@@ -454,14 +455,14 @@ public:
 		// Layer::transform.dx/dy will equal (px, py) scaled to em-space,
 		// giving the GPU the correct rotation pivot.
 		struct Origin {
-			// Default  - quad placed at bbox corner; originData = (0, 0).
+			// Default - quad placed at bbox corner; originData = (0, 0).
 			// Centered - quad placed at bbox center; originData = (width/2, height/2) in local em-space.
-			// Pivot    - quad placed at (px, py) in authoring space; originData = pivot in local
-			//            em-space (bbox-min subtracted). Use with osgSlug_Vertex_Rotate and similar
-			//            helpers that expect a local-em-space anchor.
-			// Custom   - quad placed at bbox corner (same as Default); originData = (px, py) * scale
-			//            stored verbatim. Use when the shader treats origin as raw user data (e.g. an
-			//            ejection direction vector) and you own the coordinate math.
+			// Pivot - quad placed at (px, py) in authoring space; originData = pivot in local
+			//         em-space (bbox-min subtracted). Use with osgSlug_Vertex_Rotate and similar
+			//         helpers that expect a local-em-space anchor.
+			// Custom - quad placed at bbox corner (same as Default); originData = (px, py) * scale
+			//          stored verbatim. Use when the shader treats origin as raw user data (e.g. an
+			//          ejection direction vector) and you own the coordinate math.
 			enum class Type { Default, Centered, Pivot, Custom };
 
 			Type type;
@@ -540,6 +541,8 @@ public:
 	// consecutive blocks of this many texels: first Y, then X. Each texel's R channel holds the
 	// band index for that quantized em-coordinate slot, giving O(1) lookup in the fragment shader.
 	// Must match SLUG_INDIRECTION_SIZE in the fragment shader.
+	//
+	// TODO: The constants need to always be in-sync with this!
 	static constexpr uint32_t INDIRECTION_SIZE = 32;
 
 	// Width (in texels) of each gradient color strip. 256 gives 8-bit t precision; hardware
@@ -772,6 +775,15 @@ public:
 
 	const Shape* getShape(Key key) const;
 	const CompositeShape* getCompositeShape(Key key) const;
+
+	// Returns em-space curves for a key, searching _shapes (post-build) then _build (pre-build).
+	// Works at any point in the build lifecycle. Returns nullptr if the key is not registered.
+	const Curves* getShapeCurves(Key key) const;
+
+	// Returns em-space curves split into closed contours (outer outline, counters, etc.).
+	// Contour breaks are detected where p3 of curve[i] != p1 of curve[i+1].
+	// Returns an empty vector if the key is not registered. Works at any build lifecycle stage.
+	Contours getShapeContours(Key key) const;
 
 	const TextureData& getCurveTextureData() const { return _curveData; }
 	const TextureData& getBandTextureData() const { return _bandData; }
