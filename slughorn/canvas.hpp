@@ -950,18 +950,18 @@ public:
 	// accumulated curves remain in the path until the next beginPath() call.
 	// -------------------------------------------------------------------------
 
-	Key fill(Color color, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={}) {
+	Layer fill(Color color, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={}) {
 		_consolidate();
 
-		if(_path._pendingCurves.empty()) return Key(0u);
+		if(_path._pendingCurves.empty()) return Layer{};
 
 		return _commitFill(_path._pendingCurves, color, scale, _key.next(), origin);
 	}
 
-	Key fill(Color color, slug_t scale, Key key, Atlas::ShapeInfo::Origin origin={}) {
+	Layer fill(Color color, slug_t scale, Key key, Atlas::ShapeInfo::Origin origin={}) {
 		_consolidate();
 
-		if(_path._pendingCurves.empty()) return Key(0u);
+		if(_path._pendingCurves.empty()) return Layer{};
 
 		return _commitFill(_path._pendingCurves, color, scale, key, origin);
 	}
@@ -972,60 +972,60 @@ public:
 		return _commitShape(_path._pendingCurves, key, scale, origin);
 	}
 
-	Key stroke(slug_t width, Color color, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={}) {
-		if(!_path.strokePath(width)) return Key(0u);
+	Layer stroke(slug_t width, Color color, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={}) {
+		if(!_path.strokePath(width)) return Layer{};
 
 		return _commitFill(_path._pendingCurves, color, scale, _key.next(), origin);
 	}
 
-	Key stroke(slug_t width, Color color, slug_t scale, Key key, Atlas::ShapeInfo::Origin origin={}) {
-		if(!_path.strokePath(width)) return Key(0u);
+	Layer stroke(slug_t width, Color color, slug_t scale, Key key, Atlas::ShapeInfo::Origin origin={}) {
+		if(!_path.strokePath(width)) return Layer{};
 
 		return _commitFill(_path._pendingCurves, color, scale, key, origin);
 	}
 
-	Key fillGradient(const GradientHandle& handle, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={}) {
+	Layer fillGradient(const GradientHandle& handle, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={}) {
 		_consolidate();
 
-		if(_path._pendingCurves.empty()) return Key(0u);
+		if(_path._pendingCurves.empty()) return Layer{};
 
-		Key k = _commitGradient(_path._pendingCurves, handle, scale, _key.next(), origin);
+		Layer layer = _commitGradient(_path._pendingCurves, handle, scale, _key.next(), origin);
 
 		_path._pendingCurves.clear();
 
-		return k;
+		return layer;
 	}
 
-	Key fillGradient(const GradientHandle& handle, slug_t scale, Key key, Atlas::ShapeInfo::Origin origin={}) {
+	Layer fillGradient(const GradientHandle& handle, slug_t scale, Key key, Atlas::ShapeInfo::Origin origin={}) {
 		_consolidate();
 
-		if(_path._pendingCurves.empty()) return Key(0u);
+		if(_path._pendingCurves.empty()) return Layer{};
 
-		Key k = _commitGradient(_path._pendingCurves, handle, scale, key, origin);
+		Layer layer = _commitGradient(_path._pendingCurves, handle, scale, key, origin);
 
 		_path._pendingCurves.clear();
 
-		return k;
+		return layer;
 	}
 
-	Key strokeGradient(slug_t width, const GradientHandle& handle, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={}) {
-		if(!_path.strokePath(width)) return Key(0u);
+	Layer strokeGradient(slug_t width, const GradientHandle& handle, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={}) {
+		if(!_path.strokePath(width)) return Layer{};
 
-		Key k = _commitGradient(_path._pendingCurves, handle, scale, _key.next(), origin);
+		Layer layer = _commitGradient(_path._pendingCurves, handle, scale, _key.next(), origin);
 
 		_path._pendingCurves.clear();
 
-		return k;
+		return layer;
 	}
 
-	Key strokeGradient(slug_t width, const GradientHandle& handle, slug_t scale, Key key, Atlas::ShapeInfo::Origin origin={}) {
-		if(!_path.strokePath(width)) return Key(0u);
+	Layer strokeGradient(slug_t width, const GradientHandle& handle, slug_t scale, Key key, Atlas::ShapeInfo::Origin origin={}) {
+		if(!_path.strokePath(width)) return Layer{};
 
-		Key k = _commitGradient(_path._pendingCurves, handle, scale, key, origin);
+		Layer layer = _commitGradient(_path._pendingCurves, handle, scale, key, origin);
 
 		_path._pendingCurves.clear();
 
-		return k;
+		return layer;
 	}
 
 	// -------------------------------------------------------------------------
@@ -1035,14 +1035,14 @@ public:
 	// stroke() makes an internal copy to expand the stroke without altering @p p.
 	// -------------------------------------------------------------------------
 
-	Key fill(const Path& p, Color color, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={}) {
-		if(!p.hasPendingPath()) return Key(0u);
+	Layer fill(const Path& p, Color color, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={}) {
+		if(!p.hasPendingPath()) return Layer{};
 
 		return _commitFill(_merged(p), color, scale, _key.next(), origin, _ctm);
 	}
 
-	Key fill(const Path& p, Color color, slug_t scale, Key key, Atlas::ShapeInfo::Origin origin={}) {
-		if(!p.hasPendingPath()) return Key(0u);
+	Layer fill(const Path& p, Color color, slug_t scale, Key key, Atlas::ShapeInfo::Origin origin={}) {
+		if(!p.hasPendingPath()) return Layer{};
 
 		return _commitFill(_merged(p), color, scale, key, origin, _ctm);
 	}
@@ -1053,30 +1053,30 @@ public:
 		return _commitShape(_merged(p), key, scale, origin);
 	}
 
-	Key stroke(const Path& p, slug_t width, Color color, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={}) {
+	Layer stroke(const Path& p, slug_t width, Color color, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={}) {
 		Path copy = p;
 
-		if(!copy.strokePath(width)) return Key(0u);
+		if(!copy.strokePath(width)) return Layer{};
 
 		return _commitFill(_merged(copy), color, scale, _key.next(), origin, _ctm);
 	}
 
-	Key stroke(const Path& p, slug_t width, Color color, slug_t scale, Key key, Atlas::ShapeInfo::Origin origin={}) {
+	Layer stroke(const Path& p, slug_t width, Color color, slug_t scale, Key key, Atlas::ShapeInfo::Origin origin={}) {
 		Path copy = p;
 
-		if(!copy.strokePath(width)) return Key(0u);
+		if(!copy.strokePath(width)) return Layer{};
 
 		return _commitFill(_merged(copy), color, scale, key, origin, _ctm);
 	}
 
-	Key fillGradient(const Path& p, const GradientHandle& handle, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={}) {
-		if(!p.hasPendingPath()) return Key(0u);
+	Layer fillGradient(const Path& p, const GradientHandle& handle, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={}) {
+		if(!p.hasPendingPath()) return Layer{};
 
 		return _commitGradient(_merged(p), handle, scale, _key.next(), origin, _ctm);
 	}
 
-	Key fillGradient(const Path& p, const GradientHandle& handle, slug_t scale, Key key, Atlas::ShapeInfo::Origin origin={}) {
-		if(!p.hasPendingPath()) return Key(0u);
+	Layer fillGradient(const Path& p, const GradientHandle& handle, slug_t scale, Key key, Atlas::ShapeInfo::Origin origin={}) {
+		if(!p.hasPendingPath()) return Layer{};
 
 		return _commitGradient(_merged(p), handle, scale, key, origin, _ctm);
 	}
@@ -1104,6 +1104,7 @@ public:
 
 		// Apply CTM so text() uses the same coordinate space as path operations.
 		slug_t tx, ty;
+
 		_ctm.apply(x, y, tx, ty);
 
 		// Baseline dy in em-space, adjusted for vertical anchor
@@ -1192,7 +1193,7 @@ private:
 	}
 
 	// Core fill commit: scale, apply origin, register in atlas, push Layer.
-	Key _commitFill(
+	Layer _commitFill(
 		const Atlas::Curves& curves,
 		Color color,
 		slug_t scale,
@@ -1200,7 +1201,7 @@ private:
 		Atlas::ShapeInfo::Origin origin,
 		const Matrix& placement=Matrix::identity()
 	) {
-		if(curves.empty()) return Key(0u);
+		if(curves.empty()) return Layer{};
 
 		Atlas::Curves scaled = _scaleCurves(curves, scale);
 
@@ -1226,7 +1227,7 @@ private:
 
 		auto [local, transform] = _toLocalOrigin(scaled, origin, scale);
 
-		if(local.empty()) return Key(0u);
+		if(local.empty()) return Layer{};
 
 		Atlas::ShapeInfo info;
 
@@ -1244,7 +1245,7 @@ private:
 
 		_composite.layers.push_back(layer);
 
-		return key;
+		return layer;
 	}
 
 	// Shape-only commit: no Layer pushed, no color.
@@ -1294,7 +1295,7 @@ private:
 	}
 
 	// Gradient fill commit.
-	Key _commitGradient(
+	Layer _commitGradient(
 		const Atlas::Curves& curves,
 		const GradientHandle& handle,
 		slug_t scale,
@@ -1302,7 +1303,7 @@ private:
 		Atlas::ShapeInfo::Origin origin,
 		const Matrix& placement = Matrix::identity()
 	) {
-		if(curves.empty()) return Key(0u);
+		if(curves.empty()) return Layer{};
 
 		Atlas::Curves scaled = _scaleCurves(curves, scale);
 
@@ -1328,7 +1329,7 @@ private:
 
 		auto [local, transform] = _toLocalOrigin(scaled, origin, scale);
 
-		if(local.empty()) return Key(0u);
+		if(local.empty()) return Layer{};
 
 		GradientInfo ginfo;
 
@@ -1378,7 +1379,7 @@ private:
 
 		_composite.layers.push_back(layer);
 
-		return key;
+		return layer;
 	}
 
 	void _applySplits(Atlas::ShapeInfo& info) const {

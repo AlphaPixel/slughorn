@@ -531,6 +531,7 @@ def command_info(args) -> int:
 
 		if shape is not None:
 			print(f"  shape:       {shape}")
+			print(f"  user_origin: {shape.origin}")
 			print(f"  em_origin:   {shape.em_origin}")
 			print(f"  em_size:     {shape.em_size}")
 
@@ -551,9 +552,10 @@ def command_info(args) -> int:
 				print(f"\n  Layer {i}: {format_key(layer.key)}")
 
 				if lshape is not None:
-					print(f"    shape:     {lshape}")
-					print(f"    em_origin: {lshape.em_origin}")
-					print(f"    em_size:   {lshape.em_size}")
+					print(f"    shape:       {lshape}")
+					print(f"    user_origin: {lshape.origin}")
+					print(f"    em_origin:   {lshape.em_origin}")
+					print(f"    em_size:     {lshape.em_size}")
 
 					try:
 						ldecoded = atlas.decode(layer.key)

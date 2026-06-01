@@ -676,7 +676,7 @@ int main(int /*argc*/, char** /*argv*/) {
 	canvas.quadTo(0.25_cv, 0.5_cv, 0.5_cv, 1.0_cv);
 	canvas.closePath();
 
-	slughorn::Key shapeKey = canvas.fill({1_cv, 0_cv, 0_cv, 1_cv});
+	auto shapeLayer = canvas.fill({1_cv, 0_cv, 0_cv, 1_cv});
 
 	atlas.build();
 
@@ -686,7 +686,7 @@ int main(int /*argc*/, char** /*argv*/) {
 	std::vector<slughorn::Layer> layers;
 
 	slughorn::Layer layer;
-	layer.key = shapeKey;
+	layer.key = shapeLayer.key;
 	layer.color = {0.2f, 0.8f, 0.4f, 1.0f};
 	layer.scale = 1.0f;
 	layer.transform = {};

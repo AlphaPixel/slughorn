@@ -233,7 +233,7 @@ def test_canvas_commit_paths_gradients_and_composites():
 	canvas.begin_composite()
 	canvas.rect(0.0, 0.0, 1.0, 1.0)
 
-	fill_key = canvas.fill(
+	fill_layer = canvas.fill(
 		slughorn.Color(1.0, 0.0, 0.0, 1.0),
 		1.0,
 		# Again, make sure that the slughorn.Key ctor is "imlicitly" called...
@@ -248,7 +248,7 @@ def test_canvas_commit_paths_gradients_and_composites():
 
 	assert canvas.define_shape(path, slughorn.Key("circle_shape")) is True
 
-	stroke_key = canvas.stroke(
+	stroke_layer = canvas.stroke(
 		path,
 		0.1,
 		slughorn.Color(0.0, 1.0, 0.0, 1.0),
@@ -260,13 +260,13 @@ def test_canvas_commit_paths_gradients_and_composites():
 	canvas.rounded_rect(0.1, 0.1, 0.8, 0.8, 0.15)
 
 	gradient = canvas.create_linear_gradient(0.0, 0.0, 1.0, 1.0, _gradient_stops())
-	gradient_key = canvas.fill_gradient(gradient, 1.0, slughorn.Key("gradient_rect"))
+	gradient_layer = canvas.fill_gradient(gradient, 1.0, slughorn.Key("gradient_rect"))
 
 	canvas.begin_path()
 	canvas.move_to(0.2, 0.2)
 	canvas.line_to(0.8, 0.8)
 
-	stroke_gradient_key = canvas.stroke_gradient(
+	stroke_gradient_layer = canvas.stroke_gradient(
 		0.05,
 		canvas.create_sweep_gradient(0.5, 0.5, 0.0, math.pi, _gradient_stops()),
 		1.0,
@@ -276,18 +276,18 @@ def test_canvas_commit_paths_gradients_and_composites():
 	canvas.set_advance(2.0)
 	canvas.finalize(slughorn.Key("canvas_composite"))
 
-	assert fill_key == slughorn.Key("fill_rect")
-	assert stroke_key == slughorn.Key("stroke_circle")
-	assert gradient_key == slughorn.Key("gradient_rect")
-	assert stroke_gradient_key == slughorn.Key("gradient_stroke")
+	assert fill_layer.key == slughorn.Key("fill_rect")
+	assert stroke_layer.key == slughorn.Key("stroke_circle")
+	assert gradient_layer.key == slughorn.Key("gradient_rect")
+	assert stroke_gradient_layer.key == slughorn.Key("gradient_stroke")
 
 	atlas.build()
 
 	assert atlas.get_shape(slughorn.Key("circle_shape")) is not None
-	assert atlas.get_shape(fill_key) is not None
-	assert atlas.get_shape(stroke_key) is not None
-	assert atlas.get_shape(gradient_key) is not None
-	assert atlas.get_shape(stroke_gradient_key) is not None
+	assert atlas.get_shape(fill_layer.key) is not None
+	assert atlas.get_shape(stroke_layer.key) is not None
+	assert atlas.get_shape(gradient_layer.key) is not None
+	assert atlas.get_shape(stroke_gradient_layer.key) is not None
 
 	composite = atlas.get_composite_shape(slughorn.Key("canvas_composite"))
 
@@ -308,23 +308,23 @@ def test_key_implicit_str_conversion():
 	# fill() with str key
 	canvas.begin_path()
 	canvas.rect(0.1, 0.1, 0.9, 0.9)
-	fill_key = canvas.fill(slughorn.Color(1.0, 0.0, 0.0, 1.0), 1.0, "implicit_fill")
+	fill_layer = canvas.fill(slughorn.Color(1.0, 0.0, 0.0, 1.0), 1.0, "implicit_fill")
 
-	assert fill_key == slughorn.Key("implicit_fill")
+	assert fill_layer.key == slughorn.Key("implicit_fill")
 
 	# stroke() (current-path) with str key
 	canvas.begin_path()
 	canvas.circle(0.5, 0.5, 0.3)
-	stroke_key = canvas.stroke(0.05, slughorn.Color(0.0, 1.0, 0.0, 1.0), 1.0, "implicit_stroke")
+	stroke_layer = canvas.stroke(0.05, slughorn.Color(0.0, 1.0, 0.0, 1.0), 1.0, "implicit_stroke")
 
-	assert stroke_key == slughorn.Key("implicit_stroke")
+	assert stroke_layer.key == slughorn.Key("implicit_stroke")
 
 	# stroke() (explicit Path) with str key
 	path = slughorn.canvas.Path()
 	path.circle(0.5, 0.5, 0.2)
-	stroke_path_key = canvas.stroke(path, 0.05, slughorn.Color(0.0, 0.0, 1.0, 1.0), 1.0, "implicit_stroke_path")
+	stroke_path_layer = canvas.stroke(path, 0.05, slughorn.Color(0.0, 0.0, 1.0, 1.0), 1.0, "implicit_stroke_path")
 
-	assert stroke_path_key == slughorn.Key("implicit_stroke_path")
+	assert stroke_path_layer.key == slughorn.Key("implicit_stroke_path")
 
 	atlas.build()
 
@@ -350,9 +350,9 @@ def test_canvas_arc_stroke_current_path_with_centered_origin():
 	canvas.arc(CX, CY, R, GAP / 2, 2 * math.pi - GAP / 2)
 
 	# Both str and Key forms must work here (implicit conversion test).
-	key = canvas.stroke(0.01, slughorn.Color(0.6, 0.85, 1.0, 1.0), 1.0, "arc_ring", centered)
+	layer = canvas.stroke(0.01, slughorn.Color(0.6, 0.85, 1.0, 1.0), 1.0, "arc_ring", centered)
 
-	assert key == slughorn.Key("arc_ring")
+	assert layer.key == slughorn.Key("arc_ring")
 
 	atlas.build()
 
@@ -534,22 +534,22 @@ def test_normalize_canvas_shapes():
 	# Small square: curves span ~[0, 0.3] x [0, 0.3]
 	canvas.begin_path()
 	canvas.rect(0, 0, 0.3, 0.3)
-	k_small = canvas.fill(slughorn.Color(1, 0, 0), 1.0)
+	l_small = canvas.fill(slughorn.Color(1, 0, 0), 1.0)
 	canvas.finalize()
 
 	# Large square: curves span ~[0, 0.7] x [0, 0.7]
 	canvas.begin_path()
 	canvas.rect(0, 0, 0.7, 0.7)
-	k_large = canvas.fill(slughorn.Color(0, 1, 0), 1.0)
+	l_large = canvas.fill(slughorn.Color(0, 1, 0), 1.0)
 	canvas.finalize()
 
 	# Shapes have different widths before normalization.
 	# After normalization they must share identical declared metrics.
-	atlas.normalize_shape_metrics([k_small, k_large])
+	atlas.normalize_shape_metrics([l_small.key, l_large.key])
 	atlas.build()
 
-	s_small = atlas.get_shape(k_small)
-	s_large = atlas.get_shape(k_large)
+	s_small = atlas.get_shape(l_small.key)
+	s_large = atlas.get_shape(l_large.key)
 
 	assert s_small is not None and s_large is not None
 
@@ -561,7 +561,7 @@ def test_normalize_canvas_shapes():
 	assert s_small.band_scale_x != pytest.approx(s_large.band_scale_x, abs=1e-5)
 
 	# Both shapes must still render (non-zero coverage).
-	for key in (k_small, k_large):
+	for key in (l_small.key, l_large.key):
 		grid = atlas.decode(key).render_grid(32, 0.0, True)
 		assert float(grid.max()) > 0.1, f"shape {key} should have non-zero coverage"
 
@@ -647,13 +647,13 @@ def _build_three_rect_atlas(use_rect_helper: bool):
 		add_rect(0.4, 0.25, 0.2, 0.5)
 		add_rect(0.7, 0.25, 0.2, 0.5)
 
-	key  = canvas.fill(slughorn.Color(1, 1, 1, 1), 1.0, "three_rects")
-	comp = canvas.finalize()
+	layer = canvas.fill(slughorn.Color(1, 1, 1, 1), 1.0, "three_rects")
+	comp  = canvas.finalize()
 
 	atlas.add_composite_shape(slughorn.Key("three_rects_comp"), comp)
 	atlas.build()
 
-	return atlas, key, comp
+	return atlas, layer.key, comp
 
 
 def test_multi_subpath_raw_commands():
@@ -711,20 +711,20 @@ def test_add_path_with_transform():
 	canvas.add_path(rect, slughorn.Matrix.translate(0.4, 0.25))
 	canvas.add_path(rect, slughorn.Matrix.translate(0.7, 0.25))
 
-	key  = canvas.fill(slughorn.Color(1, 1, 1, 1), 1.0, "add_path_xform")
-	comp = canvas.finalize()
+	layer = canvas.fill(slughorn.Color(1, 1, 1, 1), 1.0, "add_path_xform")
+	comp  = canvas.finalize()
 
 	atlas.add_composite_shape(slughorn.Key("add_path_xform_comp"), comp)
 	atlas.build()
 
 	assert len(comp) == 1
 
-	shape = atlas.get_shape(key)
+	shape = atlas.get_shape(layer.key)
 	assert shape is not None
 
 	# Union bbox must match the three-rect tests: width=0.8, height=0.5.
 	assert shape.width  == pytest.approx(0.8, abs=1e-4)
 	assert shape.height == pytest.approx(0.5, abs=1e-4)
 
-	grid = atlas.decode(key).render_grid(32, 0.0, True)
+	grid = atlas.decode(layer.key).render_grid(32, 0.0, True)
 	assert float(grid.max()) > 0.5, "addPath(path, transform) must place geometry at correct positions"

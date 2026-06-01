@@ -410,54 +410,6 @@ public:
 
 	using Curves = std::vector<Curve>;
 
-	// Everything the renderer needs to draw one shape. Populated by build() and returned by
-	// getShape().
-	struct Shape {
-		// Location of this shape's band header block in the band texture (texel coords)
-		uint32_t bandTexX = 0, bandTexY = 0;
-
-		// Band index clamping limits (numBands - 1)
-		uint32_t bandMaxX = 0, bandMaxY = 0;
-
-		// Band-space transform: bandCoord = emPos * bandScale + bandOffset
-		slug_t bandScaleX = 0, bandScaleY = 0;
-		slug_t bandOffsetX = 0, bandOffsetY = 0;
-
-		// Metrics in em-space (normalized to the font's em square, or to the
-		// bounding box of the curves when autoMetrics = true)
-		slug_t bearingX = 0, bearingY = 0;
-		slug_t width = 0, height = 0;
-		slug_t advance = 0;
-
-		// Origin offset in em-space. When non-zero, shifts the quad so that the
-		// transform origin lands at this point rather than the shape's corner.
-		// Set to (width/2, height/2) for a centered origin (ShapeInfo::Origin::Centered).
-		// Default (0, 0) preserves existing behavior.
-		slug_t originX = 0_cv, originY = 0_cv;
-
-		// Compute the world-space bounding quad for this shape.
-		//
-		// transform.dx/dy places the shape in world space. scale converts the
-		// shape's em-space metrics into world units.
-		//
-		// expand is a small extra em-space margin used to enlarge the quad for
-		// AA fringes or rotated content; callers should not derive it from scale.
-		//
-		// The returned quad is relative to (0,0) - scene placement is the
-		// caller's responsibility (e.g. osg::MatrixTransform).
-		Quad computeQuad(const Transform& transform, slug_t scale=1_cv, slug_t expand=0_cv) const {
-			const slug_t ox = (transform.x - originX) * scale;
-			const slug_t oy = (transform.y - originY) * scale;
-
-			return {
-				ox + (bearingX - expand) * scale,
-				oy + (bearingY - height - expand) * scale,
-				ox + (bearingX + width + expand) * scale,
-				oy + (bearingY + expand) * scale
-			};
-		}
-	};
-
 	// Descriptor passed to addShape().
 	//
 	// Curves must be in em-normalized coordinates (same convention as FreeType's FT_LOAD_NO_SCALE
@@ -526,6 +478,57 @@ public:
 		};
 
 		Origin origin;
+	};
+
+	// Everything the renderer needs to draw one shape. Populated by build() and returned by
+	// getShape().
+	struct Shape {
+		// Location of this shape's band header block in the band texture (texel coords)
+		uint32_t bandTexX = 0, bandTexY = 0;
+
+		// Band index clamping limits (numBands - 1)
+		uint32_t bandMaxX = 0, bandMaxY = 0;
+
+		// Band-space transform: bandCoord = emPos * bandScale + bandOffset
+		slug_t bandScaleX = 0, bandScaleY = 0;
+		slug_t bandOffsetX = 0, bandOffsetY = 0;
+
+		// Metrics in em-space (normalized to the font's em square, or to the
+		// bounding box of the curves when autoMetrics = true)
+		slug_t bearingX = 0, bearingY = 0;
+		slug_t width = 0, height = 0;
+		slug_t advance = 0;
+
+		// Em-space pivot offset. Shader reads this as the rotation/effect origin.
+		// Computed from ShapeInfo::Origin during build(); see `origin` below for the input spec.
+		slug_t originX = 0_cv, originY = 0_cv;
+
+		// The origin spec supplied by the caller at addShape()/canvas time.
+		// Preserved post-build for diagnostics (slughorn info) and for computeQuad
+		// branching (Task 0 clean fix: Custom must not subtract originX/Y from transform).
+		ShapeInfo::Origin origin;
+
+		// Compute the world-space bounding quad for this shape.
+		//
+		// transform.dx/dy places the shape in world space. scale converts the
+		// shape's em-space metrics into world units.
+		//
+		// expand is a small extra em-space margin used to enlarge the quad for
+		// AA fringes or rotated content; callers should not derive it from scale.
+		//
+		// The returned quad is relative to (0,0) - scene placement is the
+		// caller's responsibility (e.g. osg::MatrixTransform).
+		Quad computeQuad(const Transform& transform, slug_t scale=1_cv, slug_t expand=0_cv) const {
+			const slug_t ox = (transform.x - originX) * scale;
+			const slug_t oy = (transform.y - originY) * scale;
+
+			return {
+				ox + (bearingX - expand) * scale,
+				oy + (bearingY - height - expand) * scale,
+				ox + (bearingX + width + expand) * scale,
+				oy + (bearingY + expand) * scale
+			};
+		}
 	};
 
 	// Size of the per-shape indirection table (both axes). Each shape's band block begins with two
@@ -1267,16 +1270,6 @@ inline std::ostream& operator<<(std::ostream& os, const Layer& l) {
 	;
 }
 
-inline std::ostream& operator<<(std::ostream& os, const Atlas::Shape& s) {
-	return os
-		<< "Shape(w=" << s.width << " h=" << s.height
-		<< " bearing=" << s.bearingX << "/" << s.bearingY
-		<< " origin=" << s.originX << "/" << s.originY
-		<< " bandScale=" << s.bandScaleX << "/" << s.bandScaleY
-		<< " bandOffset=" << s.bandOffsetX << "/" << s.bandOffsetY << ")"
-	;
-}
-
 inline std::ostream& operator<<(std::ostream& os, const Atlas::Curve& c) {
 	return os
 		<< "Curve("
@@ -1300,6 +1293,16 @@ inline std::ostream& operator<<(std::ostream& os, Atlas::ShapeInfo::Origin::Type
 
 inline std::ostream& operator<<(std::ostream& os, const Atlas::ShapeInfo::Origin& origin) {
 	return os << "Origin(type=" << origin.type << " x=" << origin.x << " y=" << origin.y << ")";
+}
+
+inline std::ostream& operator<<(std::ostream& os, const Atlas::Shape& s) {
+	return os
+		<< "Shape(w=" << s.width << " h=" << s.height
+		<< " bearing=" << s.bearingX << "/" << s.bearingY
+		<< " origin=" << s.originX << "/" << s.originY
+		<< " bandScale=" << s.bandScaleX << "/" << s.bandScaleY
+		<< " bandOffset=" << s.bandOffsetX << "/" << s.bandOffsetY << ")"
+	;
 }
 
 inline std::ostream& operator<<(std::ostream& os, const Atlas::ShapeInfo& info) {
