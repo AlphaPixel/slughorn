@@ -508,6 +508,11 @@ public:
 		// branching (Task 0 clean fix: Custom must not subtract originX/Y from transform).
 		ShapeInfo::Origin origin;
 
+		// Original em-space curves, retained post-build and post-load.
+		// Enables canvas::glyphOutline() and strokeText() without re-running font backends.
+		// Populated by Atlas::build() and by serial::read() via render::decode().
+		Curves curves;
+
 		// Compute the world-space bounding quad for this shape.
 		//
 		// transform.dx/dy places the shape in world space. scale converts the

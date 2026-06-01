@@ -97,6 +97,7 @@
 // =============================================================================
 
 #include "slughorn.hpp"
+#include "render.hpp"
 
 #ifdef SLUGHORN_SERIAL_IMPLEMENTATION
 #include "nlohmann/json.hpp"
@@ -587,6 +588,15 @@ Atlas atlasFromJson(
 		}
 
 		sd.shapes[key] = shape;
+
+		// Repopulate curves from packed texture data so Shape::curves is valid
+		// after load, matching the invariant established by Atlas::build().
+		try {
+			sd.shapes[key].curves = render::decode(
+				sd.shapes[key], sd.curveData, sd.bandData
+			).curves;
+		}
+		catch(...) {}
 	}
 
 	// Composites

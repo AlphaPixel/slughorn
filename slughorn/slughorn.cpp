@@ -946,7 +946,8 @@ void Atlas::packTextures() {
 		_packingStats.bandTexelsUsed += numBandHeaders;
 
 		bandTexelOffset = cursor;
-		_shapes[key] = sd;
+		sd.curves = std::move(g.curves);
+		_shapes[key] = std::move(sd);
 	}
 
 	_build.clear();
