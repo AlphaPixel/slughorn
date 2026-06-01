@@ -1,3 +1,5 @@
+![slughorn](logo.svg)
+
 # slughorn
 
 `slughorn` is modern C++20 library implementing the recent OSS release of the
