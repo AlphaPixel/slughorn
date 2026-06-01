@@ -203,7 +203,7 @@ public:
 		};
 
 		for(const auto& c : other._pendingCurves) _pendingCurves.push_back(xform(c));
-		for(const auto& c : other._activeCurves)  _pendingCurves.push_back(xform(c));
+		for(const auto& c : other._activeCurves) _pendingCurves.push_back(xform(c));
 
 		_lutDirty = true;
 	}
@@ -779,8 +779,9 @@ public:
 	// Transform stack
 	//
 	// Two parallel CTMs are maintained and kept in sync:
-	//   _path._ctm  - bakes transforms into internal path geometry at moveTo/lineTo time
-	//   _ctm        - applied as a placement transform for external-Path commit verbs
+	//
+	// _path._ctm - bakes transforms into internal path geometry at moveTo/lineTo time
+	// _ctm - applied as a placement transform for external-Path commit verbs
 	//
 	// Internal path commits (fill(Color), stroke(width, Color), etc.) rely on geometry
 	// already baked by _path._ctm, so they do not additionally compose _ctm.
@@ -942,6 +943,18 @@ public:
 
 		_splitStrategy = {};
 	}
+
+	// -------------------------------------------------------------------------
+	// Cell extent state
+	//
+	// setAutoMetrics(false) — keep curves in canvas [0,1] space and declare the
+	// full unit-square as the shape's extent. Both the GPU quad and the band
+	// transforms are calibrated to [0,1]x[0,1], so fract()-based tiling works
+	// correctly: padding the author leaves around the shape IS the tile gap.
+	// setAutoMetrics(true) restores the default tight-bbox behaviour.
+	// -------------------------------------------------------------------------
+
+	void setAutoMetrics(bool v) { _autoMetrics = v; }
 
 	// -------------------------------------------------------------------------
 	// Commit verbs - implicit path
@@ -1290,14 +1303,37 @@ private:
 			infoOrigin.y = origin.y * scale;
 		}
 
-		auto [local, transform] = _toLocalOrigin(scaled, origin, scale);
+		Atlas::Curves local;
+		Matrix transform = Matrix::identity();
+
+		if(_autoMetrics) {
+			auto result = _toLocalOrigin(scaled, origin, scale);
+
+			local = std::move(result.first);
+			transform = result.second;
+		}
+
+		else {
+			// Keep curves in canvas space so the padding the author left around
+			// the shape is symmetric on all sides (required for correct tiling).
+			local = std::move(scaled);
+		}
 
 		if(local.empty()) return Layer{};
 
 		Atlas::ShapeInfo info;
 
 		info.curves = std::move(local);
-		info.origin = infoOrigin;
+
+		if(_autoMetrics) info.origin = infoOrigin;
+
+		else {
+			info.autoMetrics = false;
+			info.bearingX = 0_cv;
+			info.bearingY = 1_cv;
+			info.width = 1_cv;
+			info.height = 1_cv;
+		}
 
 		_applySplits(info);
 		_atlas.addShape(key, info);
@@ -1543,6 +1579,7 @@ private:
 	std::vector<slug_t> _splitsX;
 	std::vector<slug_t> _splitsY;
 	Atlas::SplitStrategy _splitStrategy;
+	bool _autoMetrics = true;
 };
 
 // ================================================================================================
