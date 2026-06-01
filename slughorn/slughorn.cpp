@@ -170,13 +170,15 @@ uint32_t alignCursorForSpan(uint32_t cursor, uint32_t width, uint32_t span) {
 
 namespace slughorn {
 
-Atlas::Atlas() : _texWidth(512) {}
+// Atlas::Atlas() : _texWidth(512) {}
 
-Atlas::Atlas(uint32_t texWidth) : _texWidth(texWidth) {
+Atlas::Atlas(uint32_t texWidth):
+_texWidth(texWidth) {
 	// Must be a power of two: the shader uses texWidth as a bit-shift count (log2),
 	// so non-power-of-two widths would produce incorrect band coordinate wrapping.
 	assert(texWidth > 0 && (texWidth & (texWidth - 1)) == 0);
 }
+
 Atlas::~Atlas() = default;
 
 // ================================================================================================
@@ -370,6 +372,27 @@ void Atlas::normalizeShapeMetrics(const std::vector<Key>& keys) {
 		m.advance = cellAdvance;
 	}
 }
+
+#if 0
+// ================================================================================================
+// Atlas::setShapeMetrics
+// ================================================================================================
+
+void Atlas::setShapeMetrics(const Key& key, slug_t bearingX, slug_t bearingY, slug_t width, slug_t height) {
+	if(_built) return;
+
+	auto it = _build.find(key);
+
+	if(it == _build.end()) return;
+
+	auto& m = it->second.metrics;
+
+	m.bearingX = bearingX;
+	m.bearingY = bearingY;
+	m.width    = width;
+	m.height   = height;
+}
+#endif
 
 // ================================================================================================
 // Atlas::build

@@ -397,8 +397,10 @@ struct FontMetrics {
 // ================================================================================================
 class Atlas {
 public:
-	Atlas();
-	Atlas(uint32_t texWidth);
+	static constexpr uint32_t DEFAULT_TEXTURE_WIDTH = 512;
+
+	// Atlas();
+	Atlas(uint32_t texWidth=DEFAULT_TEXTURE_WIDTH);
 	virtual ~Atlas();
 
 	// A single quadratic Bezier segment: p1 -> p2 (control) -> p3.
@@ -756,6 +758,20 @@ public:
 	// is determined by the shared metrics while each shape's coverage is still computed
 	// from its own band data. This is the correct invariant for setLayerShapeIndex cycling.
 	void normalizeShapeMetrics(const std::vector<Key>& keys);
+
+#if 0
+	// Override the em-space layout metrics for a single shape.
+	//
+	// Must be called after addShape() but before build(). The key must be present in the atlas;
+	// if not, this is a no-op.
+	//
+	// Use this when a shape must cover a known em-space extent; e.g. for GPU tiling where
+	// emCoords must span exactly [0,1]x[0,1]: call setShapeMetrics(key, 0, 1, 1, 1).
+	//
+	// Only the layout fields (bearingX/Y, width, height) are updated. Band transforms and
+	// advance are left intact.
+	void setShapeMetrics(const Key& key, slug_t bearingX, slug_t bearingY, slug_t width, slug_t height);
+#endif
 
 	// --------------------------------------------------------------------------------------------
 	// Build (call once, then the atlas is frozen for geometry)
