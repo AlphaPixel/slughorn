@@ -46,6 +46,7 @@
 // ================================================================================================
 
 #include "slughorn/canvas.hpp"
+#include "slughorn/render.hpp"
 
 #define SLUGHORN_EMOJI_IMPLEMENTATION
 #include "slughorn/emoji.hpp"
@@ -157,455 +158,8 @@ std::string streamRepr(const T& v, const std::string& prefix="") {
 	return ss.str();
 }
 
-struct Sample {
-	slug_t fill = 0_cv;
-	slug_t xcov = 0_cv;
-	slug_t ycov = 0_cv;
-	slug_t xwgt = 0_cv;
-	slug_t ywgt = 0_cv;
+// Sample, Sampler, and decodeShape() now live in slughorn/render.hpp.
 
-	uint32_t iters = 0;
-};
-
-struct Sampler {
-	slughorn::Atlas::Shape shape;
-	std::vector<slughorn::Atlas::Curve> curves;
-	std::vector<uint32_t> hbandOffsets;
-	std::vector<uint32_t> hbandIndices;
-	std::vector<uint32_t> vbandOffsets;
-	std::vector<uint32_t> vbandIndices;
-	std::array<uint8_t, slughorn::Atlas::INDIRECTION_SIZE> indirY{};
-	std::array<uint8_t, slughorn::Atlas::INDIRECTION_SIZE> indirX{};
-
-	static constexpr slug_t EPS = 1_cv / 65536_cv;
-
-	static uint32_t floatBitsToUint32(slug_t x) {
-		return std::bit_cast<uint32_t>(x);
-	}
-
-	static slug_t clamp(slug_t x, slug_t lo, slug_t hi) {
-		return x < lo ? lo : (x > hi ? hi : x);
-	}
-
-	static uint32_t calcRootCode(slug_t y1, slug_t y2, slug_t y3) {
-		const uint32_t i1 = floatBitsToUint32(y1) >> 31;
-		const uint32_t i2 = floatBitsToUint32(y2) >> 30;
-		const uint32_t i3 = floatBitsToUint32(y3) >> 29;
-		uint32_t shift = (i2 & 0x2u) | (i1 & ~0x2u);
-
-		shift = (i3 & 0x4u) | (shift & ~0x4u);
-
-		return (0x2E74u >> shift) & 0x0101u;
-	}
-
-	static std::pair<slug_t, slug_t> solveHorizPoly(
-		slug_t x1, slug_t y1,
-		slug_t x2, slug_t y2,
-		slug_t x3, slug_t y3
-	) {
-		const slug_t ax = x1 - 2_cv * x2 + x3;
-		const slug_t ay = y1 - 2_cv * y2 + y3;
-		const slug_t bx = x1 - x2;
-		const slug_t by = y1 - y2;
-
-		if(std::abs(ay) < EPS) {
-			const slug_t t = std::abs(by) >= EPS ? y1 * (0.5_cv / by) : 0_cv;
-			const slug_t x = (ax * t - 2_cv * bx) * t + x1;
-
-			return {x, x};
-		}
-
-		const slug_t d = std::sqrt(std::max(by * by - ay * y1, 0_cv));
-		const slug_t t1 = (by - d) / ay;
-		const slug_t t2 = (by + d) / ay;
-		const slug_t rx1 = (ax * t1 - 2_cv * bx) * t1 + x1;
-		const slug_t rx2 = (ax * t2 - 2_cv * bx) * t2 + x1;
-
-		return {rx1, rx2};
-	}
-
-	static std::pair<slug_t, slug_t> solveVertPoly(
-		slug_t x1, slug_t y1,
-		slug_t x2, slug_t y2,
-		slug_t x3, slug_t y3
-	) {
-		const slug_t ax = x1 - 2_cv * x2 + x3;
-		const slug_t ay = y1 - 2_cv * y2 + y3;
-		const slug_t bx = x1 - x2;
-		const slug_t by = y1 - y2;
-
-		if(std::abs(ax) < EPS) {
-			const slug_t t = std::abs(bx) >= EPS ? x1 * (0.5_cv / bx) : 0_cv;
-			const slug_t y = (ay * t - 2_cv * by) * t + y1;
-
-			return {y, y};
-		}
-
-		const slug_t d = std::sqrt(std::max(bx * bx - ax * x1, 0_cv));
-		const slug_t t1 = (bx - d) / ax;
-		const slug_t t2 = (bx + d) / ax;
-		const slug_t ry1 = (ay * t1 - 2_cv * by) * t1 + y1;
-		const slug_t ry2 = (ay * t2 - 2_cv * by) * t2 + y1;
-
-		return {ry1, ry2};
-	}
-
-	static slug_t calcCoverage(slug_t xcov, slug_t ycov, slug_t xwgt, slug_t ywgt) {
-		const slug_t weighted = std::abs(xcov * xwgt + ycov * ywgt) / std::max(xwgt + ywgt, EPS);
-		const slug_t conservative = std::min(std::abs(xcov), std::abs(ycov));
-
-		return clamp(std::max(weighted, conservative), 0_cv, 1_cv);
-	}
-
-	static uint32_t lookupBandIndir(slug_t coordScaled, const std::array<uint8_t, slughorn::Atlas::INDIRECTION_SIZE>& indir) {
-		const auto q = static_cast<uint32_t>(clamp(coordScaled, 0_cv, cv(slughorn::Atlas::INDIRECTION_SIZE - 1)));
-
-		return indir[q];
-	}
-
-	std::pair<slug_t, slug_t> emOrigin() const {
-		const slug_t ox = shape.bandScaleX != 0_cv ? -shape.bandOffsetX / shape.bandScaleX : 0_cv;
-		const slug_t oy = shape.bandScaleY != 0_cv ? -shape.bandOffsetY / shape.bandScaleY : 0_cv;
-
-		return {ox, oy};
-	}
-
-	std::pair<slug_t, slug_t> emSize() const {
-		const slug_t sx = shape.bandScaleX != 0_cv
-			? cv(slughorn::Atlas::INDIRECTION_SIZE) / shape.bandScaleX
-			: 0_cv
-		;
-		const slug_t sy = shape.bandScaleY != 0_cv
-			? cv(slughorn::Atlas::INDIRECTION_SIZE) / shape.bandScaleY
-			: 0_cv
-		;
-
-		return {sx, sy};
-	}
-
-	std::pair<uint32_t, uint32_t> computeRenderSize(uint32_t sizeHint) const {
-		const slug_t w = shape.width;
-		const slug_t h = shape.height;
-
-		if(w <= 0_cv || h <= 0_cv)
-			throw std::runtime_error("Invalid shape dimensions for render_grid()")
-		;
-
-		const slug_t scale = cv(sizeHint) / std::max(w, h);
-		const auto outW = static_cast<uint32_t>(std::max(1_cv, cv(std::round(w * scale))));
-		const auto outH = static_cast<uint32_t>(std::max(1_cv, cv(std::round(h * scale))));
-
-		return {outW, outH};
-	}
-
-	Sample renderSample(slug_t rx, slug_t ry, slug_t ppeX, slug_t ppeY) const {
-		Sample out;
-
-		for(const auto& c : curves) {
-			out.iters++;
-
-			const slug_t x1 = c.x1 - rx;
-			const slug_t y1 = c.y1 - ry;
-			const slug_t x2 = c.x2 - rx;
-			const slug_t y2 = c.y2 - ry;
-			const slug_t x3 = c.x3 - rx;
-			const slug_t y3 = c.y3 - ry;
-
-			uint32_t code = calcRootCode(y1, y2, y3);
-
-			if(code) {
-				auto [r1, r2] = solveHorizPoly(x1, y1, x2, y2, x3, y3);
-
-				r1 *= ppeX;
-				r2 *= ppeX;
-
-				if(code & 0x01u) {
-					out.xcov += clamp(r1 + 0.5_cv, 0_cv, 1_cv);
-					out.xwgt = std::max(out.xwgt, clamp(1_cv - std::abs(r1) * 2_cv, 0_cv, 1_cv));
-				}
-
-				if(code & 0x100u) {
-					out.xcov -= clamp(r2 + 0.5_cv, 0_cv, 1_cv);
-					out.xwgt = std::max(out.xwgt, clamp(1_cv - std::abs(r2) * 2_cv, 0_cv, 1_cv));
-				}
-			}
-
-			code = calcRootCode(x1, x2, x3);
-
-			if(code) {
-				auto [r1, r2] = solveVertPoly(x1, y1, x2, y2, x3, y3);
-
-				r1 *= ppeY;
-				r2 *= ppeY;
-
-				if(code & 0x01u) {
-					out.ycov -= clamp(r1 + 0.5_cv, 0_cv, 1_cv);
-					out.ywgt = std::max(out.ywgt, clamp(1_cv - std::abs(r1) * 2_cv, 0_cv, 1_cv));
-				}
-
-				if(code & 0x100u) {
-					out.ycov += clamp(r2 + 0.5_cv, 0_cv, 1_cv);
-					out.ywgt = std::max(out.ywgt, clamp(1_cv - std::abs(r2) * 2_cv, 0_cv, 1_cv));
-				}
-			}
-		}
-
-		out.fill = calcCoverage(out.xcov, out.ycov, out.xwgt, out.ywgt);
-
-		return out;
-	}
-
-	Sample renderSampleBanded(slug_t rx, slug_t ry, slug_t ppeX, slug_t ppeY) const {
-		Sample out;
-
-		if(hbandOffsets.size() < 2 || vbandOffsets.size() < 2) return out;
-
-		const uint32_t bandX = lookupBandIndir(rx * shape.bandScaleX + shape.bandOffsetX, indirX);
-		const uint32_t bandY = lookupBandIndir(ry * shape.bandScaleY + shape.bandOffsetY, indirY);
-
-		const auto process = [&](uint32_t ci, bool horizontal) {
-			out.iters++;
-
-			const auto& c = curves[ci];
-
-			const slug_t x1 = c.x1 - rx;
-			const slug_t y1 = c.y1 - ry;
-			const slug_t x2 = c.x2 - rx;
-			const slug_t y2 = c.y2 - ry;
-			const slug_t x3 = c.x3 - rx;
-			const slug_t y3 = c.y3 - ry;
-
-			if(horizontal) {
-				if(std::max({x1, x2, x3}) * ppeX < -0.5_cv) return false;
-
-				const uint32_t code = calcRootCode(y1, y2, y3);
-
-				if(!code) return true;
-
-				auto [r1, r2] = solveHorizPoly(x1, y1, x2, y2, x3, y3);
-
-				r1 *= ppeX;
-				r2 *= ppeX;
-
-				if(code & 0x01u) {
-					out.xcov += clamp(r1 + 0.5_cv, 0_cv, 1_cv);
-					out.xwgt = std::max(out.xwgt, clamp(1_cv - std::abs(r1) * 2_cv, 0_cv, 1_cv));
-				}
-
-				if(code & 0x100u) {
-					out.xcov -= clamp(r2 + 0.5_cv, 0_cv, 1_cv);
-					out.xwgt = std::max(out.xwgt, clamp(1_cv - std::abs(r2) * 2_cv, 0_cv, 1_cv));
-				}
-			}
-
-			else {
-				if(std::max({y1, y2, y3}) * ppeY < -0.5_cv) return false;
-
-				const uint32_t code = calcRootCode(x1, x2, x3);
-
-				if(!code) return true;
-
-				auto [r1, r2] = solveVertPoly(x1, y1, x2, y2, x3, y3);
-
-				r1 *= ppeY;
-				r2 *= ppeY;
-
-				if(code & 0x01u) {
-					out.ycov -= clamp(r1 + 0.5_cv, 0_cv, 1_cv);
-					out.ywgt = std::max(out.ywgt, clamp(1_cv - std::abs(r1) * 2_cv, 0_cv, 1_cv));
-				}
-
-				if(code & 0x100u) {
-					out.ycov += clamp(r2 + 0.5_cv, 0_cv, 1_cv);
-					out.ywgt = std::max(out.ywgt, clamp(1_cv - std::abs(r2) * 2_cv, 0_cv, 1_cv));
-				}
-			}
-
-			return true;
-		};
-
-		if(bandY + 1 < hbandOffsets.size()) {
-			for(uint32_t i = hbandOffsets[bandY]; i < hbandOffsets[bandY + 1]; i++) {
-				if(!process(hbandIndices[i], true)) break;
-			}
-		}
-
-		if(bandX + 1 < vbandOffsets.size()) {
-			for(uint32_t i = vbandOffsets[bandX]; i < vbandOffsets[bandX + 1]; i++) {
-				if(!process(vbandIndices[i], false)) break;
-			}
-		}
-
-		out.fill = calcCoverage(out.xcov, out.ycov, out.xwgt, out.ywgt);
-
-		return out;
-	}
-
-	py::array_t<slug_t> renderGrid(uint32_t sizeHint=128, slug_t margin=0_cv, bool banded=true) const {
-		const auto [width, height] = computeRenderSize(sizeHint);
-		auto [ox, oy] = emOrigin();
-		auto [sx, sy] = emSize();
-
-		ox -= margin * sx;
-		oy -= margin * sy;
-		sx *= (1_cv + 2_cv * margin);
-		sy *= (1_cv + 2_cv * margin);
-
-		py::array_t<slug_t> grid({static_cast<py::ssize_t>(height), static_cast<py::ssize_t>(width)});
-
-		auto buf = grid.mutable_unchecked<2>();
-		const slug_t ppeX = static_cast<slug_t>(width);
-		const slug_t ppeY = static_cast<slug_t>(height);
-
-		{
-			py::gil_scoped_release release;
-
-			for(uint32_t j = 0; j < height; j++) {
-				for(uint32_t i = 0; i < width; i++) {
-					const slug_t u = (cv(i) + 0.5_cv) / cv(width);
-					const slug_t v = (cv(j) + 0.5_cv) / cv(height);
-					const slug_t ex = ox + u * sx;
-					const slug_t ey = oy + v * sy;
-					const auto result = banded
-						? renderSampleBanded(ex, ey, ppeX, ppeY)
-						: renderSample(ex, ey, ppeX, ppeY)
-					;
-
-					buf(j, i) = result.fill;
-				}
-			}
-		}
-
-		return grid;
-	}
-};
-
-Sampler decodeShape(const slughorn::Atlas& atlas, const slughorn::Key& key) {
-	const auto* shape = atlas.getShape(key);
-
-	if(!shape) throw py::key_error("Key not found in atlas (or atlas not built yet)");
-
-	const auto& curveTex = atlas.getCurveTextureData();
-	const auto& bandTex = atlas.getBandTextureData();
-
-	if(curveTex.format != slughorn::Atlas::TextureData::Format::RGBA32F)
-		throw std::runtime_error("Unexpected curve texture format")
-	;
-
-	if(bandTex.format != slughorn::Atlas::TextureData::Format::RGBA16UI)
-		throw std::runtime_error("Unexpected band texture format")
-	;
-
-	Sampler out;
-
-	out.shape = *shape;
-
-	if(shape->bandScaleX == 0_cv || shape->bandScaleY == 0_cv) {
-		out.hbandOffsets = {0, 0};
-		out.vbandOffsets = {0, 0};
-
-		return out;
-	}
-
-	const auto* curveData = reinterpret_cast<const float*>(curveTex.bytes.data());
-	const auto* bandData = reinterpret_cast<const uint16_t*>(bandTex.bytes.data());
-
-	const uint32_t shapeStart = shape->bandTexY * bandTex.width + shape->bandTexX;
-	const uint32_t numHBands = shape->bandMaxY + 1;
-	const uint32_t numVBands = shape->bandMaxX + 1;
-	const uint32_t numBandHeaders = numHBands + numVBands;
-	const uint32_t indirSize = numBandHeaders > 0 ? 2 * slughorn::Atlas::INDIRECTION_SIZE : 0;
-
-	auto readBandTexel = [&](uint32_t texelIndex) -> const uint16_t* {
-		if(texelIndex >= bandTex.width * bandTex.height)
-			throw std::runtime_error("Band texture read out of bounds")
-		;
-
-		return bandData + size_t(texelIndex) * 4;
-	};
-
-	for(uint32_t q = 0; q < slughorn::Atlas::INDIRECTION_SIZE; q++) {
-		out.indirY[q] = static_cast<uint8_t>(readBandTexel(shapeStart + q)[0]);
-		out.indirX[q] = static_cast<uint8_t>(readBandTexel(shapeStart + slughorn::Atlas::INDIRECTION_SIZE + q)[0]);
-	}
-
-	struct Header { uint32_t count = 0; uint32_t offset = 0; };
-
-	std::vector<Header> headers(numBandHeaders);
-
-	for(uint32_t i = 0; i < numBandHeaders; i++) {
-		const auto* texel = readBandTexel(shapeStart + indirSize + i);
-
-		headers[i].count = texel[0];
-		headers[i].offset = texel[1];
-	}
-
-	std::vector<uint32_t> globalIndices;
-
-	globalIndices.reserve(64);
-
-	auto decodeBandList = [&](uint32_t headerIndex, std::vector<uint32_t>& offsets, std::vector<uint32_t>& indices) {
-		offsets.clear();
-		indices.clear();
-		offsets.push_back(0);
-
-		for(uint32_t i = 0; i < (headerIndex == 0 ? numHBands : numVBands); i++) {
-			const auto& h = headers[headerIndex + i];
-
-			for(uint32_t j = 0; j < h.count; j++) {
-				const auto* texel = readBandTexel(shapeStart + h.offset + j);
-				const uint32_t cx = texel[0];
-				const uint32_t cy = texel[1];
-				const uint32_t curveIndex = (cy * curveTex.width + cx) / 2;
-
-				indices.push_back(curveIndex);
-				globalIndices.push_back(curveIndex);
-			}
-
-			offsets.push_back(static_cast<uint32_t>(indices.size()));
-		}
-	};
-
-	decodeBandList(0, out.hbandOffsets, out.hbandIndices);
-	decodeBandList(numHBands, out.vbandOffsets, out.vbandIndices);
-
-	std::sort(globalIndices.begin(), globalIndices.end());
-
-	globalIndices.erase(std::unique(globalIndices.begin(), globalIndices.end()), globalIndices.end());
-
-	std::unordered_map<uint32_t, uint32_t> remap;
-
-	remap.reserve(globalIndices.size());
-
-	out.curves.reserve(globalIndices.size());
-
-	for(uint32_t globalIndex : globalIndices) {
-		const uint32_t texel0 = globalIndex * 2;
-		const uint32_t texel1 = texel0 + 1;
-
-		if(texel1 >= curveTex.width * curveTex.height)
-			throw std::runtime_error("Curve texture read out of bounds")
-		;
-
-		const float* t0 = curveData + size_t(texel0) * 4;
-		const float* t1 = curveData + size_t(texel1) * 4;
-
-		remap[globalIndex] = static_cast<uint32_t>(out.curves.size());
-
-		out.curves.push_back({
-			t0[0], t0[1],
-			t0[2], t0[3],
-			t1[0], t1[1]
-		});
-	}
-
-	for(auto& index : out.hbandIndices) index = remap.at(index);
-	for(auto& index : out.vbandIndices) index = remap.at(index);
-
-	return out;
-}
-
-// ================================================================================================
 // Python-friendly CurveDecomposer
 //
 // Owns its Curves vector so Python's GC cannot collect it out from under us. The C++
@@ -673,9 +227,8 @@ using detail::vectorView1D;
 using detail::arrayView1D;
 using detail::curveView2D;
 using detail::streamRepr;
-using detail::decodeShape;
-using detail::Sample;
-using detail::Sampler;
+using slughorn::render::Sample;
+using slughorn::render::Sampler;
 using detail::PyCurveDecomposer;
 using detail::CurveDecomposerRef;
 
@@ -1415,7 +968,7 @@ PYBIND11_MODULE(slughorn, m) {
 
 		.def("decode",
 			[](const slughorn::Atlas& a, slughorn::Key key) {
-				return decodeShape(a, key);
+				return slughorn::render::decode(a, key);
 			},
 			py::arg("key"),
 			"Decode a built shape into a Python-facing software-render view.\n"
@@ -1606,7 +1159,16 @@ PYBIND11_MODULE(slughorn, m) {
 			)
 			.def("render_grid",
 				[](const Sampler& d, uint32_t size, slug_t margin, bool banded) {
-					return d.renderGrid(size, margin, banded);
+					const auto grid = d.renderGrid(size, margin, banded);
+					py::array_t<slug_t> arr({
+						static_cast<py::ssize_t>(grid.height),
+						static_cast<py::ssize_t>(grid.width)
+					});
+					auto buf = arr.mutable_unchecked<2>();
+					for(uint32_t j = 0; j < grid.height; j++)
+						for(uint32_t i = 0; i < grid.width; i++)
+							buf(j, i) = grid.at(j, i);
+					return arr;
 				},
 				py::arg("size") = 128,
 				py::arg("margin") = 0_cv,
@@ -1626,7 +1188,7 @@ PYBIND11_MODULE(slughorn, m) {
 
 		render.def("decode",
 			[](const slughorn::Atlas& atlas, slughorn::Key key) {
-				return decodeShape(atlas, key);
+				return slughorn::render::decode(atlas, key);
 			},
 			py::arg("atlas"), py::arg("key"),
 			"Decode a built atlas shape into a slughorn.render.Sampler."

@@ -214,8 +214,12 @@ if(SLUGHORN_BUILD_TESTS)
 			DEPENDS ${_CANVAS_SLUG}
 			USES_TERMINAL
 		)
+		add_executable(slughorn-test-render "test/slughorn-test-render.cpp")
+		target_link_libraries(slughorn-test-render PRIVATE slughorn)
+		add_test(NAME render COMMAND slughorn-test-render)
+		message(STATUS "slughorn tests: building slughorn-test-render")
 	else()
-		message(STATUS "slughorn tests: SLUGHORN_SERIAL=OFF, skipping slughorn-test-canvas")
+		message(STATUS "slughorn tests: SLUGHORN_SERIAL=OFF, skipping slughorn-test-canvas and slughorn-test-render")
 	endif()
 
 	# if(SLUGHORN_GLFW)
