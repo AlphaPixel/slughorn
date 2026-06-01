@@ -495,7 +495,7 @@ int main(int argc, char** argv) {
 		canvas.moveTo(CX, CY);
 		canvas.lineTo(CX, CY + HAND_LENGTH);
 
-		const Key handKey = canvas.stroke(
+		canvas.stroke(
 			HAND_WIDTH,
 			HAND_COLOR,
 			1_cv,
@@ -737,6 +737,132 @@ int main(int argc, char** argv) {
 			<< "Pattern 21: add_path_xform layers="
 			<< comp21.layers.size() << " (expected 1)\n"
 		;
+	}
+
+	// ============================================================================================
+	// Pattern 22: Commit verbs return fully-populated Layer — transform audit.
+	//
+	// Geometry is authored clearly off the origin ([0.2,0.8] x [0.3,0.7]) so that a zeroed
+	// transform is visually distinct from the correct bbox-corner/pivot value.
+	//
+	// This test exists to expose the "old brace-init bug":
+	//
+	//   auto layer = canvas.fill(...);
+	//   drawable.addLayer({layer.key, color});  // NEW Layer: transform = {} — wrong position!
+	//
+	// The old Key-only return made this the only option. With Layer returned directly,
+	// drawable.addLayer(layer) carries the correct transform from _commitFill/_commitGradient.
+	//
+	// For rotation: the vertex shader uses layer.transform.x/y as the pivot. If that is {}
+	// instead of the authored center/pivot, the shape orbits the origin instead of spinning
+	// in place — exactly the "wobble" seen with Centered/Pivot origins.
+	// ============================================================================================
+	{
+		using Origin = slughorn::Atlas::ShapeInfo::Origin;
+
+		static constexpr slug_t TOL = 1e-5_cv;
+
+		auto check = [&](const char* label, slug_t got, slug_t expected) {
+			const bool ok = std::abs(got - expected) < TOL;
+
+			std::cerr
+				<< "Pattern 22 " << label << ": "
+				<< got << " (expected " << expected << ") "
+				<< (ok ? "OK" : "FAIL") << "\n"
+			;
+		};
+
+		// Geometry: rect spanning [0.2,0.8] x [0.3,0.7] — bbox corner (0.2,0.3), center (0.5,0.5).
+
+		auto makeRect = [&]() {
+			canvas.beginPath();
+			canvas.rect(0.2_cv, 0.3_cv, 0.6_cv, 0.4_cv);
+		};
+
+		// ---- fill / Default origin: transform = bbox corner {0.2, 0.3} ----
+		{
+			makeRect();
+
+			const auto layer = canvas.fill(WHITE, 1_cv, Key("p22_fill_default"));
+
+			check("fill/Default  tx", layer.transform.x, 0.2_cv);
+			check("fill/Default  ty", layer.transform.y, 0.3_cv);
+
+			// Old brace-init pattern: transform is silently zero.
+			const slughorn::Layer oldStyle{layer.key, WHITE};
+
+			check("fill/OldStyle  tx", oldStyle.transform.x, 0_cv);
+			check("fill/OldStyle  ty", oldStyle.transform.y, 0_cv);
+
+			canvas.finalize(Key("p22_fill_default_comp"));
+		}
+
+		// ---- fill / Centered origin: transform = geometric center {0.5, 0.5} ----
+		{
+			makeRect();
+
+			const auto layer = canvas.fill(WHITE, 1_cv, Key("p22_fill_centered"), Origin(Origin::Type::Centered));
+
+			check("fill/Centered  tx", layer.transform.x, 0.5_cv);
+			check("fill/Centered  ty", layer.transform.y, 0.5_cv);
+
+			canvas.finalize(Key("p22_fill_centered_comp"));
+		}
+
+		// ---- fill / Pivot at (0.35, 0.6): transform = {0.35, 0.6} ----
+		{
+			makeRect();
+
+			const auto layer = canvas.fill(WHITE, 1_cv, Key("p22_fill_pivot"), Origin(0.35_cv, 0.6_cv));
+
+			check("fill/Pivot     tx", layer.transform.x, 0.35_cv);
+			check("fill/Pivot     ty", layer.transform.y, 0.6_cv);
+
+			canvas.finalize(Key("p22_fill_pivot_comp"));
+		}
+
+		// ---- stroke / Default origin: transform = bbox corner of the expanded outline ----
+		// The stroke outline expands outward by half-width (0.05) on each side, so the
+		// bbox corner moves to roughly {0.15, 0.25}. We only verify it is NOT zero.
+		{
+			makeRect();
+
+			const auto layer = canvas.stroke(0.1_cv, WHITE, 1_cv, Key("p22_stroke_default"));
+
+			const bool nonzeroTx = std::abs(layer.transform.x) > TOL || std::abs(layer.transform.y) > TOL;
+
+			std::cerr
+				<< "Pattern 22 stroke/Default  transform=("
+				<< layer.transform.x << "," << layer.transform.y
+				<< ") non-zero=" << nonzeroTx << " (expected 1)\n"
+			;
+
+			canvas.finalize(Key("p22_stroke_default_comp"));
+		}
+
+		// ---- fillGradient / Centered: gradientId > 0, transform = center ----
+		{
+			makeRect();
+
+			const auto grad = canvas.createLinearGradient(0.2_cv, 0.3_cv, 0.8_cv, 0.7_cv, {
+				{0_cv,  RED},
+				{1_cv,  BLUE},
+			});
+
+			const auto layer = canvas.fillGradient(grad, 1_cv, Key("p22_gradient_centered"));
+
+			check("gradient/Centered tx", layer.transform.x, 0.2_cv);
+			check("gradient/Centered ty", layer.transform.y, 0.3_cv);
+
+			const bool hasGradient = layer.gradientId > 0;
+
+			std::cerr
+				<< "Pattern 22 gradient/Centered gradientId="
+				<< layer.gradientId << " non-zero=" << hasGradient << " (expected 1)\n"
+			;
+
+			canvas.finalize(Key("p22_gradient_centered_comp"));
+		}
 	}
 
 	// ============================================================================================

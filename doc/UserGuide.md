@@ -946,19 +946,20 @@ without disturbing the accumulator.
 #### fill — Flat Color
 
 ```cpp
-Key fill(Color color, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={});
-Key fill(Color color, slug_t scale, Key key, Atlas::ShapeInfo::Origin origin={});
+Layer fill(Color color, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={});
+Layer fill(Color color, slug_t scale, Key key, Atlas::ShapeInfo::Origin origin={});
 ```
 
-Commits the current path as a flat-colored Layer. The auto-key overload assigns the next
-name from the `KeyIterator` (`"icon_0"`, `"icon_1"`, …). The explicit-key overload makes
-the shape addressable by name after `build()`.
+Commits the current path as a flat-colored Layer and returns it. The auto-key overload
+assigns the next name from the `KeyIterator` (`"icon_0"`, `"icon_1"`, …). The
+explicit-key overload makes the shape addressable by name after `build()`. Use
+`layer.key` when you need to pass the key to another API.
 
 #### stroke — Stroke as Commit Verb
 
 ```cpp
-Key stroke(slug_t width, Color color, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={});
-Key stroke(slug_t width, Color color, slug_t scale, Key key, ...);
+Layer stroke(slug_t width, Color color, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={});
+Layer stroke(slug_t width, Color color, slug_t scale, Key key, ...);
 ```
 
 Calls `strokePath(width)` internally then commits the outline — equivalent to
@@ -979,8 +980,8 @@ re-use it later with different colors or gradients managed by the caller.
 #### fillGradient / strokeGradient
 
 ```cpp
-Key fillGradient(const GradientHandle& handle, slug_t scale=1_cv, ...);
-Key strokeGradient(slug_t width, const GradientHandle& handle, slug_t scale=1_cv, ...);
+Layer fillGradient(const GradientHandle& handle, slug_t scale=1_cv, ...);
+Layer strokeGradient(slug_t width, const GradientHandle& handle, slug_t scale=1_cv, ...);
 ```
 
 Like `fill` / `stroke`, but the resulting Layer carries a `gradientId` instead of a flat

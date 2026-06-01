@@ -426,7 +426,12 @@ json buildJson(
 			{"height", shape.height},
 			{"advance", shape.advance},
 			{"origin_x", shape.originX},
-			{"origin_y", shape.originY}
+			{"origin_y", shape.originY},
+			{"origin", [&]() {
+				std::ostringstream oss;
+				oss << shape.origin.type;
+				return json{{"type", oss.str()}, {"x", shape.origin.x}, {"y", shape.origin.y}};
+			}()}
 		});
 	}
 
@@ -569,6 +574,17 @@ Atlas atlasFromJson(
 		shape.advance = js.at("advance");
 		shape.originX = js.value("origin_x", 0_cv);
 		shape.originY = js.value("origin_y", 0_cv);
+
+		if(js.contains("origin")) {
+			const auto& jo = js.at("origin");
+			const std::string t = jo.value("type", "Default");
+			Atlas::ShapeInfo::Origin::Type ot =
+				t == "Centered" ? Atlas::ShapeInfo::Origin::Type::Centered :
+				t == "Pivot"    ? Atlas::ShapeInfo::Origin::Type::Pivot    :
+				t == "Custom"   ? Atlas::ShapeInfo::Origin::Type::Custom   :
+				                  Atlas::ShapeInfo::Origin::Type::Default;
+			shape.origin = Atlas::ShapeInfo::Origin(ot, jo.value("x", 0_cv), jo.value("y", 0_cv));
+		}
 
 		sd.shapes[key] = shape;
 	}

@@ -1183,6 +1183,10 @@ PYBIND11_MODULE(slughorn, m) {
 			"Em-space Y offset of the transform origin. "
 			"0 = bottom-left corner (Origin.Default), height/2 = center (Origin.Centered)."
 		)
+		.def_readonly("origin", &slughorn::Atlas::Shape::origin,
+			"The ShapeInfo::Origin spec supplied at build time. "
+			"Preserved post-build for diagnostics and computeQuad branching."
+		)
 
 		// Convenience: recover em-space origin and size (mirrors slug_EmToUV logic)
 		.def_property_readonly("em_origin", [](const slughorn::Atlas::Shape& s) {
@@ -1901,7 +1905,7 @@ PYBIND11_MODULE(slughorn, m) {
 				py::arg("color"), py::arg("scale") = 1_cv,
 				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin{},
 				"Commit the current path as a new Layer with the given color.\n"
-				"Returns the auto-generated Key, or Key(0) if the path was empty."
+				"Returns the Layer (use .key to access the auto-generated Key), or an empty Layer if the path was empty."
 			)
 			// fill() - named-key
 			.def("fill",
@@ -1917,7 +1921,7 @@ PYBIND11_MODULE(slughorn, m) {
 				py::arg("color"), py::arg("scale"), py::arg("key"),
 				py::arg("origin") = slughorn::Atlas::ShapeInfo::Origin{},
 				"Commit the current path as a new Layer, registering the Shape under key.\n"
-				"Returns key, or Key(0) if the path was empty."
+				"Returns the Layer (use .key to access the registered Key), or an empty Layer if the path was empty."
 			)
 			.def("define_shape",
 				[](
