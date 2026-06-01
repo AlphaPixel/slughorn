@@ -476,6 +476,52 @@ const Atlas::Shape* Atlas::getShape(Key key) const {
 }
 
 // ================================================================================================
+// Atlas::getShapeCurves
+// ================================================================================================
+
+const Atlas::Curves* Atlas::getShapeCurves(Key key) const {
+	const auto sit = _shapes.find(key);
+
+	if(sit != _shapes.end() && !sit->second.curves.empty()) return &sit->second.curves;
+
+	const auto bit = _build.find(key);
+
+	return bit != _build.end() ? &bit->second.curves : nullptr;
+}
+
+// ================================================================================================
+// Atlas::getShapeContours
+// ================================================================================================
+
+Atlas::Contours Atlas::getShapeContours(Key key) const {
+	const Curves* flat = getShapeCurves(key);
+
+	if(!flat || flat->empty()) return {};
+
+	Contours result;
+	Curves   current;
+
+	for(size_t i = 0; i < flat->size(); ++i) {
+		const auto& cur = (*flat)[i];
+
+		current.push_back(cur);
+
+		const bool last = (i + 1 == flat->size());
+		const bool brk  = !last && (
+			cur.x3 != (*flat)[i + 1].x1 ||
+			cur.y3 != (*flat)[i + 1].y1
+		);
+
+		if(last || brk) {
+			result.push_back(std::move(current));
+			current.clear();
+		}
+	}
+
+	return result;
+}
+
+// ================================================================================================
 // Atlas::getCompositeShape
 // ================================================================================================
 

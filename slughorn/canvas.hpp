@@ -1151,6 +1151,71 @@ public:
 		}
 	}
 
+	void strokeText(
+		std::string_view str,
+		slug_t fontSize,
+		slug_t strokeWidth,
+		slug_t x,
+		slug_t y,
+		Color color,
+		const FontMetrics& metrics,
+		TextAnchorY anchorY=TextAnchorY::Baseline,
+		TextAlignX alignX=TextAlignX::Left
+	) {
+		if(str.empty() || fontSize == 0_cv) return;
+
+		slug_t tx, ty;
+
+		_ctm.apply(x, y, tx, ty);
+
+		slug_t dy = ty / fontSize;
+
+		switch(anchorY) {
+			case TextAnchorY::Baseline: break;
+			case TextAnchorY::CapCenter: dy -= metrics.capHeightRatio * 0.5_cv; break;
+			case TextAnchorY::CapTop: dy -= metrics.capHeightRatio; break;
+			case TextAnchorY::XCenter: dy -= metrics.xHeightRatio * 0.5_cv; break;
+		}
+
+		slug_t dx = tx / fontSize;
+
+		if(alignX != TextAlignX::Left) {
+			slug_t totalAdvance = 0_cv;
+
+			for(char c : str) {
+				const auto* shape = _atlas.getShape(Key(static_cast<uint32_t>(static_cast<unsigned char>(c))));
+
+				totalAdvance += shape ? shape->advance : 0.6_cv;
+			}
+
+			if(alignX == TextAlignX::Center) dx -= totalAdvance * 0.5_cv;
+
+			else dx -= totalAdvance;
+		}
+
+		for(char c : str) {
+			const uint32_t cp = static_cast<uint32_t>(static_cast<unsigned char>(c));
+			const auto* shape = _atlas.getShape(Key(cp));
+
+			for(const auto& contour : _atlas.getShapeContours(Key(cp))) {
+				Path gp;
+
+				for(const auto& curve : contour) {
+					gp._pendingCurves.push_back({
+						(curve.x1 + dx) * fontSize, (curve.y1 + dy) * fontSize,
+						(curve.x2 + dx) * fontSize, (curve.y2 + dy) * fontSize,
+						(curve.x3 + dx) * fontSize, (curve.y3 + dy) * fontSize,
+					});
+				}
+
+				if(gp.strokePath(strokeWidth))
+					_commitFill(gp._pendingCurves, color, 1_cv, _key.next(), {});
+			}
+
+			dx += shape ? shape->advance : 0.6_cv;
+		}
+	}
+
 	// -------------------------------------------------------------------------
 	// CompositeShape management
 	// -------------------------------------------------------------------------
