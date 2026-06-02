@@ -51,10 +51,13 @@ std::vector<slug_t> computeAxisSplits(
 	for(const auto& c : curves) {
 		const slug_t lo = useY
 			? std::min({c.y1, c.y2, c.y3})
-			: std::min({c.x1, c.x2, c.x3});
+			: std::min({c.x1, c.x2, c.x3})
+		;
+
 		const slug_t hi = useY
 			? std::max({c.y1, c.y2, c.y3})
-			: std::max({c.x1, c.x2, c.x3});
+			: std::max({c.x1, c.x2, c.x3})
+		;
 
 		if(hi > lo) {
 			events.push_back({std::max(lo, axisMin), +1});

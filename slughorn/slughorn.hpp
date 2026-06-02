@@ -1304,7 +1304,8 @@ inline std::ostream& operator<<(std::ostream& os, const Layer& l) {
 		<< " transform=" << l.transform
 		<< " scale=" << l.scale
 		<< " effectId=" << l.effectId
-		<< " gradientId=" << l.gradientId << ")"
+		<< " gradientId=" << l.gradientId
+		<< " expand=" << l.expand << ")"
 	;
 }
 

@@ -793,14 +793,19 @@ public:
 
 	void save() {
 		_path.save();
-		_ctmStack.push_back(_ctm);
+		_ctmStack.push_back({_ctm, _autoMetrics, _splitsX, _splitsY});
 	}
 
 	void restore() {
 		_path.restore();
 
 		if(!_ctmStack.empty()) {
-			_ctm = _ctmStack.back();
+			auto& s = _ctmStack.back();
+
+			_ctm = s.ctm;
+			_autoMetrics = s.autoMetrics;
+			_splitsX = std::move(s.splitsX);
+			_splitsY = std::move(s.splitsY);
 
 			_ctmStack.pop_back();
 		}
@@ -1575,8 +1580,18 @@ private:
 	KeyIterator _key;
 	Path _path;
 	CompositeShape _composite;
+
+	struct SavedState {
+		Matrix ctm;
+
+		bool autoMetrics;
+
+		std::vector<slug_t> splitsX;
+		std::vector<slug_t> splitsY;
+	};
+
 	Matrix _ctm = Matrix::identity();
-	std::vector<Matrix> _ctmStack;
+	std::vector<SavedState> _ctmStack;
 	std::vector<slug_t> _splitsX;
 	std::vector<slug_t> _splitsY;
 	Atlas::SplitStrategy _splitStrategy;
