@@ -495,7 +495,8 @@ PYBIND11_MODULE(slughorn, m) {
 				slughorn::Transform transform,
 				slug_t scale,
 				uint32_t effectId,
-				uint32_t gradientId
+				uint32_t gradientId,
+				slug_t expand
 			) {
 				slughorn::Layer layer;
 
@@ -511,6 +512,7 @@ PYBIND11_MODULE(slughorn, m) {
 				layer.scale = scale;
 				layer.effectId = effectId;
 				layer.gradientId = gradientId;
+				layer.expand = expand;
 
 				return layer;
 			}),
@@ -519,7 +521,8 @@ PYBIND11_MODULE(slughorn, m) {
 			py::arg("transform") = slughorn::Transform{},
 			py::arg("scale") = 1_cv,
 			py::arg("effectId") = 0,
-			py::arg("gradientId") = 0
+			py::arg("gradientId") = 0,
+			py::arg("expand") = 0.01_cv
 		)
 
 		.def_readwrite("key", &slughorn::Layer::key,
@@ -544,6 +547,10 @@ PYBIND11_MODULE(slughorn, m) {
 			"Non-zero = 1-based index into the atlas gradient list "
 			"(registered via Atlas.add_gradient()). "
 			"When non-zero, layer.color.rgb is ignored; layer.color.a is a global opacity multiplier.")
+		.def_readwrite("expand", &slughorn::Layer::expand,
+			"Extra em-space margin added to the quad on each side (default 0.01). "
+			"Set to 0 for shapes authored with canvas.set_auto_metrics(False) so that "
+			"em-coords stay exactly in [0,1] for GPU tiling.")
 		.def("__repr__", [](const slughorn::Layer& l) { return streamRepr(l); })
 	;
 
@@ -1849,6 +1856,14 @@ PYBIND11_MODULE(slughorn, m) {
 
 			// Accessors -------------------------------------------------------
 
+			.def_property("auto_metrics",
+				&slughorn::canvas::Canvas::getAutoMetrics,
+				&slughorn::canvas::Canvas::setAutoMetrics,
+				"When True (default), shapes use tight curve bbox for quad sizing and band "
+				"calibration. Set to False to keep curves in [0,1] canvas space with the full "
+				"unit square as both the layout extent and band spatial range — required for "
+				"artifact-free GPU tiling via fract(). Pair with layer.expand = 0."
+			)
 			.def_property_readonly("layer_count", &slughorn::canvas::Canvas::layerCount,
 				"Number of Layers accumulated in the current composite."
 			)

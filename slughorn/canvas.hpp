@@ -955,6 +955,7 @@ public:
 	// -------------------------------------------------------------------------
 
 	void setAutoMetrics(bool v) { _autoMetrics = v; }
+	bool getAutoMetrics() const { return _autoMetrics; }
 
 	// -------------------------------------------------------------------------
 	// Commit verbs - implicit path
