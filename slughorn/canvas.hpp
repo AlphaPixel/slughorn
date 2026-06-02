@@ -441,6 +441,10 @@ public:
 	// @p cw - if false (default) the outline is appended CCW (filled area). If true the outline
 	// is appended CW (subtracts coverage), enabling punch-outs when combined with a CCW outline
 	// in the same beginPath() session.
+	//
+	// HTML Canvas semantics: a single stroke() operates on ALL subpaths accumulated since
+	// beginPath(). Each moveTo() starts a new subpath; subpaths are stroked independently
+	// and their outlines combined into one shape.
 	bool strokePath(slug_t width, bool cw=false) {
 		Atlas::Curves centerline;
 
@@ -458,140 +462,165 @@ public:
 			: std::max(TOLERANCE_BALANCED, h * 0.1_cv)
 		;
 
-		// Pass 1: flatten centerline to polyline.
-		std::vector<std::pair<slug_t, slug_t>> pts;
+		// Locate subpath boundaries: a gap exists when curve[i].x1/y1 != curve[i-1].x3/y3.
+		// The decomposer only updates its pen position on moveTo — it never pushes a curve —
+		// so any discontinuity in the curve chain marks a subpath boundary.
+		std::vector<size_t> starts;
 
-		pts.push_back({centerline.front().x1, centerline.front().y1});
+		starts.push_back(0);
 
-		for(const auto& c : centerline) detail::flattenCurve(
-			c.x1, c.y1,
-			c.x2, c.y2,
-			c.x3, c.y3,
-			tol,
-			0,
-			pts
-		);
+		for(size_t i = 1; i < centerline.size(); i++) {
+			const auto& prev = centerline[i - 1];
+			const auto& cur  = centerline[i];
 
-		if(pts.size() < 2) return false;
-
-		const size_t numSegs = pts.size() - 1;
-
-		// Pass 2a: per-segment perpendicular normals.
-		std::vector<std::pair<slug_t, slug_t>> segN(numSegs);
-
-		for(size_t i = 0; i < numSegs; i++) {
-			const slug_t dx = pts[i + 1].first - pts[i].first;
-			const slug_t dy = pts[i + 1].second - pts[i].second;
-			const slug_t len = std::sqrt(dx * dx + dy * dy);
-
-			segN[i] = len > 1e-9_cv
-				? std::pair{-dy / len, dx / len}
-				: std::pair{0_cv, 1_cv}
-			;
+			if(
+				std::abs(cur.x1 - prev.x3) > 1e-6_cv ||
+				std::abs(cur.y1 - prev.y3) > 1e-6_cv
+			) starts.push_back(i);
 		}
 
-		// Pass 2b: per-point miter-corrected normals.
 		static constexpr slug_t MITER_LIMIT = 4_cv;
 
 		struct PN { slug_t nx, ny; };
 
-		const bool isClosed =
-			std::abs(pts.back().first - pts.front().first) < 1e-6_cv &&
-			std::abs(pts.back().second - pts.front().second) < 1e-6_cv;
+		bool any = false;
 
-		auto calcMiter = [&](size_t prev, size_t cur) -> PN {
-			slug_t nx = segN[prev].first + segN[cur].first;
-			slug_t ny = segN[prev].second + segN[cur].second;
+		for(size_t si = 0; si < starts.size(); si++) {
+			const size_t begin = starts[si];
+			const size_t end   = (si + 1 < starts.size()) ? starts[si + 1] : centerline.size();
 
-			const slug_t len = std::sqrt(nx*nx + ny*ny);
+			if(begin >= end) continue;
 
-			if(len > 1e-6_cv) {
-				nx /= len; ny /= len;
+			// Pass 1: flatten this subpath to a polyline.
+			std::vector<std::pair<slug_t, slug_t>> pts;
 
-				const slug_t d = nx * segN[cur].first + ny * segN[cur].second;
+			pts.push_back({centerline[begin].x1, centerline[begin].y1});
 
-				if(d > 1e-3_cv) {
-					const slug_t m = 1_cv / d;
+			for(size_t i = begin; i < end; i++) {
+				const auto& c = centerline[i];
 
-					if(m <= MITER_LIMIT) { nx *= m; ny *= m; }
+				detail::flattenCurve(c.x1, c.y1, c.x2, c.y2, c.x3, c.y3, tol, 0, pts);
+			}
 
-					else { nx *= MITER_LIMIT; ny *= MITER_LIMIT; }
+			if(pts.size() < 2) continue;
+
+			const size_t numSegs = pts.size() - 1;
+
+			// Pass 2a: per-segment perpendicular normals.
+			std::vector<std::pair<slug_t, slug_t>> segN(numSegs);
+
+			for(size_t i = 0; i < numSegs; i++) {
+				const slug_t dx = pts[i + 1].first  - pts[i].first;
+				const slug_t dy = pts[i + 1].second - pts[i].second;
+				const slug_t len = std::sqrt(dx * dx + dy * dy);
+
+				segN[i] = len > 1e-9_cv
+					? std::pair{-dy / len, dx / len}
+					: std::pair{0_cv, 1_cv}
+				;
+			}
+
+			// Pass 2b: per-point miter-corrected normals.
+			const bool isClosed =
+				std::abs(pts.back().first  - pts.front().first)  < 1e-6_cv &&
+				std::abs(pts.back().second - pts.front().second) < 1e-6_cv;
+
+			auto calcMiter = [&](size_t prev, size_t cur) -> PN {
+				slug_t nx = segN[prev].first  + segN[cur].first;
+				slug_t ny = segN[prev].second + segN[cur].second;
+
+				const slug_t len = std::sqrt(nx * nx + ny * ny);
+
+				if(len > 1e-6_cv) {
+					nx /= len; ny /= len;
+
+					const slug_t d = nx * segN[cur].first + ny * segN[cur].second;
+
+					if(d > 1e-3_cv) {
+						const slug_t m = 1_cv / d;
+
+						if(m <= MITER_LIMIT) { nx *= m; ny *= m; }
+
+						else { nx *= MITER_LIMIT; ny *= MITER_LIMIT; }
+					}
 				}
+
+				else {
+					nx = segN[cur].first;
+					ny = segN[cur].second;
+				}
+
+				return {nx, ny};
+			};
+
+			std::vector<PN> pn(pts.size());
+
+			for(size_t i = 0; i < pts.size(); i++) {
+				if(!i) pn[i] = isClosed ? calcMiter(numSegs - 1, 0) : PN{segN[0].first, segN[0].second};
+
+				else if(i == numSegs) pn[i] = isClosed
+					? pn[0]
+					: PN{segN[numSegs - 1].first, segN[numSegs - 1].second}
+				;
+
+				else pn[i] = calcMiter(i - 1, i);
 			}
 
-			else {
-				nx = segN[cur].first;
-				ny = segN[cur].second;
+			// Pass 3: build lwall / rwall, then assemble closed outline.
+			Atlas::Curves lwall, rwall;
+
+			for(size_t i = 0; i < numSegs; i++) {
+				const slug_t p0x = pts[i].first,       p0y = pts[i].second;
+				const slug_t p2x = pts[i + 1].first,   p2y = pts[i + 1].second;
+				const slug_t l0x = p0x + h*pn[i].nx,   l0y = p0y + h*pn[i].ny;
+				const slug_t l2x = p2x + h*pn[i+1].nx, l2y = p2y + h*pn[i+1].ny;
+				const slug_t r0x = p0x - h*pn[i].nx,   r0y = p0y - h*pn[i].ny;
+				const slug_t r2x = p2x - h*pn[i+1].nx, r2y = p2y - h*pn[i+1].ny;
+
+				lwall.push_back({l0x, l0y, (l0x+l2x)*0.5_cv, (l0y+l2y)*0.5_cv, l2x, l2y});
+				rwall.push_back({r0x, r0y, (r0x+r2x)*0.5_cv, (r0y+r2y)*0.5_cv, r2x, r2y});
 			}
 
-			return {nx, ny};
-		};
+			if(lwall.empty()) continue;
 
-		std::vector<PN> pn(pts.size());
+			Atlas::Curves outline;
 
-		for(size_t i = 0; i < pts.size(); i++) {
-			if(!i) pn[i] = isClosed ? calcMiter(numSegs-1, 0) : PN{segN[0].first, segN[0].second};
+			for(const auto& r : rwall) outline.push_back(r);
 
-			else if(i==numSegs) pn[i] = isClosed ?
-				pn[0] :
-				PN{segN[numSegs-1].first, segN[numSegs-1].second}
-			;
+			{
+				const slug_t ax = rwall.back().x3, ay = rwall.back().y3;
+				const slug_t bx = lwall.back().x3, by = lwall.back().y3;
 
-			else pn[i] = calcMiter(i-1, i);
-		}
+				outline.push_back({ax, ay, (ax+bx)*0.5_cv, (ay+by)*0.5_cv, bx, by});
+			}
 
-		// Pass 3: build lwall / rwall, then close.
-		Atlas::Curves lwall, rwall;
+			for(size_t i = lwall.size(); i-- > 0;) {
+				const auto& l = lwall[i];
 
-		for(size_t i = 0; i < numSegs; i++) {
-			const slug_t p0x = pts[i].first, p0y = pts[i].second;
-			const slug_t p2x = pts[i+1].first, p2y = pts[i+1].second;
-			const slug_t l0x = p0x + h*pn[i].nx, l0y = p0y + h*pn[i].ny;
-			const slug_t l2x = p2x + h*pn[i+1].nx, l2y = p2y + h*pn[i+1].ny;
-			const slug_t r0x = p0x - h*pn[i].nx, r0y = p0y - h*pn[i].ny;
-			const slug_t r2x = p2x - h*pn[i+1].nx, r2y = p2y - h*pn[i+1].ny;
+				outline.push_back({l.x3, l.y3, l.x2, l.y2, l.x1, l.y1});
+			}
 
-			lwall.push_back({l0x, l0y, (l0x+l2x)*0.5_cv, (l0y+l2y)*0.5_cv, l2x, l2y});
-			rwall.push_back({r0x, r0y, (r0x+r2x)*0.5_cv, (r0y+r2y)*0.5_cv, r2x, r2y});
-		}
+			{
+				const slug_t ax = lwall.front().x1, ay = lwall.front().y1;
+				const slug_t bx = rwall.front().x1, by = rwall.front().y1;
 
-		if(lwall.empty()) return false;
+				outline.push_back({ax, ay, (ax+bx)*0.5_cv, (ay+by)*0.5_cv, bx, by});
+			}
 
-		Atlas::Curves outline;
+			if(!cw) for(const auto& c : outline) _pendingCurves.push_back(c);
 
-		for(const auto& r : rwall) outline.push_back(r);
+			else for(size_t i = outline.size(); i-- > 0;) {
+				const auto& c = outline[i];
 
-		{
-			const slug_t ax = rwall.back().x3, ay = rwall.back().y3;
-			const slug_t bx = lwall.back().x3, by = lwall.back().y3;
+				_pendingCurves.push_back({c.x3, c.y3, c.x2, c.y2, c.x1, c.y1});
+			}
 
-			outline.push_back({ax, ay, (ax+bx)*0.5_cv, (ay+by)*0.5_cv, bx, by});
-		}
-
-		for(size_t i = lwall.size(); i-- > 0;) {
-			const auto& l = lwall[i];
-
-			outline.push_back({l.x3, l.y3, l.x2, l.y2, l.x1, l.y1});
-		}
-
-		{
-			const slug_t ax = lwall.front().x1, ay = lwall.front().y1;
-			const slug_t bx = rwall.front().x1, by = rwall.front().y1;
-
-			outline.push_back({ax, ay, (ax+bx)*0.5_cv, (ay+by)*0.5_cv, bx, by});
-		}
-
-		if(!cw) for(const auto& c : outline) _pendingCurves.push_back(c);
-
-		else for(size_t i = outline.size(); i-- > 0;) {
-			const auto& c = outline[i];
-
-			_pendingCurves.push_back({c.x3, c.y3, c.x2, c.y2, c.x1, c.y1});
+			any = true;
 		}
 
 		_lutDirty = true;
 
-		return true;
+		return any;
 	}
 
 	// -------------------------------------------------------------------------
@@ -1349,6 +1378,10 @@ private:
 		layer.key = key;
 		layer.color = color;
 		placement.apply(transform.dx, transform.dy, layer.transform.x, layer.transform.y);
+
+		// When the caller declared manual [0,1] metrics, expand would push geometry
+		// outside the declared bounds and cause seam artifacts on wrapped UV surfaces.
+		if(!_autoMetrics) layer.expand = 0_cv;
 
 		_composite.layers.push_back(layer);
 
