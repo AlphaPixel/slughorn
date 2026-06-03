@@ -1,0 +1,649 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>slughorn Emoji Font Test</title>
+<style>
+	:root {
+		--bg: #111216;
+		--panel: #1b1d24;
+		--panel2: #232632;
+		--text: #f2f2f2;
+		--muted: #aeb4c2;
+		--accent: #7cc7ff;
+		--border: #333846;
+	}
+
+	* {
+		box-sizing: border-box;
+	}
+
+	body {
+		margin: 0;
+		background: var(--bg);
+		color: var(--text);
+		font-family: system-ui, sans-serif;
+		overflow: hidden;
+	}
+
+	#toolbar {
+		height: 56px;
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		padding: 10px 12px;
+		background: var(--panel);
+		border-bottom: 1px solid var(--border);
+		white-space: nowrap;
+	}
+
+	label {
+		color: var(--muted);
+		font-size: 13px;
+	}
+
+	select,
+	input[type="range"],
+	input[type="search"],
+	button {
+		background: var(--panel2);
+		color: var(--text);
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		padding: 7px 9px;
+	}
+
+	select {
+		min-width: 360px;
+	}
+
+	input[type="search"] {
+		width: 220px;
+	}
+
+	button {
+		cursor: pointer;
+	}
+
+	button:hover {
+		border-color: var(--accent);
+	}
+
+	#status {
+		margin-left: auto;
+		color: var(--muted);
+		font-size: 12px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	#main {
+		height: calc(100vh - 56px);
+		display: grid;
+		grid-template-columns: 260px 1fr;
+		min-height: 0;
+	}
+
+	#emojiList {
+		overflow: auto;
+		background: var(--panel);
+		border-right: 1px solid var(--border);
+		padding: 8px;
+	}
+
+	.emojiButton {
+		display: grid;
+		grid-template-columns: 42px 1fr;
+		align-items: center;
+		width: 100%;
+		border: 1px solid transparent;
+		background: transparent;
+		color: var(--text);
+		text-align: left;
+		border-radius: 10px;
+		padding: 6px;
+		gap: 8px;
+		cursor: pointer;
+	}
+
+	.emojiButton:hover {
+		background: var(--panel2);
+	}
+
+	.emojiButton.selected {
+		background: #253449;
+		border-color: var(--accent);
+	}
+
+	.emojiGlyph {
+		font-size: 28px;
+		line-height: 1;
+		text-align: center;
+		font-family: var(--emoji-font), system-ui, sans-serif;
+	}
+
+	.emojiMeta {
+		min-width: 0;
+	}
+
+	.emojiName {
+		font-size: 13px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.emojiCode {
+		font-size: 11px;
+		color: var(--muted);
+	}
+
+	#stageWrap {
+		position: relative;
+		min-width: 0;
+		min-height: 0;
+		background:
+			linear-gradient(45deg, #171922 25%, transparent 25%),
+			linear-gradient(-45deg, #171922 25%, transparent 25%),
+			linear-gradient(45deg, transparent 75%, #171922 75%),
+			linear-gradient(-45deg, transparent 75%, #171922 75%);
+		background-size: 32px 32px;
+		background-position: 0 0, 0 16px, 16px -16px, -16px 0;
+	}
+
+	canvas {
+		display: block;
+		width: 100%;
+		height: 100%;
+	}
+
+	#hud {
+		position: absolute;
+		left: 12px;
+		bottom: 12px;
+		background: rgba(0, 0, 0, 0.62);
+		border: 1px solid rgba(255, 255, 255, 0.15);
+		border-radius: 10px;
+		padding: 8px 10px;
+		font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+		font-size: 12px;
+		color: #d8dde8;
+		pointer-events: none;
+		white-space: pre;
+	}
+
+	#dropHint {
+		position: absolute;
+		inset: 18px;
+		border: 2px dashed rgba(124, 199, 255, 0.6);
+		border-radius: 18px;
+		display: none;
+		align-items: center;
+		justify-content: center;
+		font-size: 22px;
+		background: rgba(20, 28, 40, 0.78);
+		color: var(--accent);
+		pointer-events: none;
+	}
+
+	#stageWrap.dragging #dropHint {
+		display: flex;
+	}
+</style>
+</head>
+<body>
+	<div id="toolbar">
+		<label for="fontSelect">Font</label>
+		<select id="fontSelect"></select>
+
+		<label for="sizeRange">Size</label>
+		<input id="sizeRange" type="range" min="16" max="512" value="220" />
+		<span id="sizeLabel">220px</span>
+
+		<label for="search">Emoji</label>
+		<input id="search" type="search" placeholder="filter: dragon, heart..." />
+
+		<button id="reloadEmoji">Reload emoji.hpp</button>
+		<button id="fit">Fit</button>
+
+		<span id="status">Loading…</span>
+	</div>
+
+	<div id="main">
+		<nav id="emojiList"></nav>
+		<div id="stageWrap">
+			<canvas id="canvas"></canvas>
+			<div id="hud"></div>
+			<div id="dropHint">Drop a .ttf/.otf font here</div>
+		</div>
+	</div>
+
+<script>
+"use strict";
+
+const FONT_FILES = [
+	"font/COLRv0/EmojiTwoCOLRv0.ttf",
+	"font/COLRv0/TwemojiCOLRv0.ttf",
+	"font/COLRv0/OpenMojiCOLRv0.ttf",
+	"font/COLRv0/segoe-ui-emoji_0.ttf",
+	"font/COLRv0/Twemoji.Mozilla.ttf",
+	"font/COLRv1/twemoji-glyf_colr_1.ttf",
+	"font/COLRv1/noto-glyf_colr_1.ttf",
+	"font/COLRv1/NotoColorEmoji-Regular.ttf",
+];
+
+const FALLBACK_EMOJIS = [
+	["dragon", 0x1F409],
+	["dragon_face", 0x1F432],
+	["puzzle_piece", 0x1F9E9],
+	["rocket", 0x1F680],
+	["alien", 0x1F47D],
+	["robot", 0x1F916],
+	["ghost", 0x1F47B],
+	["fire", 0x1F525],
+	["t_rex", 0x1F996],
+	["guitar", 0x1F3B8],
+	["satellite", 0x1F6F0],
+	["flying_saucer", 0x1F6F8],
+	["skull", 0x1F480],
+	["heart_suit", 0x02665],
+	["red_heart", 0x02764],
+	["cat_face", 0x1F431],
+	["dog_face", 0x1F436],
+	["frog", 0x1F438],
+	["unicorn", 0x1F984],
+	["zombie", 0x1F9DF],
+];
+
+const fontSelect = document.getElementById("fontSelect");
+const emojiList = document.getElementById("emojiList");
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+const statusEl = document.getElementById("status");
+const hud = document.getElementById("hud");
+const sizeRange = document.getElementById("sizeRange");
+const sizeLabel = document.getElementById("sizeLabel");
+const search = document.getElementById("search");
+const reloadEmoji = document.getElementById("reloadEmoji");
+const fitButton = document.getElementById("fit");
+const stageWrap = document.getElementById("stageWrap");
+
+let emojis = [];
+let filtered = [];
+let selected = null;
+let currentFontFace = null;
+let currentFontFamily = "SlughornEmojiTest";
+let fontSourceLabel = "";
+let panX = 0;
+let panY = 0;
+let dragging = false;
+let dragStart = null;
+
+function cpToHex(cp) {
+	return "U+" + cp.toString(16).toUpperCase().padStart(4, "0");
+}
+
+function cpToString(cp) {
+	return String.fromCodePoint(cp);
+}
+
+function basename(path) {
+	return path.split("/").pop();
+}
+
+function setStatus(text) {
+	statusEl.textContent = text;
+}
+
+function parseEmojiHpp(text) {
+	const out = [];
+	const re = /\{\s*"([^"]+)"\s*,\s*0x([0-9A-Fa-f]+)\s*\}/g;
+	let match;
+
+	while((match = re.exec(text)) !== null) {
+		out.push([match[1], parseInt(match[2], 16)]);
+	}
+
+	out.sort((a, b) => a[0].localeCompare(b[0]));
+
+	return out;
+}
+
+async function loadEmojiTable() {
+	const candidates = [
+		"emoji.hpp",
+		// "slughorn/emoji.hpp",
+		// "include/slughorn/emoji.hpp",
+		// "../include/slughorn/emoji.hpp",
+	];
+
+	for(const url of candidates) {
+		try {
+			const response = await fetch(url, { cache: "no-cache" });
+			if(!response.ok) continue;
+
+			const text = await response.text();
+			const parsed = parseEmojiHpp(text);
+
+			if(parsed.length > 0) {
+				emojis = parsed;
+				setStatus(`Loaded ${parsed.length} emojis from ${url}`);
+				return;
+			}
+		}
+
+		catch(err) {
+			// file:// and CORS failures land here. That's fine.
+		}
+	}
+
+	emojis = FALLBACK_EMOJIS.slice();
+	setStatus(
+		`Could not fetch slughorn/emoji.hpp; using ${emojis.length} built-in fallback emojis. ` +
+		`Run from repo root with: python3 -m http.server`
+	);
+}
+
+function populateFonts() {
+	fontSelect.innerHTML = "";
+
+	for(const path of FONT_FILES) {
+		const option = document.createElement("option");
+		option.value = path;
+		option.textContent = path;
+		fontSelect.appendChild(option);
+	}
+}
+
+async function loadSelectedFont() {
+	const url = fontSelect.value;
+	fontSourceLabel = url;
+
+	try {
+		if(currentFontFace) {
+			document.fonts.delete(currentFontFace);
+			currentFontFace = null;
+		}
+
+		const family = "SlughornEmojiTest";
+		const face = new FontFace(family, `url("${url}")`);
+		await face.load();
+
+		document.fonts.add(face);
+		currentFontFace = face;
+		currentFontFamily = family;
+
+		document.documentElement.style.setProperty("--emoji-font", `"${family}"`);
+		setStatus(`Loaded font: ${url}`);
+	}
+
+	catch(err) {
+		currentFontFamily = "system-ui";
+		document.documentElement.style.setProperty("--emoji-font", "system-ui");
+		setStatus(`Font load failed: ${url} — ${err.message}`);
+	}
+
+	renderList();
+	draw();
+}
+
+async function loadDroppedFont(file) {
+	if(!file) return;
+
+	const url = URL.createObjectURL(file);
+	fontSourceLabel = file.name;
+
+	try {
+		if(currentFontFace) {
+			document.fonts.delete(currentFontFace);
+			currentFontFace = null;
+		}
+
+		const family = "SlughornEmojiDropped";
+		const face = new FontFace(family, `url("${url}")`);
+		await face.load();
+
+		document.fonts.add(face);
+		currentFontFace = face;
+		currentFontFamily = family;
+
+		document.documentElement.style.setProperty("--emoji-font", `"${family}"`);
+		setStatus(`Loaded dropped font: ${file.name}`);
+	}
+
+	catch(err) {
+		setStatus(`Dropped font load failed: ${file.name} — ${err.message}`);
+	}
+
+	renderList();
+	draw();
+}
+
+function renderList() {
+	const q = search.value.trim().toLowerCase();
+
+	filtered = emojis.filter(([name, cp]) => {
+		if(!q) return true;
+		return name.includes(q) || cpToHex(cp).toLowerCase().includes(q);
+	});
+
+	emojiList.innerHTML = "";
+
+	for(const [name, cp] of filtered) {
+		const button = document.createElement("button");
+		button.className = "emojiButton";
+		if(selected && selected[0] === name) button.classList.add("selected");
+
+		const glyph = document.createElement("div");
+		glyph.className = "emojiGlyph";
+		glyph.textContent = cpToString(cp);
+
+		const meta = document.createElement("div");
+		meta.className = "emojiMeta";
+
+		const nameEl = document.createElement("div");
+		nameEl.className = "emojiName";
+		nameEl.textContent = name;
+
+		const codeEl = document.createElement("div");
+		codeEl.className = "emojiCode";
+		codeEl.textContent = cpToHex(cp);
+
+		meta.append(nameEl, codeEl);
+		button.append(glyph, meta);
+
+		button.addEventListener("click", () => {
+			selected = [name, cp];
+			renderList();
+			draw();
+		});
+
+		emojiList.appendChild(button);
+	}
+
+	if(!selected && filtered.length > 0) selected = filtered[0];
+
+	draw();
+}
+
+function resizeCanvas() {
+	const dpr = window.devicePixelRatio || 1;
+	const rect = canvas.getBoundingClientRect();
+
+	const w = Math.max(1, Math.floor(rect.width * dpr));
+	const h = Math.max(1, Math.floor(rect.height * dpr));
+
+	if(canvas.width !== w || canvas.height !== h) {
+		canvas.width = w;
+		canvas.height = h;
+	}
+
+	draw();
+}
+
+function draw() {
+	if(!ctx) return;
+
+	const dpr = window.devicePixelRatio || 1;
+	const w = canvas.width;
+	const h = canvas.height;
+	const cssW = w / dpr;
+	const cssH = h / dpr;
+	const fontSize = Number(sizeRange.value);
+
+	ctx.save();
+	ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+	ctx.clearRect(0, 0, cssW, cssH);
+
+	ctx.fillStyle = "rgba(0, 0, 0, 0.28)";
+	ctx.fillRect(0, 0, cssW, cssH);
+
+	ctx.strokeStyle = "rgba(255, 255, 255, 0.12)";
+	ctx.lineWidth = 1;
+	ctx.beginPath();
+	ctx.moveTo(cssW / 2 + panX, 0);
+	ctx.lineTo(cssW / 2 + panX, cssH);
+	ctx.moveTo(0, cssH / 2 + panY);
+	ctx.lineTo(cssW, cssH / 2 + panY);
+	ctx.stroke();
+
+	if(selected) {
+		const [name, cp] = selected;
+		const glyph = cpToString(cp);
+
+		ctx.font = `${fontSize}px "${currentFontFamily}", system-ui, sans-serif`;
+		ctx.textAlign = "center";
+		ctx.textBaseline = "middle";
+
+		ctx.fillStyle = "white";
+		ctx.fillText(glyph, cssW / 2 + panX, cssH / 2 + panY);
+
+		hud.textContent =
+			`${name}\n` +
+			`${cpToHex(cp)}  ${glyph}\n` +
+			`font: ${fontSourceLabel || "(system fallback)"}\n` +
+			`size: ${fontSize}px  dpr: ${dpr.toFixed(2)}\n` +
+			`wheel: zoom  drag: pan`;
+	}
+
+	else {
+		ctx.fillStyle = "#d8dde8";
+		ctx.font = "20px system-ui, sans-serif";
+		ctx.textAlign = "center";
+		ctx.textBaseline = "middle";
+		ctx.fillText("No emoji selected", cssW / 2, cssH / 2);
+		hud.textContent = "";
+	}
+
+	ctx.restore();
+
+	sizeLabel.textContent = `${fontSize}px`;
+}
+
+function fitSelected() {
+	const rect = canvas.getBoundingClientRect();
+	const s = Math.floor(Math.min(rect.width, rect.height) * 0.58);
+	sizeRange.value = String(Math.max(16, Math.min(512, s)));
+	panX = 0;
+	panY = 0;
+	draw();
+}
+
+function initInput() {
+	fontSelect.addEventListener("change", loadSelectedFont);
+
+	sizeRange.addEventListener("input", draw);
+
+	search.addEventListener("input", () => {
+		renderList();
+	});
+
+	reloadEmoji.addEventListener("click", async () => {
+		selected = null;
+		await loadEmojiTable();
+		renderList();
+	});
+
+	fitButton.addEventListener("click", fitSelected);
+
+	canvas.addEventListener("wheel", event => {
+		event.preventDefault();
+
+		const oldSize = Number(sizeRange.value);
+		const factor = event.deltaY < 0 ? 1.08 : 1 / 1.08;
+		const next = Math.max(16, Math.min(512, Math.round(oldSize * factor)));
+
+		sizeRange.value = String(next);
+		draw();
+	}, { passive: false });
+
+	canvas.addEventListener("pointerdown", event => {
+		dragging = true;
+		canvas.setPointerCapture(event.pointerId);
+		dragStart = {
+			x: event.clientX,
+			y: event.clientY,
+			panX,
+			panY,
+		};
+	});
+
+	canvas.addEventListener("pointermove", event => {
+		if(!dragging || !dragStart) return;
+
+		panX = dragStart.panX + (event.clientX - dragStart.x);
+		panY = dragStart.panY + (event.clientY - dragStart.y);
+		draw();
+	});
+
+	canvas.addEventListener("pointerup", event => {
+		dragging = false;
+		dragStart = null;
+		canvas.releasePointerCapture(event.pointerId);
+	});
+
+	for(const eventName of ["dragenter", "dragover"]) {
+		stageWrap.addEventListener(eventName, event => {
+			event.preventDefault();
+			stageWrap.classList.add("dragging");
+		});
+	}
+
+	for(const eventName of ["dragleave", "drop"]) {
+		stageWrap.addEventListener(eventName, event => {
+			event.preventDefault();
+			stageWrap.classList.remove("dragging");
+		});
+	}
+
+	stageWrap.addEventListener("drop", event => {
+		const file = event.dataTransfer.files[0];
+		loadDroppedFont(file);
+	});
+}
+
+async function main() {
+	populateFonts();
+	initInput();
+
+	await loadEmojiTable();
+
+	selected = emojis.find(([name]) => name === "dragon")
+		|| emojis.find(([name]) => name === "puzzle_piece")
+		|| emojis[0]
+		|| null;
+
+	renderList();
+	await loadSelectedFont();
+
+	resizeCanvas();
+	fitSelected();
+
+	window.addEventListener("resize", resizeCanvas);
+}
+
+main();
+</script>
+</body>
+</html>
