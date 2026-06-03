@@ -351,6 +351,59 @@ struct CompositeShape {
 	// Usage is obvious in text situations; in "pure shape" modes, can be used to help arrange
 	// groups of `Shape` instances horizontally.
 	slug_t advance = 0_cv;
+
+	// --------------------------------------------------------------------------------------------
+	// Layer access
+	// --------------------------------------------------------------------------------------------
+
+	size_t size() const { return layers.size(); }
+	bool empty() const { return layers.empty(); }
+
+	Layer& operator[](size_t i) { return layers[i]; }
+	const Layer& operator[](size_t i) const { return layers[i]; }
+
+	// Named lookup - throws std::out_of_range if key is not present.
+	// Intended for post-finalize configuration (e.g. setting effectId on a named hand shape).
+	// Because the atlas is a separate argument to boundingBox(), the same CompositeShape can be
+	// reused with any compatible atlas - useful for font/convention swaps without re-authoring.
+	Layer& layer(Key key) {
+		for(auto& l : layers) if(l.key == key) return l;
+		throw std::out_of_range("CompositeShape::layer: key not found");
+	}
+
+	const Layer& layer(Key key) const {
+		for(const auto& l : layers) if(l.key == key) return l;
+		throw std::out_of_range("CompositeShape::layer: key not found");
+	}
+
+	// --------------------------------------------------------------------------------------------
+	// Geometry
+	// --------------------------------------------------------------------------------------------
+
+	// Returns the union of all layer quads in world space. Skips layers whose key is not in the
+	// atlas (pre-build or mismatched atlas). Returns nullopt if no layer resolves.
+	// Atlas is a parameter - not a member - so that CompositeShapes are atlas-agnostic and can
+	// be used with any compatible atlas without re-authoring.
+	std::optional<Quad> boundingBox(const Atlas& atlas) const;
+
+	// --------------------------------------------------------------------------------------------
+	// Future ideas (deferred until we have real use cases):
+	//
+	// TODO: merge(const CompositeShape&) - append another composite's layers into this one;
+	//       useful for assembling scenes from independently-authored parts.
+	//
+	// TODO: filter(pred) -> CompositeShape - return a view/copy containing only layers that
+	//       match a predicate; e.g. all layers with effectId != 0.
+	//
+	// TODO: reorder(std::span<Key>) - reorder layers by key list for z-order adjustment
+	//       without rebuilding; only safe when shapes don't overlap significantly.
+	//
+	// TODO: hasLayer(Key) -> bool - safe pre-check before layer(Key) when existence is
+	//       uncertain (optional clock hands, conditional HUD elements, etc.)
+	//
+	// TODO: setEffectId(Key, uint32_t) / setColor(Key, Color) - convenience setters that
+	//       combine the layer() lookup + field assignment into one call.
+	// --------------------------------------------------------------------------------------------
 };
 
 // ================================================================================================
@@ -1400,6 +1453,32 @@ inline std::ostream& operator<<(std::ostream& os, const Atlas::TextureData& t) {
 
 inline std::ostream& operator<<(std::ostream& os, const CompositeShape& c) {
 	return os << "CompositeShape(layers=" << c.layers.size() << " advance=" << c.advance << ")";
+}
+
+inline std::optional<Quad> CompositeShape::boundingBox(const Atlas& atlas) const {
+	slug_t minX = std::numeric_limits<slug_t>::max();
+	slug_t minY = std::numeric_limits<slug_t>::max();
+	slug_t maxX = std::numeric_limits<slug_t>::lowest();
+	slug_t maxY = std::numeric_limits<slug_t>::lowest();
+
+	bool any = false;
+
+	for(const auto& l : layers) {
+		const auto shape = atlas.getShape(l.key);
+
+		if(!shape) continue;
+
+		const auto q = shape->computeQuad(l.transform, l.scale, l.expand);
+
+		minX = std::min(minX, q.x0);
+		minY = std::min(minY, q.y0);
+		maxX = std::max(maxX, q.x1);
+		maxY = std::max(maxY, q.y1);
+
+		any = true;
+	}
+
+	return any ? std::optional<Quad>({minX, minY, maxX, maxY}) : std::nullopt;
 }
 
 inline std::ostream& operator<<(std::ostream& os, const FontMetrics& m) {
