@@ -499,7 +499,7 @@ static void buildMesh(
 	unsigned short base = 0;
 
 	for(const auto& layer : layers) {
-		const slughorn::Atlas::Shape* shape = atlas.getShape(layer.key);
+		const auto shape = atlas.getShape(layer.key);
 
 		if(!shape) continue;
 
