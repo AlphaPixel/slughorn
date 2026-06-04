@@ -433,7 +433,7 @@ inline Sampler decode(
 			throw std::runtime_error("Band texture read out of bounds")
 		;
 
-		return bandData + size_t(texelIndex) * 4;
+		return bandData + size_t{texelIndex} * 4;
 	};
 
 	for(uint32_t q = 0; q < Atlas::INDIRECTION_SIZE; q++) {
@@ -507,8 +507,8 @@ inline Sampler decode(
 			throw std::runtime_error("Curve texture read out of bounds")
 		;
 
-		const float* t0 = curveData + size_t(texel0) * 4;
-		const float* t1 = curveData + size_t(texel1) * 4;
+		const float* t0 = curveData + size_t{texel0} * 4;
+		const float* t1 = curveData + size_t{texel1} * 4;
 
 		remap[globalIndex] = static_cast<uint32_t>(out.curves.size());
 

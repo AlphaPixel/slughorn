@@ -14,7 +14,7 @@
 // slughorn.ShapeInfo (flat)
 // slughorn.Shape (flat, readonly)
 // slughorn.TextureData (flat, zero-copy memoryview)
-// slughorn.Atlas (add_shape, add_composite_shape, build, get_shape_info, get_composite_shape,
+// slughorn.Atlas (add_shape, add_composite_shape, build, get_shape, get_composite_shape,
 // get_shape_contours, has_key, is_built property, curve_texture, band_texture)
 // slughorn.CurveDecomposer (owns its Curves internally - safe for Python GC)
 //
@@ -794,7 +794,7 @@ PYBIND11_MODULE(slughorn, m) {
 				return result;
 			},
 			"Em-space curves as a flat list of (x1,y1,x2,y2,x3,y3) tuples. "
-			"Valid at any build lifecycle stage when accessed via get_shape_info()."
+			"Valid at any build lifecycle stage when accessed via get_shape()."
 		)
 		.def("__repr__", [](const slughorn::Atlas::Shape& s) { return streamRepr(s); })
 	;
@@ -882,7 +882,7 @@ PYBIND11_MODULE(slughorn, m) {
 			"True after build() has been called."
 		)
 
-		.def("get_shape_info",
+		.def("get_shape",
 			[](const slughorn::Atlas& a, slughorn::Key key)
 				-> std::optional<slughorn::Atlas::Shape>
 			{
@@ -1072,6 +1072,7 @@ PYBIND11_MODULE(slughorn, m) {
 		)
 #endif // SLUGHORN_HAS_MSDF
 
+#if 0
 		.def_static("compute_adaptive_splits",
 			[](const slughorn::Atlas::Curves& curves, int num_bands_x, int num_bands_y)
 				-> py::tuple
@@ -1092,6 +1093,7 @@ PYBIND11_MODULE(slughorn, m) {
 			"    info.splits_x = splits_x\n"
 			"    info.splits_y = splits_y"
 		)
+#endif
 
 		.def_static("compute_uniform_splits",
 			[](const slughorn::Atlas::Curves& curves, int num_bands_x, int num_bands_y)
@@ -1901,6 +1903,24 @@ PYBIND11_MODULE(slughorn, m) {
 				"For fill+stroke in one CompositeShape, call stroke_text() first (outline\n"
 				"underneath), then text() (fill on top), then finalize().\n\n"
 				"anchor_y and align_x work identically to text()."
+			)
+
+			.def("text_on_path",
+				&slughorn::canvas::Canvas::textOnPath,
+				py::arg("path"),
+				py::arg("s"),
+				py::arg("font_size"),
+				py::arg("start_frac"),
+				py::arg("color"),
+				py::arg("metrics"),
+				py::arg("anchor_y") = slughorn::canvas::TextAnchorY::Baseline,
+				"Place filled glyphs from s along path, each rotated to follow the tangent.\n\n"
+				"path is a slughorn.canvas.Path built with arc/move_to/etc.\n"
+				"start_frac in [0,1] is the normalized arc-length start position;\n"
+				"use 0.0 for left-aligned or compute (arc_len - text_width) / (2*arc_len)\n"
+				"for centered. Glyphs that extend past the path end are dropped.\n\n"
+				"The atlas must already contain the requested codepoints (loaded via\n"
+				"slughorn.freetype.load_font_glyphs before atlas.build())."
 			)
 
 			// Accessors -------------------------------------------------------

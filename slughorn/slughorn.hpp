@@ -641,6 +641,32 @@ public:
 	// curveTexelsUsed + curveTexelsPadding <= curveTexelsTotal
 	// (total may exceed their sum due to unused space at the end of the last row)
 	// --------------------------------------------------------------------------------------------
+	// Options for SDF/MSDF atlas rasterization. Pass to setSDFOptions() before build().
+	// msdf=false: single-channel SDF (R replicated to RGB8).
+	// msdf=true:  3-channel MSDF (RGB8, reconstruct with median(r,g,b) in shader).
+	// Both paths require SLUGHORN_MSDF=ON (msdfgen). Without it, rasterizeSDFAtlas() is a no-op.
+	struct SDFOptions {
+		uint32_t tileSize   = 128;
+		double   range      = 0.1;
+		uint32_t atlasWidth = 1024;
+		bool     msdf       = false;
+	};
+
+	// UV record for one shape tile inside the packed SDF atlas texture.
+	struct SDFRecord {
+		uint32_t atlasX = 0, atlasY = 0; // top-left corner (texels)
+		uint32_t tileW  = 0, tileH  = 0; // tile dimensions  (texels)
+	};
+
+	// Packed SDF/MSDF texture + per-shape UV records.
+	// Populated by build() when setSDFOptions() was called beforehand.
+	struct SDFAtlas {
+		TextureData texture;                               // RGB8
+		std::unordered_map<Key, SDFRecord, KeyHash> recs;
+
+		bool empty() const { return recs.empty(); }
+	};
+
 	struct PackingStats {
 		// Curve texture
 		uint32_t curveTexelsUsed = 0; // texels written with actual curve data
@@ -786,6 +812,11 @@ public:
 	// during build(); adding one after build() has no effect on rendering.
 	uint32_t addGradient(const GradientInfo& info);
 
+	// Opt in to SDF/MSDF atlas generation. Must be called before build().
+	// When set, build() will call rasterizeSDFAtlas() after packTextures(), producing a packed
+	// RGB8 texture retrievable via getSDFAtlasData(). No-op if called after build().
+	void setSDFOptions(const SDFOptions& opts) { if(!_built) _sdfOptions = opts; }
+
 	// Register a geometry shape under @p key.
 	//
 	// Must be called before build(). Calling addShape() with an already-registered key silently
@@ -863,6 +894,7 @@ public:
 	const TextureData& getCurveTextureData() const { return _curveData; }
 	const TextureData& getBandTextureData() const { return _bandData; }
 	const TextureData& getGradientTextureData() const { return _gradientData; }
+	const SDFAtlas& getSDFAtlasData() const { return _sdfAtlas; }
 
 	// Gradient list (valid after build() if any gradients were registered).
 	const std::vector<GradientInfo>& getGradients() const { return _gradients; }
@@ -952,6 +984,7 @@ private:
 
 	void packTextures();
 	void rasterizeGradients();
+	void rasterizeSDFAtlas();
 
 	// --------------------------------------------------------------------------------------------
 	// Data
@@ -965,6 +998,9 @@ private:
 	TextureData _gradientData;
 
 	std::vector<GradientInfo> _gradients;
+
+	std::optional<SDFOptions> _sdfOptions;
+	SDFAtlas _sdfAtlas;
 
 	PackingStats _packingStats; // populated by packTextures()
 

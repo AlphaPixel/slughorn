@@ -132,11 +132,12 @@ if(SLUGHORN_MSDF)
 	set(MSDFGEN_INSTALL        OFF CACHE BOOL "" FORCE)
 
 	add_subdirectory("ext/msdfgen")
+	set_target_properties(msdfgen-core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 	# target_compile_definitions(slughorn PRIVATE SLUGHORN_MSDF_IMPLEMENTATION)
 	target_compile_definitions(slughorn PUBLIC SLUGHORN_HAS_MSDF)
 	target_include_directories(slughorn
-		PUBLIC
+		SYSTEM PUBLIC
 			$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/ext/msdfgen>
 	)
 	target_link_libraries(slughorn PUBLIC msdfgen-core)

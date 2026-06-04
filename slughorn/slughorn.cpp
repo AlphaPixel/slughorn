@@ -12,6 +12,10 @@
 #include "freetype.hpp"
 #endif
 
+#ifdef SLUGHORN_HAS_MSDF
+#include "render.hpp"
+#endif
+
 #include <algorithm>
 #include <cassert>
 #include <cstring>
@@ -25,6 +29,7 @@ namespace {
 
 using slughorn::slug_t;
 
+#if 0
 // Sweep-line density analysis for one axis. Returns numBands-1 split positions in em-space,
 // placed at curve-density valleys (positions where fewest curves' bounding boxes cross).
 //
@@ -33,7 +38,9 @@ using slughorn::slug_t;
 std::vector<slug_t> computeAxisSplits(
 	const slughorn::Atlas::Curves& curves,
 	bool useY,
-	slug_t axisMin, slug_t axisMax, slug_t axisRange,
+	slug_t axisMin,
+	slug_t axisMax,
+	slug_t axisRange,
 	uint32_t numBands
 ) {
 	if(numBands <= 1) return {};
@@ -73,8 +80,11 @@ std::vector<slug_t> computeAxisSplits(
 
 	// Sweep: record density of each region between consecutive event positions.
 	struct Region { slug_t lo, hi; int density; };
+
 	std::vector<Region> regions;
+
 	int active = 0;
+
 	slug_t prevPos = axisMin;
 
 	for(size_t i = 0; i < events.size(); ) {
@@ -82,33 +92,39 @@ std::vector<slug_t> computeAxisSplits(
 
 		if(evPos > prevPos + 1e-7f) {
 			regions.push_back({prevPos, evPos, active});
+
 			prevPos = evPos;
 		}
 
 		while(i < events.size() && events[i].pos <= evPos + 1e-7f) {
 			active = std::max(0, active + events[i].delta);
+
 			i++;
 		}
 	}
 
-	if(axisMax > prevPos + 1e-7f)
-		regions.push_back({prevPos, axisMax, active});
+	if(axisMax > prevPos + 1e-7f) regions.push_back({prevPos, axisMax, active});
 
 	if(regions.empty()) {
 		std::vector<slug_t> splits(numSplits);
-		for(uint32_t i = 0; i < numSplits; i++)
+
+		for(uint32_t i = 0; i < numSplits; i++) {
 			splits[i] = axisMin + axisRange * cv(i + 1) / cv(numBands);
+		}
+
 		return splits;
 	}
 
 	// Sort regions by density ascending: lowest density = best valley candidates.
 	std::vector<Region> sorted = regions;
+
 	std::sort(sorted.begin(), sorted.end(), [](const Region& a, const Region& b) {
 		return a.density < b.density;
 	});
 
 	// Greedily pick valley midpoints, enforcing minimum spacing between splits.
 	std::vector<slug_t> splits;
+
 	splits.reserve(numSplits);
 
 	for(const auto& region : sorted) {
@@ -142,6 +158,7 @@ std::vector<slug_t> computeAxisSplits(
 
 	return splits;
 }
+#endif
 
 bool curveIntersectsBandY(const slughorn::Atlas::Curve& c, slug_t lo, slug_t hi) {
 	const slug_t minY = std::min({c.y1, c.y2, c.y3});
@@ -188,6 +205,8 @@ Atlas::~Atlas() = default;
 // Atlas::computeAdaptiveSplits / computeUniformSplits
 // ================================================================================================
 
+#if 0
+// TODO: This ended up being a waste of time; it should be removed soon...
 std::pair<std::vector<slug_t>, std::vector<slug_t>> Atlas::computeAdaptiveSplits(
 	const Curves& curves,
 	int numBandsX,
@@ -212,10 +231,12 @@ std::pair<std::vector<slug_t>, std::vector<slug_t>> Atlas::computeAdaptiveSplits
 	const uint32_t nX = numBandsX > 1 ? static_cast<uint32_t>(numBandsX) : 0u;
 
 	return {
-		computeAxisSplits(curves, /*useY=*/false, minX, maxX, rangeX, nX),
-		computeAxisSplits(curves, /*useY=*/true, minY, maxY, rangeY, nY),
+		// TODO: Second boolean argument is `useY`; why?
+		computeAxisSplits(curves, false, minX, maxX, rangeX, nX),
+		computeAxisSplits(curves, true, minY, maxY, rangeY, nY),
 	};
 }
+#endif
 
 std::pair<std::vector<slug_t>, std::vector<slug_t>> Atlas::computeUniformSplits(
 	const Curves& /*curves*/,
@@ -265,7 +286,15 @@ void Atlas::addShape(Key key, const ShapeInfo& desc) {
 	build.splitsY = desc.splitsY;
 	build.splitsX = desc.splitsX;
 
-	buildShapeBands(key, build, numBandsX, numBandsY, /*overrideMetrics=*/!desc.autoMetrics, desc.origin);
+	buildShapeBands(
+		key,
+		build,
+		numBandsX,
+		numBandsY,
+		// overrideMetrics
+		!desc.autoMetrics,
+		desc.origin
+	);
 }
 
 // ================================================================================================
@@ -381,7 +410,13 @@ void Atlas::normalizeShapeMetrics(const std::vector<Key>& keys) {
 // Atlas::setShapeMetrics
 // ================================================================================================
 
-void Atlas::setShapeMetrics(const Key& key, slug_t bearingX, slug_t bearingY, slug_t width, slug_t height) {
+void Atlas::setShapeMetrics(
+	const Key& key,
+	slug_t bearingX,
+	slug_t bearingY,
+	slug_t width,
+	slug_t height
+) {
 	if(_built) return;
 
 	auto it = _build.find(key);
@@ -406,6 +441,7 @@ void Atlas::build() {
 
 	packTextures();
 	rasterizeGradients();
+	rasterizeSDFAtlas();
 
 	_built = true;
 }
@@ -427,7 +463,7 @@ void Atlas::rasterizeGradients() {
 	_gradientData.height = numGradients;
 	_gradientData.format = TextureData::Format::RGBA8;
 
-	_gradientData.bytes.assign(size_t(GRADIENT_STRIP_WIDTH) * numGradients * 4, 0);
+	_gradientData.bytes.assign(size_t{GRADIENT_STRIP_WIDTH} * numGradients * 4, 0);
 
 	_packingStats.gradientCount = numGradients;
 	_packingStats.gradientTexelsTotal = GRADIENT_STRIP_WIDTH * numGradients;
@@ -492,6 +528,142 @@ void Atlas::rasterizeGradients() {
 }
 
 // ================================================================================================
+// Atlas::rasterizeSDFAtlas
+//
+// Sprite-sheet packer for SDF/MSDF tiles. Mirrors rasterizeGradients() in structure:
+// called at the tail of build(), no-op if _sdfOptions is not set.
+//
+// Two-pass: render all tiles first (actual dimensions vary from tileSize due to aspect
+// ratio), then shelf-pack into a single RGB8 texture and record SDFRecord per key.
+//
+// Requires SLUGHORN_HAS_MSDF — the C++ DT fallback (Path B) is not yet implemented.
+// ================================================================================================
+
+void Atlas::rasterizeSDFAtlas() {
+#ifdef SLUGHORN_HAS_MSDF
+	if(!_sdfOptions) return;
+
+	const auto& opts = *_sdfOptions;
+
+	struct TileEntry {
+		Key key;
+
+		uint32_t w, h;
+
+		std::vector<uint8_t> rgb; // packed RGB8, row-major
+	};
+
+	// Pass 1: rasterize every shape with geometry into RGB8 tiles.
+	std::vector<TileEntry> tiles;
+
+	for(const auto& [key, shape] : _shapes) {
+		if(shape.curves.empty()) continue;
+
+		TileEntry e;
+
+		e.key = key;
+
+		if(opts.msdf) {
+			const auto grid = render::renderMSDF(*this, key, opts.tileSize, opts.range);
+
+			e.w = grid.width; e.h = grid.height;
+
+			e.rgb.reserve(e.w * e.h * 3);
+
+			for(uint32_t row = 0; row < e.h; row++) {
+				for(uint32_t col = 0; col < e.w; col++) {
+					e.rgb.push_back(static_cast<uint8_t>(std::clamp(
+						grid.at(row, col, 0) * 255.f,
+						0.f,
+						255.f
+					)));
+					e.rgb.push_back(static_cast<uint8_t>(std::clamp(
+						grid.at(row, col, 1) * 255.f,
+						0.f,
+						255.f
+					)));
+					e.rgb.push_back(static_cast<uint8_t>(std::clamp(
+						grid.at(row, col, 2) * 255.f,
+						0.f,
+						255.f
+					)));
+				}
+			}
+		}
+
+		else {
+			const auto grid = render::renderSDF(*this, key, opts.tileSize, opts.range);
+
+			e.w = grid.width; e.h = grid.height;
+			e.rgb.reserve(e.w * e.h * 3);
+
+			for(uint32_t row = 0; row < e.h; row++) {
+				for(uint32_t col = 0; col < e.w; col++) {
+					const uint8_t v = static_cast<uint8_t>(std::clamp(
+						float(grid.at(row, col)) * 255.f,
+						0.f,
+						255.f
+					));
+
+					e.rgb.push_back(v);
+					e.rgb.push_back(v);
+					e.rgb.push_back(v);
+				}
+			}
+		}
+
+		tiles.push_back(std::move(e));
+	}
+
+	if(tiles.empty()) return;
+
+	// Pass 2: shelf-pack tiles and measure total atlas height.
+	const uint32_t atlasW = opts.atlasWidth;
+	uint32_t cx = 0, cy = 0, rowH = 0, atlasH = 0;
+
+	for(const auto& e : tiles) {
+		if(cx + e.w > atlasW) { cy += rowH; cx = 0; rowH = 0; }
+
+		cx += e.w;
+		rowH = std::max(rowH, e.h);
+	}
+
+	atlasH = cy + rowH;
+
+	// Allocate texture.
+	_sdfAtlas.texture.width = atlasW;
+	_sdfAtlas.texture.height = atlasH;
+	_sdfAtlas.texture.format = TextureData::Format::RGBA8;
+
+	_sdfAtlas.texture.bytes.assign(size_t{atlasW} * atlasH * 4, 0);
+
+	// Pass 3: blit tiles and record SDFRecords.
+	cx = 0; cy = 0; rowH = 0;
+
+	for(const auto& e : tiles) {
+		if(cx + e.w > atlasW) { cy += rowH; cx = 0; rowH = 0; }
+
+		for(uint32_t row = 0; row < e.h; row++) {
+			for(uint32_t col = 0; col < e.w; col++) {
+				const size_t src = (size_t{row} * e.w + col) * 3;
+				const size_t dst = (size_t{cy + row} * atlasW + (cx + col)) * 4;
+
+				_sdfAtlas.texture.bytes[dst + 0] = e.rgb[src + 0];
+				_sdfAtlas.texture.bytes[dst + 1] = e.rgb[src + 1];
+				_sdfAtlas.texture.bytes[dst + 2] = e.rgb[src + 2];
+				_sdfAtlas.texture.bytes[dst + 3] = 255;
+			}
+		}
+
+		_sdfAtlas.recs[e.key] = {cx, cy, e.w, e.h};
+
+		cx += e.w;
+		rowH = std::max(rowH, e.h);
+	}
+#endif
+}
+
+// ================================================================================================
 // Atlas::getShape
 // ================================================================================================
 
@@ -521,7 +693,7 @@ Atlas::Contours Atlas::getShapeContours(Key key) const {
 	if(!flat || flat->empty()) return {};
 
 	Contours result;
-	Curves   current;
+	Curves current;
 
 	for(size_t i = 0; i < flat->size(); ++i) {
 		const auto& cur = (*flat)[i];
@@ -529,7 +701,7 @@ Atlas::Contours Atlas::getShapeContours(Key key) const {
 		current.push_back(cur);
 
 		const bool last = (i + 1 == flat->size());
-		const bool brk  = !last && (
+		const bool brk = !last && (
 			cur.x3 != (*flat)[i + 1].x1 ||
 			cur.y3 != (*flat)[i + 1].y1
 		);
@@ -579,13 +751,15 @@ void Atlas::buildShapeBands(
 	// Band counts: splits override numBands; otherwise auto-pick or use caller's value.
 	// --------------------------------------------------------------------------------------------
 	if(!splitsY.empty()) numBandsY = static_cast<uint32_t>(splitsY.size() + 1);
+
 	else if(numBandsY == 0) numBandsY = static_cast<uint32_t>(
-		std::min(size_t(16), std::max(size_t(1), numCurves / 2))
+		std::min(size_t{16}, std::max(size_t{1}, numCurves / 2))
 	);
 
 	if(!splitsX.empty()) numBandsX = static_cast<uint32_t>(splitsX.size() + 1);
+
 	else if(numBandsX == 0) numBandsX = static_cast<uint32_t>(
-		std::min(size_t(16), std::max(size_t(1), numCurves / 2))
+		std::min(size_t{16}, std::max(size_t{1}, numCurves / 2))
 	);
 
 	// --------------------------------------------------------------------------------------------
@@ -669,19 +843,26 @@ void Atlas::buildShapeBands(
 	// --------------------------------------------------------------------------------------------
 	{
 		std::vector<slug_t> hboundaries(numBandsY + 1);
+
 		hboundaries[0] = minY;
 		hboundaries[numBandsY] = maxY;
 
 		if(!splitsY.empty()) {
 			for(uint32_t i = 0; i < static_cast<uint32_t>(splitsY.size()); i++) {
-				const slug_t snapped = std::round(splitsY[i] * cv(INDIRECTION_SIZE)) / cv(INDIRECTION_SIZE);
+				const slug_t snapped = std::round(
+					splitsY[i] * cv(INDIRECTION_SIZE)
+				) / cv(INDIRECTION_SIZE);
+
 				hboundaries[i + 1] = minY + snapped * rangeY;
 			}
 		}
 
 		else {
 			for(uint32_t i = 1; i < numBandsY; i++) {
-				const slug_t snapped = std::round(cv(i) / cv(numBandsY) * cv(INDIRECTION_SIZE)) / cv(INDIRECTION_SIZE);
+				const slug_t snapped = std::round(
+					cv(i) / cv(numBandsY) * cv(INDIRECTION_SIZE)
+				) / cv(INDIRECTION_SIZE);
+
 				hboundaries[i] = minY + snapped * rangeY;
 			}
 		}
@@ -738,14 +919,20 @@ void Atlas::buildShapeBands(
 
 		if(!splitsX.empty()) {
 			for(uint32_t i = 0; i < static_cast<uint32_t>(splitsX.size()); i++) {
-				const slug_t snapped = std::round(splitsX[i] * cv(INDIRECTION_SIZE)) / cv(INDIRECTION_SIZE);
+				const slug_t snapped = std::round(
+					splitsX[i] * cv(INDIRECTION_SIZE)
+				) / cv(INDIRECTION_SIZE);
+
 				vboundaries[i + 1] = minX + snapped * rangeX;
 			}
 		}
 
 		else {
 			for(uint32_t i = 1; i < numBandsX; i++) {
-				const slug_t snapped = std::round(cv(i) / cv(numBandsX) * cv(INDIRECTION_SIZE)) / cv(INDIRECTION_SIZE);
+				const slug_t snapped = std::round(
+					cv(i) / cv(numBandsX) * cv(INDIRECTION_SIZE)
+				) / cv(INDIRECTION_SIZE);
+
 				vboundaries[i] = minX + snapped * rangeX;
 			}
 		}
@@ -822,7 +1009,7 @@ void Atlas::packTextures() {
 	_curveData.format = TextureData::Format::RGBA32F;
 
 	// 4 floats per texel
-	_curveData.bytes.assign(size_t(_texWidth) * curveTexHeight * 4 * sizeof(float), 0);
+	_curveData.bytes.assign(size_t{_texWidth} * curveTexHeight * 4 * sizeof(float), 0);
 
 	// --------------------------------------------------------------------------------------------
 	// Pass 1: measure band texture height
@@ -864,7 +1051,7 @@ void Atlas::packTextures() {
 	_bandData.format = TextureData::Format::RGBA16UI;
 
 	// 4 uint16_t per texel
-	_bandData.bytes.assign(size_t(_texWidth) * bandTexHeight * 4 * sizeof(uint16_t), 0);
+	_bandData.bytes.assign(size_t{_texWidth} * bandTexHeight * 4 * sizeof(uint16_t), 0);
 
 	// --------------------------------------------------------------------------------------------
 	// Write helpers - write directly into TextureData::bytes
@@ -876,7 +1063,7 @@ void Atlas::packTextures() {
 		if(y >= curveTexHeight) return;
 
 		float* p = reinterpret_cast<float*>(
-			_curveData.bytes.data() + (size_t(y) * _texWidth + x) * 4 * sizeof(float)
+			_curveData.bytes.data() + (size_t{y} * _texWidth + x) * 4 * sizeof(float)
 		);
 
 		p[0] = r; p[1] = g; p[2] = b; p[3] = a;
@@ -889,7 +1076,7 @@ void Atlas::packTextures() {
 		if(y >= bandTexHeight) return;
 
 		uint16_t* p = reinterpret_cast<uint16_t*>(
-			_bandData.bytes.data() + (size_t(y) * _texWidth + x) * 4 * sizeof(uint16_t)
+			_bandData.bytes.data() + (size_t{y} * _texWidth + x) * 4 * sizeof(uint16_t)
 		);
 
 		p[0] = r; p[1] = g; p[2] = b; p[3] = a;
@@ -940,6 +1127,7 @@ void Atlas::packTextures() {
 			writeCurveTexel(curveTexelOffset + 1, c.x3, c.y3, 0_cv, 0_cv);
 
 			curveTexelOffset += 2;
+
 			_packingStats.curveTexelsUsed += 2;
 		}
 
@@ -967,7 +1155,11 @@ void Atlas::packTextures() {
 		sd.bandTexY = shapeStart / _texWidth;
 
 		// Write indirection tables (only when shape has geometry).
-		if(indirSize > 0 && g.indirY.size() == INDIRECTION_SIZE && g.indirX.size() == INDIRECTION_SIZE) {
+		if(
+			indirSize > 0 &&
+			g.indirY.size() == INDIRECTION_SIZE &&
+			g.indirX.size() == INDIRECTION_SIZE
+		) {
 			for(uint32_t q = 0; q < INDIRECTION_SIZE; q++) {
 				writeBandTexel(shapeStart + q, g.indirY[q], 0, 0, 0);
 				writeBandTexel(shapeStart + INDIRECTION_SIZE + q, g.indirX[q], 0, 0, 0);
@@ -1018,18 +1210,26 @@ void Atlas::packTextures() {
 		packBandList(g.vbands, numHBands);
 
 		// Write band headers at shapeStart + indirSize (after the indirection blocks).
-		for(uint32_t i = 0; i < numHBands; i++) {
-			writeBandTexel(shapeStart + indirSize + i, headers[i].count, headers[i].offset, 0, 0);
-		}
+		for(uint32_t i = 0; i < numHBands; i++) writeBandTexel(
+			shapeStart + indirSize + i,
+			headers[i].count,
+			headers[i].offset,
+			0, 0
+		);
 
-		for(uint32_t i = 0; i < numVBands; i++) {
-			writeBandTexel(shapeStart + indirSize + numHBands + i, headers[numHBands + i].count, headers[numHBands + i].offset, 0, 0);
-		}
+		for(uint32_t i = 0; i < numVBands; i++) writeBandTexel(
+			shapeStart + indirSize + numHBands + i,
+			headers[numHBands + i].count,
+			headers[numHBands + i].offset,
+			0, 0
+		);
 
 		_packingStats.bandTexelsUsed += numBandHeaders;
 
 		bandTexelOffset = cursor;
+
 		sd.curves = std::move(g.curves);
+
 		_shapes[key] = std::move(sd);
 	}
 

@@ -147,7 +147,7 @@ def test_atlas_build_decode_and_render_surface():
 
 	assert atlas.is_built is True
 
-	shape = atlas.get_shape_info(shape_key)
+	shape = atlas.get_shape(shape_key)
 
 	assert shape is not None
 	assert shape.width > 0.0
@@ -283,11 +283,11 @@ def test_canvas_commit_paths_gradients_and_composites():
 
 	atlas.build()
 
-	assert atlas.get_shape_info(slughorn.Key("circle_shape")) is not None
-	assert atlas.get_shape_info(fill_layer.key) is not None
-	assert atlas.get_shape_info(stroke_layer.key) is not None
-	assert atlas.get_shape_info(gradient_layer.key) is not None
-	assert atlas.get_shape_info(stroke_gradient_layer.key) is not None
+	assert atlas.get_shape(slughorn.Key("circle_shape")) is not None
+	assert atlas.get_shape(fill_layer.key) is not None
+	assert atlas.get_shape(stroke_layer.key) is not None
+	assert atlas.get_shape(gradient_layer.key) is not None
+	assert atlas.get_shape(stroke_gradient_layer.key) is not None
 
 	composite = atlas.get_composite_shape(slughorn.Key("canvas_composite"))
 
@@ -328,9 +328,9 @@ def test_key_implicit_str_conversion():
 
 	atlas.build()
 
-	assert atlas.get_shape_info("implicit_fill") is not None
-	assert atlas.get_shape_info("implicit_stroke") is not None
-	assert atlas.get_shape_info("implicit_stroke_path") is not None
+	assert atlas.get_shape("implicit_fill") is not None
+	assert atlas.get_shape("implicit_stroke") is not None
+	assert atlas.get_shape("implicit_stroke_path") is not None
 
 
 def test_canvas_arc_stroke_current_path_with_centered_origin():
@@ -356,7 +356,7 @@ def test_canvas_arc_stroke_current_path_with_centered_origin():
 
 	atlas.build()
 
-	shape = atlas.get_shape_info("arc_ring")
+	shape = atlas.get_shape("arc_ring")
 
 	assert shape is not None
 	assert shape.width > 0.0
@@ -424,7 +424,7 @@ def test_nanosvg_load_string_single_solid():
 
 	atlas.build()
 
-	assert atlas.get_shape_info(layer.key) is not None
+	assert atlas.get_shape(layer.key) is not None
 
 def test_nanosvg_load_string_two_solids():
 	if not _nanosvg_available():
@@ -450,7 +450,7 @@ def test_nanosvg_load_file_gradient():
 	atlas.build()
 
 	for layer in composite.layers:
-		assert atlas.get_shape_info(layer.key) is not None
+		assert atlas.get_shape(layer.key) is not None
 
 def test_nanosvg_load_file_inkscape():
 	if not _nanosvg_available():
@@ -486,7 +486,7 @@ def test_nanosvg_key_chaining():
 	atlas.build()
 
 	for layer in list(composite_a.layers) + list(composite_b.layers):
-		assert atlas.get_shape_info(layer.key) is not None
+		assert atlas.get_shape(layer.key) is not None
 
 def test_nanosvg_renderable():
 	if not _nanosvg_available():
@@ -548,8 +548,8 @@ def test_normalize_canvas_shapes():
 	atlas.normalize_shape_metrics([l_small.key, l_large.key])
 	atlas.build()
 
-	s_small = atlas.get_shape_info(l_small.key)
-	s_large = atlas.get_shape_info(l_large.key)
+	s_small = atlas.get_shape(l_small.key)
+	s_large = atlas.get_shape(l_large.key)
 
 	assert s_small is not None and s_large is not None
 
@@ -580,7 +580,7 @@ def test_normalize_freetype_tabular():
 	atlas.normalize_shape_metrics([slughorn.Key(cp) for cp in _DIGIT_CPS])
 	atlas.build()
 
-	shapes = [atlas.get_shape_info(slughorn.Key(cp)) for cp in _DIGIT_CPS]
+	shapes = [atlas.get_shape(slughorn.Key(cp)) for cp in _DIGIT_CPS]
 	assert all(s is not None for s in shapes)
 
 	ref = shapes[0]
@@ -604,7 +604,7 @@ def test_normalize_freetype_nontabular():
 	atlas.normalize_shape_metrics([slughorn.Key(cp) for cp in _DIGIT_CPS])
 	atlas.build()
 
-	shapes = [atlas.get_shape_info(slughorn.Key(cp)) for cp in _DIGIT_CPS]
+	shapes = [atlas.get_shape(slughorn.Key(cp)) for cp in _DIGIT_CPS]
 	assert all(s is not None for s in shapes)
 
 	ref = shapes[0]
@@ -663,7 +663,7 @@ def test_multi_subpath_raw_commands():
 	# One fill() call → one layer in the composite.
 	assert len(comp) == 1
 
-	shape = atlas.get_shape_info(key)
+	shape = atlas.get_shape(key)
 	assert shape is not None
 
 	# Union bbox: x spans 0.1→0.9 (width 0.8), y spans 0.25→0.75 (height 0.5).
@@ -682,7 +682,7 @@ def test_multi_subpath_rect_helper():
 	# Same assertions as the raw-command version — results must be identical.
 	assert len(comp) == 1
 
-	shape = atlas.get_shape_info(key)
+	shape = atlas.get_shape(key)
 	assert shape is not None
 
 	assert shape.width  == pytest.approx(0.8, abs=1e-4)
@@ -719,7 +719,7 @@ def test_add_path_with_transform():
 
 	assert len(comp) == 1
 
-	shape = atlas.get_shape_info(layer.key)
+	shape = atlas.get_shape(layer.key)
 	assert shape is not None
 
 	# Union bbox must match the three-rect tests: width=0.8, height=0.5.
