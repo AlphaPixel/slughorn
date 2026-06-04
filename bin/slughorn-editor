@@ -1,0 +1,525 @@
+#!/usr/bin/env python3
+"""
+slughorn_editor.py -- PySide6 SVG Layer Viewer for osgSlug curve debugging.
+
+Uses pure QPainter software rendering (no QGraphicsView / no OpenGL).
+
+Usage:
+	python3 slughorn_editor.py layer0.svg layer1.svg ... layer6.svg
+	python3 slughorn_editor.py path/to/svg_directory/
+	python3 slughorn_editor.py font.slug
+
+Keys / Controls:
+	Left/Right or A/D	-- previous / next layer
+	Mouse wheel -- zoom in/out (anchored at cursor)
+	Click + drag -- pan
+	F -- fit to window
+	R -- reset zoom to 1:1
+	Ctrl+O -- open file(s)
+	Ctrl+Shift+O -- open directory
+	1-9 -- jump to layer N
+"""
+
+import importlib.util
+import os
+import sys
+import glob
+from pathlib import Path
+
+# ---------------------------------------------------------------------------
+# Force software rendering BEFORE any Qt objects are created.
+# ---------------------------------------------------------------------------
+os.environ["QT_QUICK_BACKEND"] = "software"
+os.environ["QMLSCENE_DEVICE"] = "softwarecontext"
+os.environ["QSG_RHI_BACKEND"] = "sw"
+
+from PySide6.QtCore import Qt, QByteArray, QPointF, QRectF
+from PySide6.QtGui import (
+	QAction,
+	QKeySequence,
+	QPainter,
+	QSurfaceFormat,
+)
+from PySide6.QtWidgets import (
+	QApplication,
+	QFileDialog,
+	QHBoxLayout,
+	QLabel,
+	QListWidget,
+	QListWidgetItem,
+	QMainWindow,
+	QPushButton,
+	QSplitter,
+	QStatusBar,
+	QToolBar,
+	QVBoxLayout,
+	QWidget,
+)
+from PySide6.QtSvg import QSvgRenderer
+
+
+# ---------------------------------------------------------------------------
+# slughorn bin loader -- imports bin/slughorn (no .py extension) via importlib
+# ---------------------------------------------------------------------------
+def _load_slughorn_bin():
+	import types
+	from importlib.machinery import SourceFileLoader
+	bin_path = str(Path(__file__).resolve().parents[1] / "bin" / "slughorn")
+	mod = types.ModuleType("_slughorn_bin")
+	mod.__file__ = bin_path
+	SourceFileLoader("_slughorn_bin", bin_path).exec_module(mod)
+	return mod
+
+
+_EMPTY_SVG = (
+	'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+	'<text x="50" y="55" text-anchor="middle" font-size="14" fill="#888">(no curves)</text>'
+	"</svg>"
+).encode("utf-8")
+
+
+def _entries_from_slug(slug_bin, slug_path: str) -> list[tuple[str, bytes]]:
+	atlas = slug_bin.load_atlas(slug_path)
+	entries = []
+	for key in sorted(atlas.get_shapes().keys(), key=slug_bin.format_key):
+		decoded = atlas.decode(key)
+		label = slug_bin.format_key(key)
+		try:
+			svg_bytes = slug_bin.build_curves_svg_string(decoded, atlas, key).encode("utf-8")
+		except ValueError:
+			svg_bytes = _EMPTY_SVG
+		entries.append((label, svg_bytes))
+	return entries
+
+
+# ---------------------------------------------------------------------------
+# Pure-QPainter SVG viewport widget
+# ---------------------------------------------------------------------------
+class SvgViewport(QWidget):
+	"""
+	Renders an SVG via QSvgRenderer + QPainter directly onto a QWidget.
+	Supports zoom (scroll wheel) and pan (click-drag).
+	No QGraphicsView, no OpenGL -- just software rasterisation.
+	"""
+
+	def __init__(self, parent=None):
+		super().__init__(parent)
+		self.setMinimumSize(200, 200)
+		self.setAttribute(Qt.WA_OpaquePaintEvent)
+
+		self._renderer: QSvgRenderer | None = None
+		self._svg_viewbox = QRectF()
+
+		# Transform state
+		self._zoom = 1.0
+		self._pan = QPointF(0.0, 0.0)
+
+		# Drag state
+		self._dragging = False
+		self._drag_start = QPointF()
+		self._pan_start = QPointF()
+
+	# ---- Public API -------------------------------------------------------
+
+	def set_svg(self, renderer: QSvgRenderer, viewbox: QRectF):
+		self._renderer = renderer
+		self._svg_viewbox = viewbox
+		self.fit_contents()
+
+	def clear(self):
+		self._renderer = None
+		self.update()
+
+	def fit_contents(self):
+		if self._svg_viewbox.isNull() or not self._renderer:
+			return
+		vw, vh = self.width(), self.height()
+		sw, sh = self._svg_viewbox.width(), self._svg_viewbox.height()
+		if sw < 1 or sh < 1:
+			return
+		self._zoom = min(vw / sw, vh / sh) * 0.95
+		self._pan = QPointF(
+			(vw - sw * self._zoom) / 2.0,
+			(vh - sh * self._zoom) / 2.0,
+		)
+		self.update()
+
+	def reset_zoom(self):
+		self._zoom = 1.0
+		self._pan = QPointF(0.0, 0.0)
+		self.update()
+
+	# ---- Painting ---------------------------------------------------------
+
+	def paintEvent(self, _event):
+		p = QPainter(self)
+		p.setRenderHint(QPainter.Antialiasing)
+		p.setRenderHint(QPainter.SmoothPixmapTransform)
+
+		p.fillRect(self.rect(), Qt.black)
+
+		if not self._renderer or self._svg_viewbox.isNull():
+			p.setPen(Qt.gray)
+			p.drawText(self.rect(), Qt.AlignCenter, "No SVG loaded")
+			p.end()
+			return
+
+		# Build the destination rect in widget coords: the SVG's viewBox
+		# scaled by our zoom factor and offset by our pan. QSvgRenderer
+		# maps the SVG's own viewBox into this target rect -- exactly the
+		# same thing EOG / librsvg does internally.
+		vb = self._svg_viewbox
+		dst = QRectF(
+			self._pan.x(),
+			self._pan.y(),
+			vb.width() * self._zoom,
+			vb.height() * self._zoom,
+		)
+		self._renderer.render(p, dst)
+		p.end()
+
+	# ---- Mouse: zoom + pan -----------------------------------------------
+
+	def wheelEvent(self, event):
+		old_zoom = self._zoom
+		factor = 1.15 if event.angleDelta().y() > 0 else 1.0 / 1.15
+		new_zoom = old_zoom * factor
+
+		cursor = event.position()
+		wx = (cursor.x() - self._pan.x()) / old_zoom
+		wy = (cursor.y() - self._pan.y()) / old_zoom
+		self._pan = QPointF(
+			cursor.x() - wx * new_zoom,
+			cursor.y() - wy * new_zoom,
+		)
+		self._zoom = new_zoom
+		self.update()
+
+	def mousePressEvent(self, event):
+		if event.button() in (Qt.LeftButton, Qt.MiddleButton, Qt.RightButton):
+			self._dragging = True
+			self._drag_start = event.position()
+			self._pan_start = QPointF(self._pan)
+			self.setCursor(Qt.ClosedHandCursor)
+
+	def mouseMoveEvent(self, event):
+		if self._dragging:
+			delta = event.position() - self._drag_start
+			self._pan = self._pan_start + delta
+			self.update()
+
+	def mouseReleaseEvent(self, event):
+		if self._dragging:
+			self._dragging = False
+			self.setCursor(Qt.ArrowCursor)
+
+	def resizeEvent(self, event):
+		super().resizeEvent(event)
+		if self._renderer:
+			self.fit_contents()
+
+
+# ---------------------------------------------------------------------------
+# Main window
+# ---------------------------------------------------------------------------
+class SlugSvgViewer(QMainWindow):
+	def __init__(self):
+		super().__init__()
+		self.setWindowTitle("osgSlug -- SVG Layer Viewer")
+		self.resize(1280, 900)
+
+		self._entries: list[tuple[str, str | bytes]] = []
+		self._current_index: int = -1
+		self._current_renderer = None # prevent GC
+
+		self._build_ui()
+		self._build_toolbar()
+		self._build_menu()
+		self._connect_signals()
+
+	def _build_ui(self):
+		splitter = QSplitter(Qt.Horizontal, self)
+		self.setCentralWidget(splitter)
+
+		left = QWidget()
+		left_layout = QVBoxLayout(left)
+		left_layout.setContentsMargins(4, 4, 4, 4)
+
+		left_layout.addWidget(QLabel("Layers"))
+		self._layer_list = QListWidget()
+		self._layer_list.setMinimumWidth(180)
+		left_layout.addWidget(self._layer_list)
+
+		nav = QHBoxLayout()
+		self._btn_prev = QPushButton("? Prev")
+		self._btn_next = QPushButton("Next ?")
+		nav.addWidget(self._btn_prev)
+		nav.addWidget(self._btn_next)
+		left_layout.addLayout(nav)
+
+		splitter.addWidget(left)
+
+		self._viewport = SvgViewport()
+		splitter.addWidget(self._viewport)
+
+		splitter.setStretchFactor(0, 0)
+		splitter.setStretchFactor(1, 1)
+		splitter.setSizes([200, 1080])
+
+		self._status = QStatusBar()
+		self.setStatusBar(self._status)
+
+	def _build_toolbar(self):
+		tb = QToolBar("View")
+		self.addToolBar(tb)
+
+		btn_fit = QPushButton("Fit (F)")
+		btn_fit.clicked.connect(self._viewport.fit_contents)
+		tb.addWidget(btn_fit)
+
+		btn_reset = QPushButton("1:1 (R)")
+		btn_reset.clicked.connect(self._viewport.reset_zoom)
+		tb.addWidget(btn_reset)
+
+	def _build_menu(self):
+		menu = self.menuBar().addMenu("&File")
+
+		open_files = QAction("&Open SVG(s)...", self)
+		open_files.setShortcut(QKeySequence("Ctrl+O"))
+		open_files.triggered.connect(self._on_open_files)
+		menu.addAction(open_files)
+
+		open_dir = QAction("Open &Directory...", self)
+		open_dir.setShortcut(QKeySequence("Ctrl+Shift+O"))
+		open_dir.triggered.connect(self._on_open_dir)
+		menu.addAction(open_dir)
+
+		menu.addSeparator()
+
+		quit_act = QAction("&Quit", self)
+		quit_act.setShortcut(QKeySequence("Ctrl+Q"))
+		quit_act.triggered.connect(self.close)
+		menu.addAction(quit_act)
+
+	def _connect_signals(self):
+		self._layer_list.currentRowChanged.connect(self._on_layer_selected)
+		self._btn_prev.clicked.connect(self._go_prev)
+		self._btn_next.clicked.connect(self._go_next)
+
+	# ---- Loading ----------------------------------------------------------
+
+	def load_entries(self, entries: list[tuple[str, str | bytes]]):
+		self._entries = entries
+		self._layer_list.clear()
+
+		for i, (label, _) in enumerate(entries):
+			self._layer_list.addItem(QListWidgetItem(f"Layer {i}: {label}"))
+
+		if entries:
+			self._layer_list.setCurrentRow(0)
+
+		self._status.showMessage(f"Loaded {len(entries)} layer(s)")
+
+	def load_svgs(self, paths: list[str]):
+		self.load_entries([(os.path.basename(p), p) for p in sorted(paths)])
+
+	@staticmethod
+	def _resolve_svg_percentages(svg_bytes: bytes) -> bytes:
+		"""Resolve percentage-based width/height attributes to absolute
+		values derived from the SVG's viewBox.
+
+		Qt's QSvgRenderer doesn't correctly resolve percentage units
+		(like width="100%" height="100%") against the viewBox, unlike
+		librsvg (used by EOG/Inkscape). This pre-processes the SVG to
+		convert those to absolute coordinates so Qt renders them in the
+		right place and at the right size.
+		"""
+		import re
+
+		text = svg_bytes.decode("utf-8", errors="replace")
+
+		# Extract viewBox dimensions from the root <svg> element.
+		vb_match = re.search(
+			r'<svg[^>]*\bviewBox="(\S+)\s+(\S+)\s+(\S+)\s+(\S+)"', text
+		)
+		if not vb_match:
+			return svg_bytes
+
+		vb_x = float(vb_match.group(1))
+		vb_y = float(vb_match.group(2))
+		vb_w = float(vb_match.group(3))
+		vb_h = float(vb_match.group(4))
+
+		def resolve_attr(match):
+			attr_name = match.group(1) # "width", "height", "x", "y", etc.
+			value_str = match.group(2) # e.g. "100%", "50%"
+
+			pct = float(value_str.rstrip("%"))
+			fraction = pct / 100.0
+
+			if attr_name in ("width", "x", "cx", "rx"):
+				absolute = vb_w * fraction
+				if attr_name == "x":
+					absolute += vb_x
+			elif attr_name in ("height", "y", "cy", "ry"):
+				absolute = vb_h * fraction
+				if attr_name == "y":
+					absolute += vb_y
+			else:
+				# For anything else, use the larger dimension
+				absolute = max(vb_w, vb_h) * fraction
+
+			# Format cleanly: drop trailing zeros
+			abs_str = f"{absolute:g}"
+			return f'{attr_name}="{abs_str}"'
+
+		# Match attribute="<number>%" patterns inside SVG elements,
+		# but NOT inside the root <svg> tag itself (whose width/height
+		# in % are fine and refer to the CSS viewport, not the viewBox).
+		# We skip the root <svg ...> element by starting after it.
+		svg_open_end = text.find(">", text.find("<svg"))
+		if svg_open_end < 0:
+			return svg_bytes
+
+		header = text[:svg_open_end + 1]
+		body = text[svg_open_end + 1:]
+
+		body = re.sub(
+			r'\b(width|height|x|y|cx|cy|rx|ry)="(\d+(?:\.\d+)?%)"',
+			resolve_attr,
+			body,
+		)
+
+		return (header + body).encode("utf-8")
+
+	def _show_svg(self, source: str | bytes):
+		label, _ = self._entries[self._current_index]
+
+		if isinstance(source, bytes):
+			data = source
+		else:
+			try:
+				with open(source, "rb") as f:
+					data = f.read()
+			except OSError as exc:
+				self._status.showMessage(f"Error reading {source}: {exc}")
+				self._viewport.clear()
+				return
+
+		# Work around Qt's poor handling of percentage-based SVG attributes.
+		data = self._resolve_svg_percentages(data)
+
+		renderer = QSvgRenderer(QByteArray(data))
+		if not renderer.isValid():
+			self._status.showMessage(f"Qt could not parse: {label}")
+			self._viewport.clear()
+			return
+
+		vb = renderer.viewBoxF()
+		if vb.isNull():
+			sz = renderer.defaultSize()
+			vb = QRectF(0, 0, sz.width(), sz.height())
+
+		self._current_renderer = renderer
+		self._viewport.set_svg(renderer, vb)
+
+		self._status.showMessage(
+			f"{label}  --  {int(vb.width())}x{int(vb.height())} viewBox"
+		)
+
+	# ---- Navigation -------------------------------------------------------
+
+	def _on_layer_selected(self, row: int):
+		if 0 <= row < len(self._entries):
+			self._current_index = row
+			self._show_svg(self._entries[row][1])
+			self._update_nav_buttons()
+
+	def _go_prev(self):
+		if self._current_index > 0:
+			self._layer_list.setCurrentRow(self._current_index - 1)
+
+	def _go_next(self):
+		if self._current_index < len(self._entries) - 1:
+			self._layer_list.setCurrentRow(self._current_index + 1)
+
+	def _update_nav_buttons(self):
+		self._btn_prev.setEnabled(self._current_index > 0)
+		self._btn_next.setEnabled(self._current_index < len(self._entries) - 1)
+
+	# ---- File dialogs -----------------------------------------------------
+
+	def _on_open_files(self):
+		paths, _ = QFileDialog.getOpenFileNames(
+			self, "Open SVG(s)", "",
+			"SVG Files (*.svg);;All Files (*)"
+		)
+		if paths:
+			self.load_svgs(paths)
+
+	def _on_open_dir(self):
+		d = QFileDialog.getExistingDirectory(self, "Open SVG Directory")
+		if d:
+			paths = sorted(glob.glob(os.path.join(d, "*.svg")))
+			if paths:
+				self.load_svgs(paths)
+			else:
+				self._status.showMessage(f"No .svg files found in {d}")
+
+	# ---- Keyboard shortcuts -----------------------------------------------
+
+	def keyPressEvent(self, event):
+		key = event.key()
+		if key in (Qt.Key_Left, Qt.Key_A):
+			self._go_prev()
+		elif key in (Qt.Key_Right, Qt.Key_D):
+			self._go_next()
+		elif key == Qt.Key_F:
+			self._viewport.fit_contents()
+		elif key == Qt.Key_R:
+			self._viewport.reset_zoom()
+		elif Qt.Key_1 <= key <= Qt.Key_9:
+			idx = key - Qt.Key_1
+			if idx < len(self._entries):
+				self._layer_list.setCurrentRow(idx)
+		else:
+			super().keyPressEvent(event)
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+def main():
+	# Belt-and-suspenders: set a default surface format with no GL version
+	# requirement so nothing tries to create a real GL context.
+	fmt = QSurfaceFormat()
+	fmt.setRenderableType(QSurfaceFormat.DefaultRenderableType)
+	QSurfaceFormat.setDefaultFormat(fmt)
+
+	app = QApplication(sys.argv)
+
+	entries: list[tuple[str, str | bytes]] = []
+	slug_bin = None
+
+	for arg in sys.argv[1:]:
+		if os.path.isdir(arg):
+			for p in sorted(glob.glob(os.path.join(arg, "*.svg"))):
+				entries.append((os.path.basename(p), p))
+		elif os.path.isfile(arg) and arg.lower().endswith(".svg"):
+			entries.append((os.path.basename(arg), arg))
+		elif os.path.isfile(arg) and arg.lower().endswith((".slug", ".slugb")):
+			if slug_bin is None:
+				slug_bin = _load_slughorn_bin()
+			entries.extend(_entries_from_slug(slug_bin, arg))
+		else:
+			print(f"Warning: skipping '{arg}' (not a .svg/.slug file or directory)")
+
+	viewer = SlugSvgViewer()
+	if entries:
+		viewer.load_entries(entries)
+	viewer.show()
+	sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+	main()
