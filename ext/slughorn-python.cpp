@@ -158,8 +158,6 @@ std::string streamRepr(const T& v, const std::string& prefix="") {
 	return ss.str();
 }
 
-// Sample, Sampler, and decodeShape() now live in slughorn/render.hpp.
-
 // Python-friendly CurveDecomposer
 //
 // Owns its Curves vector so Python's GC cannot collect it out from under us. The C++
@@ -185,6 +183,12 @@ struct PyCurveDecomposer {
 	slug_t getTolerance() const { return decomposer.tolerance; }
 	void setTolerance(slug_t tolerance) { decomposer.tolerance = tolerance; }
 	void clear() { curves.clear(); }
+
+	size_t mark() const { return decomposer.mark(); }
+	void reverseFrom(size_t pos) { decomposer.reverseFrom(pos); }
+	void reverseCurves(size_t begin, size_t end) {
+		slughorn::CurveDecomposer::reverseCurves(curves, begin, end);
+	}
 };
 
 // Non-owning Python-facing view over a real slughorn::CurveDecomposer.
@@ -197,6 +201,16 @@ struct CurveDecomposerRef {
 
 	void setTolerance(slug_t tolerance) {
 		if(decomposer) decomposer->tolerance = tolerance;
+	}
+
+	size_t mark() const { return decomposer ? decomposer->mark() : 0; }
+
+	void reverseFrom(size_t pos) {
+		if(decomposer) decomposer->reverseFrom(pos);
+	}
+
+	void reverseCurves(size_t begin, size_t end) {
+		if(decomposer) slughorn::CurveDecomposer::reverseCurves(decomposer->curves, begin, end);
 	}
 };
 
@@ -1162,6 +1176,18 @@ PYBIND11_MODULE(slughorn, m) {
 		.def("clear", &PyCurveDecomposer::clear,
 			"Discard all accumulated curves (reuse the decomposer for a new path)."
 		)
+		.def("mark", &PyCurveDecomposer::mark,
+			"Return the current curve count as a position snapshot for reverse_from()."
+		)
+		.def("reverse_from", &PyCurveDecomposer::reverseFrom, py::arg("pos"),
+			"Reverse the winding of all curves appended since mark(pos).\n"
+			"Swaps each curve's endpoints and reverses the sequence order."
+		)
+		.def("reverse_curves", &PyCurveDecomposer::reverseCurves,
+			py::arg("begin"), py::arg("end"),
+			"Reverse the winding of curves[begin:end] in-place.\n"
+			"Swaps each curve's endpoints and reverses the sequence order."
+		)
 		.def("__len__", [](const PyCurveDecomposer& d) {
 			return d.getCurves().size();
 		}, "Number of curves accumulated so far.")
@@ -1173,6 +1199,16 @@ PYBIND11_MODULE(slughorn, m) {
 		"the underlying tolerance control without copying the decomposer state.")
 		.def_property("tolerance", &CurveDecomposerRef::getTolerance, &CurveDecomposerRef::setTolerance,
 			"Flatness threshold for cubic decomposition in curve-space units."
+		)
+		.def("mark", &CurveDecomposerRef::mark,
+			"Return the current curve count as a position snapshot for reverse_from()."
+		)
+		.def("reverse_from", &CurveDecomposerRef::reverseFrom, py::arg("pos"),
+			"Reverse the winding of all curves appended since mark(pos)."
+		)
+		.def("reverse_curves", &CurveDecomposerRef::reverseCurves,
+			py::arg("begin"), py::arg("end"),
+			"Reverse the winding of curves[begin:end] in-place."
 		)
 	;
 
@@ -2063,11 +2099,9 @@ PYBIND11_MODULE(slughorn, m) {
 			bool uniform,
 			std::optional<slughorn::freetype::LogCallback> log
 		) {
-			return slughorn::freetype::loadAsciiFont(
-				fontPath,
-				atlas,
-				detail::makeLoadConfig(strategy, uniform, log)
-			);
+			auto config = detail::makeLoadConfig(strategy, uniform, log);
+
+			return slughorn::freetype::loadAsciiFont(fontPath, atlas, &config);
 		},
 		py::arg("font_path"),
 		py::arg("atlas"),
@@ -2093,12 +2127,9 @@ PYBIND11_MODULE(slughorn, m) {
 			bool uniform,
 			std::optional<slughorn::freetype::LogCallback> log
 		) {
-			return slughorn::freetype::loadFontGlyphs(
-				fontPath,
-				codepoints,
-				atlas,
-				detail::makeLoadConfig(strategy, uniform, log)
-			);
+			auto config = detail::makeLoadConfig(strategy, uniform, log);
+
+			return slughorn::freetype::loadFontGlyphs(fontPath, codepoints, atlas, &config);
 		},
 		py::arg("font_path"),
 		py::arg("codepoints"),
@@ -2123,11 +2154,9 @@ PYBIND11_MODULE(slughorn, m) {
 			bool uniform,
 			std::optional<slughorn::freetype::LogCallback> log
 		) {
-			return slughorn::freetype::loadAllFontGlyphs(
-				fontPath,
-				atlas,
-				detail::makeLoadConfig(strategy, uniform, log)
-			);
+			auto config = detail::makeLoadConfig(strategy, uniform, log);
+
+			return slughorn::freetype::loadAllFontGlyphs(fontPath, atlas, &config);
 		},
 		py::arg("font_path"),
 		py::arg("atlas"),
@@ -2153,13 +2182,9 @@ PYBIND11_MODULE(slughorn, m) {
 	) -> py::dict {
 		std::map<uint32_t, slughorn::CompositeShape> colorGlyphs;
 
-		slughorn::freetype::loadEmojiFont(
-			fontPath,
-			codepoints,
-			atlas,
-			colorGlyphs,
-			detail::makeLoadConfig(strategy, uniform, log)
-		);
+		auto config = detail::makeLoadConfig(strategy, uniform, log);
+
+		slughorn::freetype::loadEmojiFont(fontPath, codepoints, atlas, colorGlyphs, &config);
 
 		py::dict result;
 
@@ -2212,10 +2237,9 @@ PYBIND11_MODULE(slughorn, m) {
 				float dpi,
 				std::optional<slughorn::nanosvg::LogCallback> log
 			) {
-				return slughorn::nanosvg::loadFile(
-					path, atlas, keys, dpi,
-					detail::makeNanosvgLoadConfig(log)
-				);
+				auto config = detail::makeNanosvgLoadConfig(log);
+
+				return slughorn::nanosvg::loadFile(path, atlas, keys, dpi, &config);
 			},
 			py::arg("path"),
 			py::arg("atlas"),
@@ -2237,10 +2261,9 @@ PYBIND11_MODULE(slughorn, m) {
 				float dpi,
 				std::optional<slughorn::nanosvg::LogCallback> log
 			) {
-				return slughorn::nanosvg::loadString(
-					svg, atlas, keys, dpi,
-					detail::makeNanosvgLoadConfig(log)
-				);
+				auto config = detail::makeNanosvgLoadConfig(log);
+
+				return slughorn::nanosvg::loadString(svg, atlas, keys, dpi, &config);
 			},
 			py::arg("svg"),
 			py::arg("atlas"),

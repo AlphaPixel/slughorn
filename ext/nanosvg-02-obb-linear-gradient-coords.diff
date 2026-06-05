@@ -1,0 +1,42 @@
+diff --git a/src/nanosvg.h b/src/nanosvg.h
+--- a/src/nanosvg.h
++++ b/src/nanosvg.h
+@@ -831,6 +831,16 @@ static NSVGgradient* nsvg__findGradientData(NSVGparser* p, const char* id)
+ 	return NULL;
+ }
+
++/* OBB linear gradient coordinates: SVG spec says plain numbers like x1="0" y1="0" x2="0" y2="1"
++ * are fractions in [0,1] of the bounding box. nsvg__convertToPixels() for NSVG_UNITS_USER
++ * ignores orig/length and returns the raw value, so we need a separate converter for OBB mode. */
++static float nsvg__convertToPixelsOBB(NSVGcoordinate c, float orig, float length)
++{
++	if (c.units == NSVG_UNITS_PERCENT)
++		return orig + c.value / 100.0f * length;
++	return orig + c.value * length;
++}
++
+ static NSVGgradient* nsvg__createGradient(NSVGparser* p, const char* id, const float* localBounds, float *xform, signed char* paintType)
+ {
+ 	NSVGgradientData* data = NULL;
+@@ -881,10 +891,17 @@ static NSVGgradient* nsvg__createGradient(NSVGparser* p, const char* id, const float* localBounds, float *xform, signed char* paintType)
+
+ 	if (data->type == NSVG_PAINT_LINEAR_GRADIENT) {
+ 		float x1, y1, x2, y2, dx, dy;
+-		x1 = nsvg__convertToPixels(p, data->linear.x1, ox, sw);
+-		y1 = nsvg__convertToPixels(p, data->linear.y1, oy, sh);
+-		x2 = nsvg__convertToPixels(p, data->linear.x2, ox, sw);
+-		y2 = nsvg__convertToPixels(p, data->linear.y2, oy, sh);
++		if (data->units == NSVG_OBJECT_SPACE) {
++			x1 = nsvg__convertToPixelsOBB(data->linear.x1, ox, sw);
++			y1 = nsvg__convertToPixelsOBB(data->linear.y1, oy, sh);
++			x2 = nsvg__convertToPixelsOBB(data->linear.x2, ox, sw);
++			y2 = nsvg__convertToPixelsOBB(data->linear.y2, oy, sh);
++		} else {
++			x1 = nsvg__convertToPixels(p, data->linear.x1, ox, sw);
++			y1 = nsvg__convertToPixels(p, data->linear.y1, oy, sh);
++			x2 = nsvg__convertToPixels(p, data->linear.x2, ox, sw);
++			y2 = nsvg__convertToPixels(p, data->linear.y2, oy, sh);
++		}
+ 		// Calculate transform aligned to the line
+ 		dx = x2 - x1;
+ 		dy = y2 - y1;
