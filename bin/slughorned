@@ -44,13 +44,14 @@ from PySide6.QtWidgets import (
 	QApplication,
 	QFileDialog,
 	QHBoxLayout,
+	QHeaderView,
 	QLabel,
-	QListWidget,
-	QListWidgetItem,
 	QMainWindow,
 	QPushButton,
 	QSplitter,
 	QStatusBar,
+	QTableWidget,
+	QTableWidgetItem,
 	QToolBar,
 	QVBoxLayout,
 	QWidget,
@@ -246,8 +247,16 @@ class SlugSvgViewer(QMainWindow):
 		left_layout.setContentsMargins(4, 4, 4, 4)
 
 		left_layout.addWidget(QLabel("Layers"))
-		self._layer_list = QListWidget()
-		self._layer_list.setMinimumWidth(180)
+		self._layer_list = QTableWidget(0, 3)
+		self._layer_list.setHorizontalHeaderLabels(["#", "Type", "Value"])
+		self._layer_list.setMinimumWidth(220)
+		self._layer_list.setSelectionBehavior(QTableWidget.SelectRows)
+		self._layer_list.setSelectionMode(QTableWidget.SingleSelection)
+		self._layer_list.setEditTriggers(QTableWidget.NoEditTriggers)
+		self._layer_list.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+		self._layer_list.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+		self._layer_list.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+		self._layer_list.verticalHeader().setVisible(False)
 		left_layout.addWidget(self._layer_list)
 
 		nav = QHBoxLayout()
@@ -302,21 +311,34 @@ class SlugSvgViewer(QMainWindow):
 		menu.addAction(quit_act)
 
 	def _connect_signals(self):
-		self._layer_list.currentRowChanged.connect(self._on_layer_selected)
+		self._layer_list.currentCellChanged.connect(lambda row, *_: self._on_layer_selected(row))
 		self._btn_prev.clicked.connect(self._go_prev)
 		self._btn_next.clicked.connect(self._go_next)
+
+	@staticmethod
+	def _label_type(label: str) -> tuple[str, str]:
+		"""Return (type_str, value_str) for a layer label."""
+		if label.startswith("U+"):
+			return "codepoint", label
+		if label.lower().endswith(".svg"):
+			return "svg", label
+		return "str", label
 
 	# ---- Loading ----------------------------------------------------------
 
 	def load_entries(self, entries: list[tuple[str, str | bytes]]):
 		self._entries = entries
-		self._layer_list.clear()
+		self._layer_list.setRowCount(0)
 
 		for i, (label, _) in enumerate(entries):
-			self._layer_list.addItem(QListWidgetItem(f"Layer {i}: {label}"))
+			type_str, value_str = self._label_type(label)
+			self._layer_list.insertRow(i)
+			self._layer_list.setItem(i, 0, QTableWidgetItem(str(i)))
+			self._layer_list.setItem(i, 1, QTableWidgetItem(type_str))
+			self._layer_list.setItem(i, 2, QTableWidgetItem(value_str))
 
 		if entries:
-			self._layer_list.setCurrentRow(0)
+			self._layer_list.setCurrentCell(0, 0)
 
 		self._status.showMessage(f"Loaded {len(entries)} layer(s)")
 
@@ -437,11 +459,11 @@ class SlugSvgViewer(QMainWindow):
 
 	def _go_prev(self):
 		if self._current_index > 0:
-			self._layer_list.setCurrentRow(self._current_index - 1)
+			self._layer_list.setCurrentCell(self._current_index - 1, 0)
 
 	def _go_next(self):
 		if self._current_index < len(self._entries) - 1:
-			self._layer_list.setCurrentRow(self._current_index + 1)
+			self._layer_list.setCurrentCell(self._current_index + 1, 0)
 
 	def _update_nav_buttons(self):
 		self._btn_prev.setEnabled(self._current_index > 0)
@@ -481,7 +503,7 @@ class SlugSvgViewer(QMainWindow):
 		elif Qt.Key_1 <= key <= Qt.Key_9:
 			idx = key - Qt.Key_1
 			if idx < len(self._entries):
-				self._layer_list.setCurrentRow(idx)
+				self._layer_list.setCurrentCell(idx, 0)
 		else:
 			super().keyPressEvent(event)
 

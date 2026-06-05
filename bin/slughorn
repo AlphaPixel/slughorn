@@ -77,6 +77,18 @@ def resolve_key_arg(raw: str | None, ord_char: str | None) -> slughorn.Key:
 	return make_key(raw)
 
 
+_FORMAT_BYTES_PER_TEXEL = {"RGBA32F": 16, "RGBA16UI": 8, "RGBA8": 4}
+
+def tex_size_str(tex) -> str:
+    bpt = _FORMAT_BYTES_PER_TEXEL.get(tex.format, 0)
+    total = tex.width * tex.height * bpt
+    if total >= 1024 * 1024:
+        return f"{total / (1024 * 1024):.1f} MiB"
+    if total >= 1024:
+        return f"{total // 1024} KiB"
+    return f"{total} B"
+
+
 def key_type_name(key) -> str:
 	type_obj = key.type
 	return type_obj.name if hasattr(type_obj, "name") else str(type_obj)
@@ -527,11 +539,11 @@ def command_info(args) -> int:
 		print(f"Atlas: {args.atlas}")
 		print(f"  shapes:       {len(shapes)}")
 		print(f"  composites:   {len(composites)}")
-		print(f"  curve tex:    {curve_tex.width}x{curve_tex.height} {curve_tex.format}")
-		print(f"  band tex:     {band_tex.width}x{band_tex.height} {band_tex.format}")
+		print(f"  curve tex:    {curve_tex.width}x{curve_tex.height} {curve_tex.format}  ({tex_size_str(curve_tex)})")
+		print(f"  band tex:     {band_tex.width}x{band_tex.height} {band_tex.format}  ({tex_size_str(band_tex)})")
 
 		if grad_tex.width > 0:
-			print(f"  gradient tex: {grad_tex.width}x{grad_tex.height} {grad_tex.format}")
+			print(f"  gradient tex: {grad_tex.width}x{grad_tex.height} {grad_tex.format}  ({tex_size_str(grad_tex)})")
 
 		print(f"  packing:      {atlas.packing_stats}")
 
