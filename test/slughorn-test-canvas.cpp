@@ -866,6 +866,76 @@ int main(int argc, char** argv) {
 	}
 
 	// ============================================================================================
+	// Pattern 23: Method chaining — Path and Canvas builder methods return *this.
+	//
+	// Every builder verb returns a reference to *this so calls can be chained. Commit
+	// verbs (fill, stroke, finalize) keep their original return types (Layer /
+	// CompositeShape) and act as natural chain terminators.
+	//
+	// Rules:
+	//   - Always start a chain from a named variable, not a temporary. auto deduces
+	//     Path& which would dangle if the temporary was constructed inline.
+	//   - Commit verbs (fill, stroke, etc.) return Layer — they terminate a Canvas chain.
+	//   - finalize() returns CompositeShape — it terminates a composite chain.
+	// ============================================================================================
+	{
+		// -- Path: chain on an existing named object --
+		slughorn::canvas::Path p;
+
+		p.moveTo(0.5_cv, 0.9_cv)
+		 .lineTo(0.9_cv, 0.1_cv)
+		 .lineTo(0.1_cv, 0.1_cv)
+		 .closePath();
+
+		// Same triangle geometry as Pattern 1, committed via explicit-path overload.
+		canvas.fill(p, RED, 1_cv, Key("chain_p_triangle"));
+		canvas.finalize(Key("chain_p_composite"));
+
+		// -- Canvas: geometry chain ending in stroke() --
+		const auto chainStroke = canvas.beginPath()
+			.moveTo(0.1_cv, 0.5_cv)
+			.quadTo(0.25_cv, 0.05_cv, 0.5_cv, 0.5_cv)
+			.quadTo(0.75_cv, 0.95_cv, 0.9_cv, 0.5_cv)
+			.stroke(0.06_cv, WHITE);
+
+		canvas.finalize(Key("chain_scurve_composite"));
+
+		// -- Canvas: shape helper chain ending in fill() --
+		const auto chainFill = canvas.circle(0.5_cv, 0.5_cv, 0.4_cv)
+			.fill(BLUE, 1_cv, Key("chain_circle_shape"));
+
+		canvas.finalize(Key("chain_circle_composite"));
+
+		// -- Canvas: transform state chain, then separate geometry + commit --
+		const auto PI = cv(M_PI);
+
+		canvas.save()
+			.translate(0.5_cv, 0.5_cv)
+			.rotate(PI / 4_cv);
+
+		const auto chainRot = canvas.rect(-0.3_cv, -0.3_cv, 0.6_cv, 0.6_cv)
+			.fill(GOLD, 1_cv, Key("chain_rot_rect"));
+
+		canvas.restore();
+		canvas.finalize(Key("chain_rot_composite"));
+
+		// -- Canvas: state setter chain --
+		canvas.setAutoMetrics(false).clearSplits();
+
+		canvas.rect(0_cv, 0_cv, 1_cv, 1_cv);
+		canvas.fill(CYAN, 1_cv, Key("chain_unit_sq"));
+		canvas.finalize(Key("chain_unit_sq_composite"));
+
+		canvas.setAutoMetrics(true);
+
+		std::cerr
+			<< "Pattern 23: chain_scurve key=" << chainStroke.key
+			<< " chain_circle key=" << chainFill.key
+			<< " chain_rot key=" << chainRot.key << "\n"
+		;
+	}
+
+	// ============================================================================================
 
 	atlas.build();
 

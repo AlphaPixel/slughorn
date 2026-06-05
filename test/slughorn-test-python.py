@@ -381,6 +381,80 @@ def test_canvas_arc_stroke_current_path_with_centered_origin():
 	assert mid_y == pytest.approx(CY, abs=0.02)
 
 
+def test_canvas_method_chaining():
+    """Path and Canvas builder methods return self, enabling fluent call chains."""
+
+    # -- Path chaining --------------------------------------------------------
+    # Build a square by chaining move_to / line_to / close_path.
+    p = slughorn.canvas.Path()
+    result = p.move_to(0.1, 0.1) \
+               .line_to(0.9, 0.1) \
+               .line_to(0.9, 0.9) \
+               .line_to(0.1, 0.9) \
+               .close_path()
+
+    # Returned object wraps the same C++ Path — geometry is visible on both sides.
+    assert result.has_pending_path is True
+    assert p.has_pending_path is True
+
+    # A path built step-by-step (no chaining) must have the same arc length.
+    ref = slughorn.canvas.Path()
+    ref.move_to(0.1, 0.1)
+    ref.line_to(0.9, 0.1)
+    ref.line_to(0.9, 0.9)
+    ref.line_to(0.1, 0.9)
+    ref.close_path()
+
+    assert result.arc_length() == pytest.approx(ref.arc_length(), rel=1e-6)
+
+    # Additional Path helpers must also be chainable.
+    q = slughorn.canvas.Path()
+    q.clear().rect(0.0, 0.0, 1.0, 1.0)
+    assert q.has_pending_path is True
+
+    q2 = slughorn.canvas.Path()
+    q2.clear().circle(0.5, 0.5, 0.4)
+    assert q2.has_pending_path is True
+
+    # -- Canvas chaining ------------------------------------------------------
+    atlas = slughorn.Atlas()
+    canvas = slughorn.canvas.Canvas(atlas, slughorn.KeyIterator("ch"))
+
+    # Geometry chain: begin_path → move_to → line_to → stroke (terminal, returns Layer).
+    layer = canvas.begin_path() \
+                  .move_to(0.1, 0.5) \
+                  .line_to(0.9, 0.5) \
+                  .stroke(0.05, slughorn.Color(1, 1, 1, 1))
+
+    assert layer.key is not None
+    canvas.finalize(slughorn.Key("chain_line_comp"))
+
+    # Shape helper chain: circle → fill (returns Layer).
+    fill_layer = canvas.circle(0.5, 0.5, 0.4) \
+                       .fill(slughorn.Color(0, 0, 1, 1), 1.0, slughorn.Key("chain_circle"))
+
+    assert fill_layer.key == slughorn.Key("chain_circle")
+    canvas.finalize(slughorn.Key("chain_circle_comp"))
+
+    # Transform chain: save → translate → rotate (all return Canvas&), then commit.
+    canvas.save() \
+          .translate(0.5, 0.5) \
+          .rotate(math.pi / 4)
+
+    rot_layer = canvas.rect(-0.3, -0.3, 0.6, 0.6) \
+                      .fill(slughorn.Color(1, 0.75, 0, 1), 1.0, slughorn.Key("chain_rotated"))
+
+    canvas.restore()
+    canvas.finalize(slughorn.Key("chain_rot_comp"))
+
+    assert rot_layer.key == slughorn.Key("chain_rotated")
+
+    atlas.build()
+
+    assert atlas.get_shape(slughorn.Key("chain_circle")) is not None
+    assert atlas.get_shape(slughorn.Key("chain_rotated")) is not None
+
+
 # =============================================================================
 # NanoSVG backend
 # =============================================================================

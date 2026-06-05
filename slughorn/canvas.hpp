@@ -173,27 +173,29 @@ public:
 
 	// Reset all geometry state. CTM is intentionally NOT cleared - matches HTML Canvas
 	// behavior where beginPath() does not affect the current transform.
-	void clear() {
+	Path& clear() {
 		_pendingCurves.clear();
 		_activeCurves.clear();
 		_decomposer._x = _decomposer._y = 0_cv;
 		_decomposer._sx = _decomposer._sy = 0_cv;
 		_penX = _penY = 0_cv;
 		_lutDirty = true;
+		return *this;
 	}
 
 	// Append all curves from @p other into this path's pending accumulator.
 	// Does not affect @p other.
-	void addPath(const Path& other) {
+	Path& addPath(const Path& other) {
 		for(const auto& c : other._pendingCurves) _pendingCurves.push_back(c);
 		for(const auto& c : other._activeCurves) _pendingCurves.push_back(c);
 
 		_lutDirty = true;
+		return *this;
 	}
 
 	// Append curves from @p other with each control point transformed by @p transform.
 	// Matches HTML Canvas Path2D.addPath(path, DOMMatrix) semantics.
-	void addPath(const Path& other, const slughorn::Matrix& transform) {
+	Path& addPath(const Path& other, const slughorn::Matrix& transform) {
 		auto xform = [&](const slughorn::Atlas::Curve& c) {
 			slughorn::Atlas::Curve out;
 			transform.apply(c.x1, c.y1, out.x1, out.y1);
@@ -206,6 +208,7 @@ public:
 		for(const auto& c : other._activeCurves) _pendingCurves.push_back(xform(c));
 
 		_lutDirty = true;
+		return *this;
 	}
 
 	// -------------------------------------------------------------------------
@@ -216,28 +219,32 @@ public:
 	// state; the CTM does not affect already-accumulated curves.
 	// -------------------------------------------------------------------------
 
-	void save() { _ctmStack.push_back(_ctm); }
+	Path& save() { _ctmStack.push_back(_ctm); return *this; }
 
-	void restore() {
+	Path& restore() {
 		if(!_ctmStack.empty()) {
 			_ctm = _ctmStack.back();
 			_ctmStack.pop_back();
 		}
+
+		return *this;
 	}
 
-	void resetTransform() { _ctm = Matrix::identity(); }
-	void setTransform(const Matrix& m) { _ctm = m; }
-	void transform(const Matrix& m) { _ctm = _ctm * m; }
+	Path& resetTransform() { _ctm = Matrix::identity(); return *this; }
+	Path& setTransform(const Matrix& m) { _ctm = m; return *this; }
+	Path& transform(const Matrix& m) { _ctm = _ctm * m; return *this; }
 
-	void translate(slug_t tx, slug_t ty) {
+	Path& translate(slug_t tx, slug_t ty) {
 		Matrix m;
 
 		m.dx = tx; m.dy = ty;
 
 		_ctm = _ctm * m;
+
+		return *this;
 	}
 
-	void rotate(slug_t angle) {
+	Path& rotate(slug_t angle) {
 		const slug_t c = std::cos(angle), s = std::sin(angle);
 
 		Matrix m;
@@ -246,21 +253,25 @@ public:
 		m.yx = s; m.yy = c;
 
 		_ctm = _ctm * m;
+
+		return *this;
 	}
 
-	void scale(slug_t sx, slug_t sy) {
+	Path& scale(slug_t sx, slug_t sy) {
 		Matrix m;
 
 		m.xx = sx; m.yy = sy;
 
 		_ctm = _ctm * m;
+
+		return *this;
 	}
 
 	// -------------------------------------------------------------------------
 	// Path commands
 	// -------------------------------------------------------------------------
 
-	void moveTo(slug_t x, slug_t y) {
+	Path& moveTo(slug_t x, slug_t y) {
 		_penX = x;
 		_penY = y;
 
@@ -271,9 +282,11 @@ public:
 		_decomposer.moveTo(tx, ty);
 
 		_lutDirty = true;
+
+		return *this;
 	}
 
-	void lineTo(slug_t x, slug_t y) {
+	Path& lineTo(slug_t x, slug_t y) {
 		_penX = x;
 		_penY = y;
 
@@ -283,9 +296,11 @@ public:
 		_decomposer.lineTo(tx, ty);
 
 		_lutDirty = true;
+
+		return *this;
 	}
 
-	void quadTo(slug_t cx, slug_t cy, slug_t x, slug_t y) {
+	Path& quadTo(slug_t cx, slug_t cy, slug_t x, slug_t y) {
 		_penX = x;
 		_penY = y;
 
@@ -297,9 +312,11 @@ public:
 		_decomposer.quadTo(tcx, tcy, tx, ty);
 
 		_lutDirty = true;
+
+		return *this;
 	}
 
-	void bezierTo(slug_t c1x, slug_t c1y, slug_t c2x, slug_t c2y, slug_t x, slug_t y) {
+	Path& bezierTo(slug_t c1x, slug_t c1y, slug_t c2x, slug_t c2y, slug_t x, slug_t y) {
 		_penX = x;
 		_penY = y;
 
@@ -312,9 +329,11 @@ public:
 		_decomposer.cubicTo(tc1x, tc1y, tc2x, tc2y, tx, ty);
 
 		_lutDirty = true;
+
+		return *this;
 	}
 
-	void closePath() {
+	Path& closePath() {
 		_decomposer.close();
 
 		for(const auto& c : _activeCurves) _pendingCurves.push_back(c);
@@ -322,6 +341,8 @@ public:
 		_activeCurves.clear();
 
 		_lutDirty = true;
+
+		return *this;
 	}
 
 	// -------------------------------------------------------------------------
@@ -332,18 +353,18 @@ public:
 	// to build compound shapes (e.g. a rect with a circular hole).
 	// -------------------------------------------------------------------------
 
-	void rect(slug_t x, slug_t y, slug_t w, slug_t h) {
+	Path& rect(slug_t x, slug_t y, slug_t w, slug_t h) {
 		moveTo(x, y);
 		lineTo(x + w, y);
 		lineTo(x + w, y + h);
 		lineTo(x, y + h);
-		closePath();
+		return closePath();
 	}
 
-	void roundedRect(slug_t x, slug_t y, slug_t w, slug_t h, slug_t r) {
+	Path& roundedRect(slug_t x, slug_t y, slug_t w, slug_t h, slug_t r) {
 		r = std::min(r, std::min(w, h) * 0.5_cv);
 
-		if(r <= 0_cv) { rect(x, y, w, h); return; }
+		if(r <= 0_cv) return rect(x, y, w, h);
 
 		const slug_t k = 0.5522847498_cv;
 		const slug_t kr = k * r;
@@ -357,12 +378,12 @@ public:
 		bezierTo(x + r - kr, y + h, x, y + h - r + kr, x, y + h - r);
 		lineTo(x, y + r);
 		bezierTo(x, y + r - kr, x + r - kr, y, x + r, y);
-		closePath();
+		return closePath();
 	}
 
-	void circle(slug_t cx, slug_t cy, slug_t r) { ellipse(cx, cy, r, r); }
+	Path& circle(slug_t cx, slug_t cy, slug_t r) { return ellipse(cx, cy, r, r); }
 
-	void ellipse(slug_t cx, slug_t cy, slug_t rx, slug_t ry) {
+	Path& ellipse(slug_t cx, slug_t cy, slug_t rx, slug_t ry) {
 		const slug_t k = 0.5522847498_cv;
 		const slug_t kx = k * rx;
 		const slug_t ky = k * ry;
@@ -372,12 +393,12 @@ public:
 		bezierTo(cx - kx, cy + ry, cx - rx, cy + ky, cx - rx, cy);
 		bezierTo(cx - rx, cy - ky, cx - kx, cy - ry, cx, cy - ry);
 		bezierTo(cx + kx, cy - ry, cx + rx, cy - ky, cx + rx, cy);
-		closePath();
+		return closePath();
 	}
 
 	// arc() does NOT call clear(). It appends to the current path, enabling composition
 	// with lineTo() for pie slices, stadium shapes, etc.
-	void arc(slug_t cx, slug_t cy, slug_t r, slug_t startAngle, slug_t endAngle, bool ccw=false) {
+	Path& arc(slug_t cx, slug_t cy, slug_t r, slug_t startAngle, slug_t endAngle, bool ccw=false) {
 		slug_t sweep;
 
 		if(ccw) {
@@ -395,10 +416,12 @@ public:
 		}
 
 		_arcSegments(cx, cy, r, startAngle, sweep);
+
+		return *this;
 	}
 
-	void arcTo(slug_t x1, slug_t y1, slug_t x2, slug_t y2, slug_t r) {
-		if(r <= 0_cv) { lineTo(x1, y1); return; }
+	Path& arcTo(slug_t x1, slug_t y1, slug_t x2, slug_t y2, slug_t r) {
+		if(r <= 0_cv) return lineTo(x1, y1);
 
 		const slug_t p0x = _penX, p0y = _penY;
 		const slug_t d0x = p0x - x1, d0y = p0y - y1;
@@ -406,18 +429,18 @@ public:
 		const slug_t len0 = std::sqrt(d0x*d0x + d0y*d0y);
 		const slug_t len1 = std::sqrt(d1x*d1x + d1y*d1y);
 
-		if(len0 < 1e-6_cv || len1 < 1e-6_cv) { lineTo(x1, y1); return; }
+		if(len0 < 1e-6_cv || len1 < 1e-6_cv) return lineTo(x1, y1);
 
 		const slug_t u0x = d0x / len0, u0y = d0y / len0;
 		const slug_t u1x = d1x / len1, u1y = d1y / len1;
 		const slug_t cross = u0x*u1y - u0y*u1x;
 
-		if(std::abs(cross) < 1e-6_cv) { lineTo(x1, y1); return; }
+		if(std::abs(cross) < 1e-6_cv) return lineTo(x1, y1);
 
 		const slug_t dot = u0x*u1x + u0y*u1y;
 		const slug_t tanHalf = std::abs(cross) / (1_cv + dot);
 
-		if(tanHalf < 1e-6_cv) { lineTo(x1, y1); return; }
+		if(tanHalf < 1e-6_cv) return lineTo(x1, y1);
 
 		const slug_t tangentDist = r / tanHalf;
 		const slug_t t0x = x1 + u0x * tangentDist, t0y = y1 + u0y * tangentDist;
@@ -432,6 +455,8 @@ public:
 
 		lineTo(t0x, t0y);
 		arc(cenX, cenY, r, a0, a1, cross > 0_cv);
+
+		return *this;
 	}
 
 	// -------------------------------------------------------------------------
@@ -821,12 +846,13 @@ public:
 	// save() / restore() checkpoint both CTMs together.
 	// -------------------------------------------------------------------------
 
-	void save() {
+	Canvas& save() {
 		_path.save();
 		_ctmStack.push_back({_ctm, _autoMetrics, _splitsX, _splitsY});
+		return *this;
 	}
 
-	void restore() {
+	Canvas& restore() {
 		_path.restore();
 
 		if(!_ctmStack.empty()) {
@@ -839,14 +865,16 @@ public:
 
 			_ctmStack.pop_back();
 		}
+
+		return *this;
 	}
 
 	const Matrix& getTransform() const { return _ctm; }
-	void resetTransform() { _path.resetTransform(); _ctm = Matrix::identity(); }
-	void setTransform(const Matrix& m) { _path.setTransform(m); _ctm = m; }
-	void transform(const Matrix& m) { _path.transform(m); _ctm = _ctm * m; }
+	Canvas& resetTransform() { _path.resetTransform(); _ctm = Matrix::identity(); return *this; }
+	Canvas& setTransform(const Matrix& m) { _path.setTransform(m); _ctm = m; return *this; }
+	Canvas& transform(const Matrix& m) { _path.transform(m); _ctm = _ctm * m; return *this; }
 
-	void translate(slug_t tx, slug_t ty) {
+	Canvas& translate(slug_t tx, slug_t ty) {
 		_path.translate(tx, ty);
 
 		Matrix m;
@@ -854,9 +882,11 @@ public:
 		m.dx = tx; m.dy = ty;
 
 		_ctm = _ctm * m;
+
+		return *this;
 	}
 
-	void rotate(slug_t angle) {
+	Canvas& rotate(slug_t angle) {
 		_path.rotate(angle);
 
 		const slug_t c = std::cos(angle), s = std::sin(angle);
@@ -867,9 +897,11 @@ public:
 		m.yx = s; m.yy = c;
 
 		_ctm = _ctm * m;
+
+		return *this;
 	}
 
-	void scale(slug_t sx, slug_t sy) {
+	Canvas& scale(slug_t sx, slug_t sy) {
 		_path.scale(sx, sy);
 
 		Matrix m;
@@ -877,24 +909,27 @@ public:
 		m.xx = sx; m.yy = sy;
 
 		_ctm = _ctm * m;
+
+		return *this;
 	}
 
 	// -------------------------------------------------------------------------
 	// Path commands (forwarded to internal Path)
 	// -------------------------------------------------------------------------
 
-	void beginPath() { _path.clear(); }
-	void addPath(const Path& other) { _path.addPath(other); }
-	void addPath(const Path& other, const Matrix& transform) { _path.addPath(other, transform); }
-	void moveTo(slug_t x, slug_t y) { _path.moveTo(x, y); }
-	void lineTo(slug_t x, slug_t y) { _path.lineTo(x, y); }
-	void quadTo(slug_t cx, slug_t cy, slug_t x, slug_t y) { _path.quadTo(cx, cy, x, y); }
+	Canvas& beginPath() { _path.clear(); return *this; }
+	Canvas& addPath(const Path& other) { _path.addPath(other); return *this; }
+	Canvas& addPath(const Path& other, const Matrix& transform) { _path.addPath(other, transform); return *this; }
+	Canvas& moveTo(slug_t x, slug_t y) { _path.moveTo(x, y); return *this; }
+	Canvas& lineTo(slug_t x, slug_t y) { _path.lineTo(x, y); return *this; }
+	Canvas& quadTo(slug_t cx, slug_t cy, slug_t x, slug_t y) { _path.quadTo(cx, cy, x, y); return *this; }
 
-	void bezierTo(slug_t c1x, slug_t c1y, slug_t c2x, slug_t c2y, slug_t x, slug_t y) {
+	Canvas& bezierTo(slug_t c1x, slug_t c1y, slug_t c2x, slug_t c2y, slug_t x, slug_t y) {
 		_path.bezierTo(c1x, c1y, c2x, c2y, x, y);
+		return *this;
 	}
 
-	void closePath() { _path.closePath(); }
+	Canvas& closePath() { _path.closePath(); return *this; }
 	bool strokePath(slug_t width, bool cw=false) { return _path.strokePath(width, cw); }
 	bool hasPendingPath() const { return _path.hasPendingPath(); }
 
@@ -902,17 +937,19 @@ public:
 	// Shape helpers (forwarded to internal Path)
 	// -------------------------------------------------------------------------
 
-	void rect(slug_t x, slug_t y, slug_t w, slug_t h) { _path.rect(x, y, w, h); }
-	void roundedRect(slug_t x, slug_t y, slug_t w, slug_t h, slug_t r) { _path.roundedRect(x, y, w, h, r); }
-	void circle(slug_t cx, slug_t cy, slug_t r) { _path.circle(cx, cy, r); }
-	void ellipse(slug_t cx, slug_t cy, slug_t rx, slug_t ry) { _path.ellipse(cx, cy, rx, ry); }
+	Canvas& rect(slug_t x, slug_t y, slug_t w, slug_t h) { _path.rect(x, y, w, h); return *this; }
+	Canvas& roundedRect(slug_t x, slug_t y, slug_t w, slug_t h, slug_t r) { _path.roundedRect(x, y, w, h, r); return *this; }
+	Canvas& circle(slug_t cx, slug_t cy, slug_t r) { _path.circle(cx, cy, r); return *this; }
+	Canvas& ellipse(slug_t cx, slug_t cy, slug_t rx, slug_t ry) { _path.ellipse(cx, cy, rx, ry); return *this; }
 
-	void arc(slug_t cx, slug_t cy, slug_t r, slug_t startAngle, slug_t endAngle, bool ccw=false) {
+	Canvas& arc(slug_t cx, slug_t cy, slug_t r, slug_t startAngle, slug_t endAngle, bool ccw=false) {
 		_path.arc(cx, cy, r, startAngle, endAngle, ccw);
+		return *this;
 	}
 
-	void arcTo(slug_t x1, slug_t y1, slug_t x2, slug_t y2, slug_t r) {
+	Canvas& arcTo(slug_t x1, slug_t y1, slug_t x2, slug_t y2, slug_t r) {
 		_path.arcTo(x1, y1, x2, y2, r);
+		return *this;
 	}
 
 	// -------------------------------------------------------------------------
@@ -959,24 +996,29 @@ public:
 	// clearSplits() - revert to default auto-band behavior
 	// -------------------------------------------------------------------------
 
-	void setSplits(std::vector<slug_t> splitsX, std::vector<slug_t> splitsY) {
+	Canvas& setSplits(std::vector<slug_t> splitsX, std::vector<slug_t> splitsY) {
 		_splitsX = std::move(splitsX);
 		_splitsY = std::move(splitsY);
 		_splitStrategy = {};
+		return *this;
 	}
 
-	void setSplitStrategy(Atlas::SplitStrategy strategy) {
+	Canvas& setSplitStrategy(Atlas::SplitStrategy strategy) {
 		_splitStrategy = std::move(strategy);
 
 		_splitsX.clear();
 		_splitsY.clear();
+
+		return *this;
 	}
 
-	void clearSplits() {
+	Canvas& clearSplits() {
 		_splitsX.clear();
 		_splitsY.clear();
 
 		_splitStrategy = {};
+
+		return *this;
 	}
 
 	// -------------------------------------------------------------------------
@@ -989,7 +1031,7 @@ public:
 	// setAutoMetrics(true) restores the default tight-bbox behaviour.
 	// -------------------------------------------------------------------------
 
-	void setAutoMetrics(bool v) { _autoMetrics = v; }
+	Canvas& setAutoMetrics(bool v) { _autoMetrics = v; return *this; }
 	bool getAutoMetrics() const { return _autoMetrics; }
 
 	// -------------------------------------------------------------------------
@@ -1139,7 +1181,7 @@ public:
 	// optional horizontal alignment internally.
 	// -------------------------------------------------------------------------
 
-	void text(
+	Canvas& text(
 		std::string_view str,
 		slug_t fontSize,
 		slug_t x,
@@ -1149,7 +1191,7 @@ public:
 		TextAnchorY anchorY=TextAnchorY::Baseline,
 		TextAlignX alignX=TextAlignX::Left
 	) {
-		if(str.empty() || fontSize == 0_cv) return;
+		if(str.empty() || fontSize == 0_cv) return *this;
 
 		// Apply CTM so text() uses the same coordinate space as path operations.
 		slug_t tx, ty;
@@ -1198,9 +1240,11 @@ public:
 
 			dx += info ? info->advance : 0.6_cv;
 		}
+
+		return *this;
 	}
 
-	void strokeText(
+	Canvas& strokeText(
 		std::string_view str,
 		slug_t fontSize,
 		slug_t strokeWidth,
@@ -1211,7 +1255,7 @@ public:
 		TextAnchorY anchorY=TextAnchorY::Baseline,
 		TextAlignX alignX=TextAlignX::Left
 	) {
-		if(str.empty() || fontSize == 0_cv) return;
+		if(str.empty() || fontSize == 0_cv) return *this;
 
 		slug_t tx, ty;
 
@@ -1263,6 +1307,8 @@ public:
 
 			dx += info ? info->advance : 0.6_cv;
 		}
+
+		return *this;
 	}
 
 	// textGlyph - bakes a single glyph's em-space curves into world-space at scale=1.
@@ -1290,7 +1336,7 @@ public:
 	// textOnPath - places filled glyphs from str along path, each rotated to follow
 	// the tangent. startFrac in [0,1] is the normalized arc-length start position.
 	// Glyphs that would extend past the path end are dropped.
-	void textOnPath(
+	Canvas& textOnPath(
 		const Path& path,
 		std::string_view str,
 		slug_t fontSize,
@@ -1299,11 +1345,11 @@ public:
 		const FontMetrics& metrics,
 		TextAnchorY anchorY=TextAnchorY::Baseline
 	) {
-		if(str.empty() || fontSize == 0_cv) return;
+		if(str.empty() || fontSize == 0_cv) return *this;
 
 		const slug_t totalLen = path.arcLength();
 
-		if(totalLen <= 0_cv) return;
+		if(totalLen <= 0_cv) return *this;
 
 		slug_t cursor = std::max(0_cv, std::min(1_cv, startFrac)) * totalLen;
 
@@ -1321,19 +1367,23 @@ public:
 
 			cursor += advance;
 		}
+
+		return *this;
 	}
 
 	// -------------------------------------------------------------------------
 	// CompositeShape management
 	// -------------------------------------------------------------------------
 
-	void beginComposite() {
+	Canvas& beginComposite() {
 		_composite = CompositeShape{};
 
 		beginPath();
+
+		return *this;
 	}
 
-	void setAdvance(slug_t advance) { _composite.advance = advance; }
+	Canvas& setAdvance(slug_t advance) { _composite.advance = advance; return *this; }
 
 	CompositeShape finalize() {
 		CompositeShape result = std::move(_composite);
