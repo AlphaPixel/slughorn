@@ -632,13 +632,11 @@ public:
 				outline.push_back({ax, ay, (ax + bx) * 0.5_cv, (ay + by) * 0.5_cv, bx, by});
 			}
 
-			if(!cw) for(const auto& c : outline) _pendingCurves.push_back(c);
+			const size_t outlineStart = _pendingCurves.size();
 
-			else for(size_t i = outline.size(); i-- > 0;) {
-				const auto& c = outline[i];
+			for(const auto& c : outline) _pendingCurves.push_back(c);
 
-				_pendingCurves.push_back({c.x3, c.y3, c.x2, c.y2, c.x1, c.y1});
-			}
+			if(cw) CurveDecomposer::reverseCurves(_pendingCurves, outlineStart, _pendingCurves.size());
 
 			any = true;
 		}

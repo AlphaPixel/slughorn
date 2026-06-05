@@ -36,6 +36,11 @@
 // - Per-shape local coordinate decomposition (tight bands, zero offset waste)
 // - Auto-scale from SVG viewBox width (always 1/image->width)
 //
+// WHAT IS SUPPORTED
+// -----------------
+// - fill-rule="evenodd": converted to nonzero at load time via ray-cast winding
+//   reversal on inner sub-paths (CPU only; zero GPU cost)
+//
 // WHAT IS NOT (YET) SUPPORTED
 // ---------------------------
 // - Stroked shapes (stroke-to-fill expansion not yet wired up)
@@ -216,6 +221,29 @@ static void warn(const LoadConfig& config, int level, const Args&... args) {
 	}
 }
 
+// Ray-cast a horizontal ray rightward from (px, py) against curves[0..end).
+// Each curve is approximated as a line segment (x1,y1)->(x3,y3) - exact for
+// rectangles and polygons, a good-enough approximation for smooth shapes.
+// Returns the number of crossings; odd = point is inside the accumulated paths.
+static int rayCrossings(const Atlas::Curves& curves, size_t end, slug_t px, slug_t py) {
+	int count = 0;
+
+	for(size_t i = 0; i < end; i++) {
+		const auto& c = curves[i];
+
+		// Segment must straddle the ray's y-level.
+		if((c.y1 <= py) == (c.y3 <= py)) continue;
+
+		// X coordinate of the segment at y = py.
+		const slug_t t  = (py - c.y1) / (c.y3 - c.y1);
+		const slug_t xi = c.x1 + t * (c.x3 - c.x1);
+
+		if(xi > px) count++;
+	}
+
+	return count;
+}
+
 std::pair<Atlas::ShapeInfo, Matrix> decomposePath(const NSVGshape* shape, slug_t scale, Atlas::ShapeInfo::Origin origin) {
 	// NanoSVG pre-computes the bounding box for each shape.
 	const slug_t minX = cv(shape->bounds[0]) * scale;
@@ -229,12 +257,26 @@ std::pair<Atlas::ShapeInfo, Matrix> decomposePath(const NSVGshape* shape, slug_t
 
 	CurveDecomposer decomposer(curves);
 
-	for(const NSVGpath* path = shape->paths; path; path = path->next) {
+	const bool evenodd = (shape->fillRule == NSVG_FILLRULE_EVENODD);
+
+	// NanoSVG prepends each NSVGpath to the shape's list as it parses, so
+	// shape->paths is in reverse SVG document order (last sub-path first).
+	// Reverse here so the outer sub-path is always processed before inner ones,
+	// which is required for the ray-cast containment test to work correctly.
+	std::vector<const NSVGpath*> paths;
+	for(const NSVGpath* p = shape->paths; p; p = p->next) paths.push_back(p);
+	std::reverse(paths.begin(), paths.end());
+
+	for(const NSVGpath* path : paths) {
 		if(path->npts < 4) continue;
 
 		const float* p = path->pts;
 
-		decomposer.moveTo(cv(p[0]) * scale - minX, cv(p[1]) * scale - minY);
+		const slug_t startX = cv(p[0]) * scale - minX;
+		const slug_t startY = cv(p[1]) * scale - minY;
+		const size_t subpathStart = decomposer.mark();
+
+		decomposer.moveTo(startX, startY);
 
 		for(int i = 0; i < path->npts - 1; i += 3) {
 			p = path->pts + i * 2;
@@ -247,6 +289,15 @@ std::pair<Atlas::ShapeInfo, Matrix> decomposePath(const NSVGshape* shape, slug_t
 		}
 
 		if(path->closed) decomposer.close();
+
+		// Evenodd -> nonzero conversion: if this sub-path's start point is inside
+		// an odd number of previously accumulated sub-paths, flip its winding so
+		// the nonzero shader produces the correct hole. CPU-only; baked into atlas.
+		if(evenodd && subpathStart > 0) {
+			if(rayCrossings(curves, subpathStart, startX, startY) % 2 != 0) {
+				decomposer.reverseFrom(subpathStart);
+			}
+		}
 	}
 
 	if(curves.empty()) return { {}, Matrix::identity() };
@@ -306,12 +357,6 @@ CompositeShape loadImage(
 		if(!(shape->flags & NSVG_FLAGS_VISIBLE)) continue;
 
 		// ---- Unsupported feature checks ----
-
-		if(shape->fillRule == NSVG_FILLRULE_EVENODD)
-			warn(config, 1,
-				"fill-rule=\"evenodd\" is not supported (shape id=\"",
-				shape->id, "\"); rendering as nonzero — compound cutout paths will render solid"
-			);
 
 		if(shape->stroke.type != NSVG_PAINT_NONE)
 			warn(config, 1,

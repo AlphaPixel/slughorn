@@ -536,7 +536,7 @@ void Atlas::rasterizeGradients() {
 // Two-pass: render all tiles first (actual dimensions vary from tileSize due to aspect
 // ratio), then shelf-pack into a single RGB8 texture and record SDFRecord per key.
 //
-// Requires SLUGHORN_HAS_MSDF — the C++ DT fallback (Path B) is not yet implemented.
+// Requires SLUGHORN_HAS_MSDF - the C++ DT fallback (Path B) is not yet implemented.
 // ================================================================================================
 
 void Atlas::rasterizeSDFAtlas() {

@@ -1,11 +1,13 @@
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <functional>
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <ostream>
@@ -1211,6 +1213,29 @@ struct CurveDecomposer {
 
 		if(std::abs(_x - _sx) > eps || std::abs(_y - _sy) > eps) lineTo(_sx, _sy);
 	}
+
+	// Snapshot the current write position for a later reverseFrom() call.
+	size_t mark() const { return curves.size(); }
+
+	// Reverse the winding of curves[begin..end) in-place: swap each curve's
+	// endpoints (control point stays put) then reverse the sequence order.
+	// Works for any contiguous range, e.g. a single sub-path captured via mark().
+	static void reverseCurves(Atlas::Curves& curves, size_t begin, size_t end) {
+		for(size_t i = begin; i < end; i++) {
+			auto& c = curves[i];
+
+			std::swap(c.x1, c.x3);
+			std::swap(c.y1, c.y3);
+		}
+
+		std::reverse(
+			curves.begin() + static_cast<std::ptrdiff_t>(begin),
+			curves.begin() + static_cast<std::ptrdiff_t>(end)
+		);
+	}
+
+	// Reverse all curves appended since mark().
+	void reverseFrom(size_t pos) { reverseCurves(curves, pos, curves.size()); }
 
 private:
 	// Maximum recursion depth. Prevents infinite loops on degenerate/malformed
