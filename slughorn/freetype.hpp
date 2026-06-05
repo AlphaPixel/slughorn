@@ -110,8 +110,12 @@ bool decomposeGlyph(
 // Uniform-bounding-box note: set config.uniform=true to force all glyphs in a batch to share
 // the same em-space bounding box, required for setLayerShapeIndex. Auto-detects tabular advances
 // (Option C) and falls back to union bbox + centering (Option A) when advances differ.
-bool loadGlyph(FT_Face face, uint32_t codepoint, Atlas& atlas,
-	const LoadConfig& config={});
+bool loadGlyph(
+	FT_Face face,
+	uint32_t codepoint,
+	Atlas& atlas,
+	const LoadConfig& config={}
+);
 
 // Convenience: load a contiguous range of codepoints [first, last]. Returns the number of glyphs
 // successfully added.

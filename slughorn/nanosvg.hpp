@@ -42,7 +42,7 @@
 // - Sweep/conic gradients (SVG has no native sweep gradient type)
 // - Gradient spreadMethod reflect/repeat (clamped to pad)
 // - Radial focal point offset / cone gradients (g->fx/fy != 0 is the SVG cone case)
-// - Clip paths, masks, opacity, transforms on groups
+// - Clip paths, masks, group opacity, transforms on groups
 // - Text elements
 // ================================================================================================
 
@@ -67,11 +67,22 @@ SLUGHORN_IGNORE("-Wsign-conversion")
 
 SLUGHORN_DIAGNOSTIC_POP()
 
+#include <functional>
+#include <sstream>
 #include <string>
 #include <utility>
 
 namespace slughorn {
 namespace nanosvg {
+
+// ================================================================================================
+// LogCallback / LoadConfig
+// ================================================================================================
+using LogCallback = std::function<void(int level, const std::string& msg)>;
+
+struct LoadConfig {
+	LogCallback log = {};
+};
 
 // ================================================================================================
 // colorFromNSVG
@@ -146,7 +157,8 @@ Matrix loadShape(
 CompositeShape loadImage(
 	const NSVGimage* image,
 	Atlas& atlas,
-	KeyIterator& keys
+	KeyIterator& keys,
+	const LoadConfig& config={}
 );
 
 // ================================================================================================
@@ -156,14 +168,16 @@ CompositeShape loadFile(
 	const std::string& path,
 	Atlas& atlas,
 	KeyIterator& keys,
-	float dpi=96.0f
+	float dpi=96.0f,
+	const LoadConfig& config={}
 );
 
 CompositeShape loadString(
 	const std::string& svg,
 	Atlas& atlas,
 	KeyIterator& keys,
-	float dpi=96.0f
+	float dpi=96.0f,
+	const LoadConfig& config={}
 );
 
 }
@@ -179,6 +193,28 @@ CompositeShape loadString(
 
 namespace slughorn {
 namespace nanosvg {
+
+// ================================================================================================
+// warn - internal helper
+// ================================================================================================
+template<typename... Args>
+static void warn(const LoadConfig& config, int level, const Args&... args) {
+	if(config.log) {
+		std::ostringstream oss;
+
+		((oss << args), ...);
+
+		config.log(level, oss.str());
+	}
+
+	else {
+		std::cerr << "slughorn::nanosvg [" << level << "]: ";
+
+		((std::cerr << args), ...);
+
+		std::cerr << std::endl;
+	}
+}
 
 std::pair<Atlas::ShapeInfo, Matrix> decomposePath(const NSVGshape* shape, slug_t scale, Atlas::ShapeInfo::Origin origin) {
 	// NanoSVG pre-computes the bounding box for each shape.
@@ -245,16 +281,18 @@ Matrix loadShape(const NSVGshape* shape, Atlas& atlas, Key key, slug_t scale, At
 	return transform;
 }
 
-CompositeShape loadImage(const NSVGimage* image, Atlas& atlas, KeyIterator& keys) {
+CompositeShape loadImage(
+	const NSVGimage* image,
+	Atlas& atlas,
+	KeyIterator& keys,
+	const LoadConfig& config
+) {
 	CompositeShape composite;
 
 	if(!image) return composite;
 
 	if(image->width <= 0.0f) {
-		std::cerr
-			<< "slughorn::nanosvg::loadImage: image width is zero, cannot normalize."
-			<< std::endl
-		;
+		warn(config, 2, "loadImage: image width is zero, cannot normalize");
 
 		return composite;
 	}
@@ -267,11 +305,32 @@ CompositeShape loadImage(const NSVGimage* image, Atlas& atlas, KeyIterator& keys
 	for(const NSVGshape* shape = image->shapes; shape; shape = shape->next) {
 		if(!(shape->flags & NSVG_FLAGS_VISIBLE)) continue;
 
+		// ---- Unsupported feature checks ----
+
+		if(shape->fillRule == NSVG_FILLRULE_EVENODD)
+			warn(config, 1,
+				"fill-rule=\"evenodd\" is not supported (shape id=\"",
+				shape->id, "\"); rendering as nonzero — compound cutout paths will render solid"
+			);
+
+		if(shape->stroke.type != NSVG_PAINT_NONE)
+			warn(config, 1,
+				"stroke paint is not supported (shape id=\"",
+				shape->id, "\"); strokes are silently skipped"
+			);
+
+		// ---- Fill color / gradient ----
+
+		// shape->opacity is a per-shape multiplier on top of fill alpha; bake it in here
+		// so the shader never needs to know about it.
+		const slug_t shapeOpacity = cv(shape->opacity);
+
 		Color color = { 1_cv, 1_cv, 1_cv, 1_cv };
 		uint32_t gradientId = 0;
 
 		if(shape->fill.type == NSVG_PAINT_COLOR) {
 			color = colorFromNSVG(shape->fill.color);
+			color.a *= shapeOpacity;
 
 			if(color.a < 1e-4_cv) continue;
 		}
@@ -282,7 +341,8 @@ CompositeShape loadImage(const NSVGimage* image, Atlas& atlas, KeyIterator& keys
 			NSVGgradient* g = shape->fill.gradient;
 
 			if(!g || g->nstops == 0) {
-				std::cerr << "slughorn::nanosvg: skipping gradient with no stops." << std::endl;
+				warn(config, 1, "skipping gradient with no stops (shape id=\"", shape->id, "\")");
+
 				continue;
 			}
 
@@ -290,7 +350,11 @@ CompositeShape loadImage(const NSVGimage* image, Atlas& atlas, KeyIterator& keys
 			stops.reserve(static_cast<size_t>(g->nstops));
 
 			for(int i = 0; i < g->nstops; i++) {
-				stops.push_back({ cv(g->stops[i].offset), colorFromNSVG(g->stops[i].color) });
+				GradientStop stop{ cv(g->stops[i].offset), colorFromNSVG(g->stops[i].color) };
+
+				stop.color.a *= shapeOpacity;
+
+				stops.push_back(stop);
 			}
 
 			// NanoSVG stores g->xform as the INVERSE of the gradient -> pixel transform.
@@ -343,7 +407,11 @@ CompositeShape loadImage(const NSVGimage* image, Atlas& atlas, KeyIterator& keys
 				const float det = fwd[0] * fwd[3] - fwd[2] * fwd[1];
 
 				if(std::abs(det) < 1e-10f) {
-					std::cerr << "slughorn::nanosvg: degenerate radial gradient transform, skipping." << std::endl;
+					warn(config, 1,
+						"degenerate radial gradient transform, skipping (shape id=\"",
+						shape->id, "\")"
+					);
+
 					continue;
 				}
 
@@ -391,11 +459,11 @@ CompositeShape loadImage(const NSVGimage* image, Atlas& atlas, KeyIterator& keys
 			continue;
 		}
 		else {
-			std::cerr
-				<< "slughorn::nanosvg: skipping unsupported fill type "
-				<< static_cast<int>(shape->fill.type)
-				<< std::endl
-			;
+			warn(config, 1,
+				"skipping unsupported fill type ",
+				static_cast<int>(shape->fill.type),
+				" (shape id=\"", shape->id, "\")"
+			);
 
 			continue;
 		}
@@ -423,20 +491,18 @@ CompositeShape loadFile(
 	const std::string& path,
 	Atlas& atlas,
 	KeyIterator& keys,
-	float dpi
+	float dpi,
+	const LoadConfig& config
 ) {
 	NSVGimage* image = nsvgParseFromFile(path.c_str(), "px", dpi);
 
 	if(!image) {
-		std::cerr
-			<< "slughorn::nanosvg::loadFile: failed to parse '" << path << "'"
-			<< std::endl
-		;
+		warn(config, 2, "loadFile: failed to parse '", path, "'");
 
 		return {};
 	}
 
-	CompositeShape result = loadImage(image, atlas, keys);
+	CompositeShape result = loadImage(image, atlas, keys, config);
 
 	nsvgDelete(image);
 
@@ -447,19 +513,20 @@ CompositeShape loadString(
 	const std::string& svg,
 	Atlas& atlas,
 	KeyIterator& keys,
-	float dpi
+	float dpi,
+	const LoadConfig& config
 ) {
 	std::string buf = svg;
 
 	NSVGimage* image = nsvgParse(buf.data(), "px", dpi);
 
 	if(!image) {
-		std::cerr << "slughorn::nanosvg::loadString: failed to parse SVG" << std::endl;
+		warn(config, 2, "loadString: failed to parse SVG");
 
 		return {};
 	}
 
-	CompositeShape result = loadImage(image, atlas, keys);
+	CompositeShape result = loadImage(image, atlas, keys, config);
 
 	nsvgDelete(image);
 

@@ -218,6 +218,16 @@ inline slughorn::freetype::LoadConfig makeLoadConfig(
 }
 #endif
 
+inline slughorn::nanosvg::LoadConfig makeNanosvgLoadConfig(
+	std::optional<slughorn::nanosvg::LogCallback> log
+) {
+	slughorn::nanosvg::LoadConfig config;
+
+	if(log) config.log = *log;
+
+	return config;
+}
+
 } // namespace detail
 
 // Bring detail helpers into file scope so existing call sites in PYBIND11_MODULE need no change.
@@ -2195,29 +2205,53 @@ PYBIND11_MODULE(slughorn, m) {
 		);
 
 		nanosvg.def("load_file",
-			[](const std::string& path, slughorn::Atlas& atlas, slughorn::KeyIterator& keys, float dpi) {
-				return slughorn::nanosvg::loadFile(path, atlas, keys, dpi);
+			[](
+				const std::string& path,
+				slughorn::Atlas& atlas,
+				slughorn::KeyIterator& keys,
+				float dpi,
+				std::optional<slughorn::nanosvg::LogCallback> log
+			) {
+				return slughorn::nanosvg::loadFile(
+					path, atlas, keys, dpi,
+					detail::makeNanosvgLoadConfig(log)
+				);
 			},
 			py::arg("path"),
 			py::arg("atlas"),
 			py::arg("keys") = slughorn::KeyIterator(),
 			py::arg("dpi") = 96.0f,
+			py::arg("log") = py::none(),
 			"Parse an SVG file and pack every filled shape into atlas.\n"
 			"keys is advanced in-place; pass the same KeyIterator to subsequent calls\n"
-			"to pack multiple SVGs into the same atlas without key collisions."
+			"to pack multiple SVGs into the same atlas without key collisions.\n"
+			"log(level, msg) is called for warnings (level=1) and errors (level=2); "
+			"omit to print to stderr."
 		);
 
 		nanosvg.def("load_string",
-			[](const std::string& svg, slughorn::Atlas& atlas, slughorn::KeyIterator& keys, float dpi) {
-				return slughorn::nanosvg::loadString(svg, atlas, keys, dpi);
+			[](
+				const std::string& svg,
+				slughorn::Atlas& atlas,
+				slughorn::KeyIterator& keys,
+				float dpi,
+				std::optional<slughorn::nanosvg::LogCallback> log
+			) {
+				return slughorn::nanosvg::loadString(
+					svg, atlas, keys, dpi,
+					detail::makeNanosvgLoadConfig(log)
+				);
 			},
 			py::arg("svg"),
 			py::arg("atlas"),
 			py::arg("keys") = slughorn::KeyIterator(),
 			py::arg("dpi") = 96.0f,
+			py::arg("log") = py::none(),
 			"Parse an SVG string and pack every filled shape into atlas.\n"
 			"keys is advanced in-place; pass the same KeyIterator to subsequent calls\n"
-			"to pack multiple SVGs into the same atlas without key collisions."
+			"to pack multiple SVGs into the same atlas without key collisions.\n"
+			"log(level, msg) is called for warnings (level=1) and errors (level=2); "
+			"omit to print to stderr."
 		);
 	}
 #endif
