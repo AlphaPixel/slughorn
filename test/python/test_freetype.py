@@ -233,7 +233,7 @@ def test_normalize_coverage_preserved(atlas):
 	atlas.build()
 	for cp in DIGIT_CODEPOINTS:
 		grid = atlas.decode(slughorn.Key(cp)).render_grid(32, 0.0, True)
-		assert float(grid.max()) > 0.0, f"glyph {cp} has zero coverage after normalize"
+		assert max(memoryview(grid).cast('B').cast('f')) > 0.0, f"glyph {cp} has zero coverage after normalize"
 
 
 # ---------------------------------------------------------------------------
@@ -304,4 +304,4 @@ def test_load_and_decode(atlas):
 	atlas.build()
 	sampler = atlas.decode(slughorn.Key(ord("A")))
 	grid = sampler.render_grid(32, 0.0, True)
-	assert float(grid.max()) > 0.0, "glyph 'A' rendered empty"
+	assert max(memoryview(grid).cast('B').cast('f')) > 0.0, "glyph 'A' rendered empty"

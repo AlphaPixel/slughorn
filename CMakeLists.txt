@@ -175,6 +175,13 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
 	target_compile_features(slughorn_python PUBLIC cxx_std_20)
 	target_compile_options(slughorn_python PRIVATE ${SLUGHORN_COMPILE_OPTIONS})
 	set_target_properties(slughorn_python PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+	add_custom_target(pytest
+		COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}
+			${Python3_EXECUTABLE} -m pytest
+		WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+		DEPENDS slughorn_python
+	)
 endif()
 
 # =============================================================================
@@ -318,7 +325,7 @@ if(PANDOC_EXECUTABLE)
 
 	add_custom_target(userguide
 		COMMAND ${PANDOC_EXECUTABLE}
-			cover.md UserGuide.md
+			userguide-cover.md UserGuide.md
 			-o UserGuide.pdf
 			${_PANDOC_FLAGS}
 		WORKING_DIRECTORY "${_DOC_DIR}"

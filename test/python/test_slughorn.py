@@ -823,10 +823,12 @@ def test_shape_curves_nonempty(built_atlas):
 	s = built_atlas.get_shape(slughorn.Key("rect"))
 	assert len(s.curves) > 0
 
-def test_shape_curves_are_tuples(built_atlas):
+def test_shape_curves_is_buffer(built_atlas):
 	s = built_atlas.get_shape(slughorn.Key("rect"))
-	for curve in s.curves:
-		assert len(curve) == 6
+	mv = memoryview(s.curves)
+	assert mv.ndim == 2
+	assert mv.shape[1] == 6
+	assert mv.format == 'f'
 
 def test_shape_repr(built_atlas):
 	assert repr(built_atlas.get_shape(slughorn.Key("rect"))) != ""
@@ -893,4 +895,4 @@ def test_normalize_coverage_preserved(atlas):
 
 	for key in (l_small.key, l_large.key):
 		grid = atlas.decode(key).render_grid(32, 0.0, True)
-		assert float(grid.max()) > 0.1, f"{key} should have non-zero coverage after normalize"
+		assert max(memoryview(grid).cast('B').cast('f')) > 0.1, f"{key} should have non-zero coverage after normalize"

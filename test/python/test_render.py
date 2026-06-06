@@ -224,25 +224,27 @@ def test_render_grid_shape():
 	atlas = _make_built_atlas()
 	sampler = atlas.decode("rect")
 	grid = sampler.render_grid(16, 0.0, True)
-	assert tuple(grid.shape) == (16, 16)
+	assert (grid.height, grid.width) == (16, 16)
 
 def test_render_grid_value_range():
 	atlas = _make_built_atlas()
 	sampler = atlas.decode("rect")
 	grid = sampler.render_grid(16, 0.0, True)
-	assert float(grid.min()) >= 0.0
-	assert float(grid.max()) <= 1.0 + 1e-6
+	flat = memoryview(grid).cast('B').cast('f')
+	assert min(flat) >= 0.0
+	assert max(flat) <= 1.0 + 1e-6
 
 def test_render_grid_solid_rect_coverage():
 	atlas = _make_built_atlas()
 	sampler = atlas.decode("rect")
 	grid = sampler.render_grid(32, 0.0, True)
-	assert float(grid.max()) > 0.9, "solid unit rect should have near-full coverage at centre"
+	assert max(memoryview(grid).cast('B').cast('f')) > 0.9, "solid unit rect should have near-full coverage at centre"
 
 def test_render_grid_unbanded_matches_banded():
 	atlas = _make_built_atlas()
 	sampler = atlas.decode("rect")
 	banded   = sampler.render_grid(16, 0.0, True)
 	unbanded = sampler.render_grid(16, 0.0, False)
-	import numpy
-	assert numpy.allclose(banded, unbanded, atol=1e-4)
+	b = memoryview(banded).cast('B').cast('f')
+	u = memoryview(unbanded).cast('B').cast('f')
+	assert all(abs(b[i] - u[i]) < 1e-4 for i in range(len(b)))

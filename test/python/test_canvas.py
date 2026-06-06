@@ -126,12 +126,9 @@ def test_path_clear():
 	assert p.has_pending_path is False
 
 def test_path_from_curves(built_atlas):
-	# Shape.curves returns a list of (x1,y1,x2,y2,x3,y3) tuples, but Path(curves)
-	# expects a list of slughorn.Curve objects — binding mismatch.
-	# Convert tuples to Curve objects manually until the binding is fixed.
 	s = built_atlas.get_shape(slughorn.Key("rect"))
-	curves = [slughorn.Curve(*t) for t in s.curves]
-	p = slughorn.canvas.Path(curves)
+	# Shape.curves returns a (N, 6) float32 memoryview; Path accepts it directly.
+	p = slughorn.canvas.Path(s.curves)
 	assert p.arc_length() > 0.0
 
 def test_path_stroke_path():
@@ -626,13 +623,13 @@ def test_multisubpath_coverage_raw(atlas):
 	layer = _three_rects_raw(atlas)
 	atlas.build()
 	grid = atlas.decode(layer.key).render_grid(32, 0.0, True)
-	assert float(grid.max()) > 0.5
+	assert max(memoryview(grid).cast('B').cast('f')) > 0.5
 
 def test_multisubpath_coverage_helper(atlas):
 	layer = _three_rects_helper(atlas)
 	atlas.build()
 	grid = atlas.decode(layer.key).render_grid(32, 0.0, True)
-	assert float(grid.max()) > 0.5
+	assert max(memoryview(grid).cast('B').cast('f')) > 0.5
 
 def test_add_path_transform(atlas):
 	canvas = slughorn.canvas.Canvas(atlas)
@@ -672,7 +669,7 @@ def test_add_path_transform_coverage(atlas):
 	atlas.build()
 
 	grid = atlas.decode(layer.key).render_grid(32, 0.0, True)
-	assert float(grid.max()) > 0.5
+	assert max(memoryview(grid).cast('B').cast('f')) > 0.5
 
 
 # ---------------------------------------------------------------------------

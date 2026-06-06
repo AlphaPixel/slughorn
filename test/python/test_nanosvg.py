@@ -312,9 +312,10 @@ def test_renderable_solid(atlas):
 	atlas.build()
 	sampler = atlas.decode(composite.layers[0].key)
 	grid = sampler.render_grid(32, 0.0, True)
-	assert tuple(grid.shape) == (32, 32)
-	assert float(grid.max()) > 0.5, "solid filled rect must have high coverage"
-	assert float(grid.min()) >= 0.0
+	assert (grid.height, grid.width) == (32, 32)
+	flat = memoryview(grid).cast('B').cast('f')
+	assert max(flat) > 0.5, "solid filled rect must have high coverage"
+	assert min(flat) >= 0.0
 
 def test_renderable_all_gradient_shapes(atlas):
 	svg_path = _SVG_DIR / "gradient-test.svg"
@@ -324,4 +325,4 @@ def test_renderable_all_gradient_shapes(atlas):
 	atlas.build()
 	for layer in composite.layers:
 		grid = atlas.decode(layer.key).render_grid(16, 0.0, True)
-		assert float(grid.max()) > 0.0, f"gradient shape {layer.key} rendered empty"
+		assert max(memoryview(grid).cast('B').cast('f')) > 0.0, f"gradient shape {layer.key} rendered empty"

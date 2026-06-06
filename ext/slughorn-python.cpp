@@ -64,7 +64,7 @@
 #endif
 
 #include <pybind11/pybind11.h>
-#include <pybind11/numpy.h>
+// #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
 #include <pybind11/stl_bind.h>
 #include <pybind11/functional.h>
@@ -130,7 +130,7 @@ py::memoryview arrayView1D(const std::array<T, N>& v) {
 }
 
 py::memoryview curveView2D(const std::vector<slughorn::Atlas::Curve>& curves) {
-	const auto fmt = py::format_descriptor<slughorn::slug_t>::format();
+	static const std::string fmt = py::format_descriptor<slughorn::slug_t>::format();
 	const std::vector<py::ssize_t> shape = {static_cast<py::ssize_t>(curves.size()), 6};
 	const std::vector<py::ssize_t> strides = {
 		static_cast<py::ssize_t>(sizeof(slughorn::Atlas::Curve)),
@@ -251,10 +251,16 @@ using detail::vectorView1D;
 using detail::arrayView1D;
 using detail::curveView2D;
 using detail::streamRepr;
-using slughorn::render::Sample;
-using slughorn::render::Sampler;
 using detail::PyCurveDecomposer;
 using detail::CurveDecomposerRef;
+
+using slughorn::render::Sample;
+using slughorn::render::Sampler;
+using slughorn::render::Grid;
+
+#ifdef SLUGHORN_HAS_MSDF
+using slughorn::render::MSDFGrid;
+#endif
 
 // ================================================================================================
 // Module
@@ -663,8 +669,36 @@ PYBIND11_MODULE(slughorn, m) {
 	// ============================================================================================
 	auto shapeinfo_ = py::class_<slughorn::Atlas::ShapeInfo>(m, "ShapeInfo")
 		.def(py::init<>())
-		.def_readwrite("curves", &slughorn::Atlas::ShapeInfo::curves,
-			"List of Curve objects in em-normalized coordinates."
+		.def_property("curves",
+			[](const slughorn::Atlas::ShapeInfo& info) { return info.curves; },
+			[](slughorn::Atlas::ShapeInfo& info, py::object obj) {
+				if(PyObject_CheckBuffer(obj.ptr())) {
+					py::buffer_info bi = py::reinterpret_borrow<py::buffer>(obj).request();
+
+					if(
+						bi.format != py::format_descriptor<slug_t>::format() ||
+						bi.ndim != 2 ||
+						bi.shape[1] != 6
+					) throw std::runtime_error(
+						"ShapeInfo.curves: expected (N, 6) float32 buffer"
+					);
+
+					info.curves.clear();
+					info.curves.reserve(static_cast<size_t>(bi.shape[0]));
+
+					for(py::ssize_t i = 0; i < bi.shape[0]; i++) {
+						const slug_t* row = reinterpret_cast<const slug_t*>(
+							static_cast<const char*>(bi.ptr) + i * bi.strides[0]
+						);
+
+						info.curves.push_back({row[0], row[1], row[2], row[3], row[4], row[5]});
+					}
+				}
+
+				else info.curves = obj.cast<slughorn::Atlas::Curves>();
+			},
+			"List of Curve objects in em-normalized coordinates (get), "
+			"or a (N, 6) float32 buffer to assign from (set)."
 		)
 		.def_readwrite("auto_metrics", &slughorn::Atlas::ShapeInfo::autoMetrics,
 			"If True (default), derive width/height/bearing/advance from the "
@@ -809,15 +843,9 @@ PYBIND11_MODULE(slughorn, m) {
 			"Compute the world-space bounding quad for this shape."
 		)
 		.def_property_readonly("curves",
-			[](const slughorn::Atlas::Shape& s) {
-				py::list result;
-
-				for(const auto& c : s.curves)
-					result.append(py::make_tuple(c.x1, c.y1, c.x2, c.y2, c.x3, c.y3));
-
-				return result;
-			},
-			"Em-space curves as a flat list of (x1,y1,x2,y2,x3,y3) tuples. "
+			[](const slughorn::Atlas::Shape& s) { return curveView2D(s.curves); },
+			"Em-space curves as a (N, 6) float32 memoryview (x1,y1,x2,y2,x3,y3 per row). "
+			"Pass directly to Path(curves), memoryview(), or np.asarray(). "
 			"Valid at any build lifecycle stage when accessed via get_shape()."
 		)
 		.def("__repr__", [](const slughorn::Atlas::Shape& s) { return streamRepr(s); })
@@ -1041,58 +1069,26 @@ PYBIND11_MODULE(slughorn, m) {
 #ifdef SLUGHORN_HAS_MSDF
 		.def("render_sdf",
 			[](const slughorn::Atlas& a, slughorn::Key key, uint32_t tileSize, double range) {
-				const auto grid = slughorn::render::renderSDF(a, key, tileSize, range);
-
-				py::array_t<float> arr({
-					static_cast<py::ssize_t>(grid.height),
-					static_cast<py::ssize_t>(grid.width)
-				});
-
-				auto buf = arr.mutable_unchecked<2>();
-
-				for(uint32_t j = 0; j < grid.height; j++) {
-					for(uint32_t i = 0; i < grid.width; i++) {
-						buf(j, i) = grid.at(j, i);
-					}
-				}
-
-				return arr;
+				return slughorn::render::renderSDF(a, key, tileSize, range);
 			},
 			py::arg("key"),
 			py::arg("tile_size")=128,
 			py::arg("range")=0.1,
 			"Generate a single-channel SDF tile via msdfgen.\n"
-			"Returns a float32 ndarray of shape (H, W); edge pixels are ~0.5."
+			"Returns a Grid; use memoryview(grid) for a (H, W) float32 view,\n"
+			"or np.asarray(grid) for NumPy. Edge pixels are ~0.5."
 		)
 
 		.def("render_msdf",
 			[](const slughorn::Atlas& a, slughorn::Key key, uint32_t tileSize, double range) {
-				const auto grid = slughorn::render::renderMSDF(a, key, tileSize, range);
-
-				py::array_t<float> arr({
-					static_cast<py::ssize_t>(grid.height),
-					static_cast<py::ssize_t>(grid.width),
-					static_cast<py::ssize_t>(3)
-				});
-
-				auto buf = arr.mutable_unchecked<3>();
-
-				for(uint32_t j = 0; j < grid.height; j++) {
-					for(uint32_t i = 0; i < grid.width; i++) {
-						for(uint32_t c = 0; c < 3; c++) {
-							buf(j, i, c) = grid.at(j, i, c);
-						}
-					}
-				}
-
-				return arr;
+				return slughorn::render::renderMSDF(a, key, tileSize, range);
 			},
 			py::arg("key"),
-			py::arg("tile_size")=128,
-			py::arg("range")=0.1,
+			py::arg("tile_size") = 128,
+			py::arg("range") = 0.1,
 			"Generate a multi-channel SDF tile via msdfgen.\n"
-			"Returns a float32 ndarray of shape (H, W, 3).\n"
-			"Reconstruct in shader: float sd = median(d.r, d.g, d.b);"
+			"Returns an MSDFGrid; use memoryview(grid) for a (H, W, 3) float32 view,\n"
+			"or np.asarray(grid) for NumPy. Reconstruct in shader: median(r, g, b)."
 		)
 #endif // SLUGHORN_HAS_MSDF
 
@@ -1170,6 +1166,11 @@ PYBIND11_MODULE(slughorn, m) {
 			py::return_value_policy::copy,
 			"Return a copy of the accumulated Curves list."
 		)
+		.def_property_readonly("curve_buffer",
+			[](const PyCurveDecomposer& d) { return curveView2D(d.getCurves()); },
+			"Zero-copy (N, 6) float32 memoryview of accumulated curves.\n"
+			"View is invalidated if the decomposer is mutated after this call."
+		)
 		.def("close", &PyCurveDecomposer::close,
 			"Close the current subpath by drawing a line back to the start point."
 		)
@@ -1220,6 +1221,55 @@ PYBIND11_MODULE(slughorn, m) {
 			"Software decode and rendering helpers built on top of a compiled slughorn.Atlas.\n\n"
 			"Provides a decoded per-shape view plus native reference and banded sample paths."
 		);
+
+		py::class_<Grid>(render, "Grid", py::buffer_protocol())
+			.def_readonly("width", &Grid::width)
+			.def_readonly("height", &Grid::height)
+			.def_buffer([](Grid& g) -> py::buffer_info {
+				return py::buffer_info(
+					g.data.data(),
+					sizeof(slug_t),
+					py::format_descriptor<slug_t>::format(),
+					2,
+					{ static_cast<py::ssize_t>(g.height), static_cast<py::ssize_t>(g.width) },
+					{
+						static_cast<py::ssize_t>(g.width * sizeof(slug_t)),
+						static_cast<py::ssize_t>(sizeof(slug_t))
+					}
+				);
+			})
+			.def("__repr__", [](const Grid& g) {
+				return "Grid(" + std::to_string(g.width) + "x" + std::to_string(g.height) + ")";
+			})
+		;
+
+#ifdef SLUGHORN_HAS_MSDF
+		py::class_<MSDFGrid>(render, "MSDFGrid", py::buffer_protocol())
+			.def_readonly("width", &MSDFGrid::width)
+			.def_readonly("height", &MSDFGrid::height)
+			.def_buffer([](MSDFGrid& g) -> py::buffer_info {
+				return py::buffer_info(
+					g.data.data(),
+					sizeof(float),
+					py::format_descriptor<float>::format(),
+					3,
+					{
+						static_cast<py::ssize_t>(g.height),
+						static_cast<py::ssize_t>(g.width),
+						static_cast<py::ssize_t>(3)
+					},
+					{
+						static_cast<py::ssize_t>(g.width * 3 * sizeof(float)),
+						static_cast<py::ssize_t>(3 * sizeof(float)),
+						static_cast<py::ssize_t>(sizeof(float))
+					}
+				);
+			})
+			.def("__repr__", [](const MSDFGrid& g) {
+				return "MSDFGrid(" + std::to_string(g.width) + "x" + std::to_string(g.height) + ")";
+			})
+		;
+#endif
 
 		py::class_<Sample>(render, "Sample")
 			.def_readonly("fill", &Sample::fill)
@@ -1304,21 +1354,14 @@ PYBIND11_MODULE(slughorn, m) {
 			)
 			.def("render_grid",
 				[](const Sampler& d, uint32_t size, slug_t margin, bool banded) {
-					const auto grid = d.renderGrid(size, margin, banded);
-					py::array_t<slug_t> arr({
-						static_cast<py::ssize_t>(grid.height),
-						static_cast<py::ssize_t>(grid.width)
-					});
-					auto buf = arr.mutable_unchecked<2>();
-					for(uint32_t j = 0; j < grid.height; j++)
-						for(uint32_t i = 0; i < grid.width; i++)
-							buf(j, i) = grid.at(j, i);
-					return arr;
+					return d.renderGrid(size, margin, banded);
 				},
 				py::arg("size") = 128,
 				py::arg("margin") = 0_cv,
 				py::arg("banded") = true,
-				"Render a full grayscale coverage grid as a float32 NumPy-compatible array."
+				"Render a full grayscale coverage grid.\n"
+				"Returns a Grid; use memoryview(grid) for a zero-copy (H, W) float32 view,\n"
+				"or np.asarray(grid) for NumPy users."
 			)
 			.def("__repr__", [](const Sampler& d) {
 				return "Sampler(curves=" + std::to_string(d.curves.size()) +
@@ -1429,9 +1472,36 @@ PYBIND11_MODULE(slughorn, m) {
 
 			path
 				.def(py::init<>(), "Create an empty path with identity transform.")
+				.def(py::init([](py::buffer b) {
+					py::buffer_info info = b.request();
+
+					if(
+						info.format != py::format_descriptor<slug_t>::format() ||
+						info.ndim != 2 ||
+						info.shape[1] != 6
+					) throw std::runtime_error(
+						"Path(curves): expected (N, 6) float32 buffer"
+					);
+
+					slughorn::Atlas::Curves curves;
+
+					curves.reserve(static_cast<size_t>(info.shape[0]));
+
+					for(py::ssize_t i = 0; i < info.shape[0]; i++) {
+						const slug_t* row = reinterpret_cast<const slug_t*>(
+							static_cast<const char*>(info.ptr) + i * info.strides[0]
+						);
+
+						curves.push_back({row[0], row[1], row[2], row[3], row[4], row[5]});
+					}
+
+					return slughorn::canvas::Path(std::move(curves));
+				}), py::arg("curves"),
+					"Create a path from a (N, 6) float32 buffer (memoryview, numpy array, etc.).\n"
+					"Accepts Shape.curves directly: Path(atlas.get_shape(key).curves)"
+				)
 				.def(py::init<slughorn::Atlas::Curves>(), py::arg("curves"),
-					"Create a path pre-populated with curves from an Atlas shape.\n"
-					"Useful for sampling along SVG geometry: Path(atlas.get_shape(key).curves)."
+					"Create a path pre-populated with a list of Curve objects."
 				)
 
 				// Path management
