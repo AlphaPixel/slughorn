@@ -69,7 +69,7 @@ simple quadratic Bezier curves, `slughorn` can make it render.
 
 **Emoji**
 
-Demonstrates loading **COLRv0** and **COLRv1** emojis using the `slughorn-freetype.hpp`
+Demonstrates loading **COLRv0** and **COLRv1** emojis using the `slughorn/freetype.hpp`
 backend. Each layer of the emoji is composited into its own quad and positioned relative
 to the base.
 
@@ -222,7 +222,7 @@ changing a small subset of the total GPU memory.
 
 Each backend has its own examples of how to create both simple `Shape` and
 `CompositeShape` objects, groups of `Shape` instances layered together. The last
-screenshot demonstrates the `slughorn-canvas.hpp` backend, in addition to showing how
+screenshot demonstrates the `slughorn/canvas.hpp` backend, in addition to showing how
 the traditional punch-out effect can be achieved by manually using opposite winding
 directions in order to cut out one closed path from another.
 
@@ -290,10 +290,11 @@ Slug is not restricted to simple quads; any 3D object or mesh can be assigned co
 
 **SVG**
 
-SVG content fits easily within the `slughorn` ecosystem via the `slughorn-nanosvg.hpp`
+SVG content fits easily within the `slughorn` ecosystem via the `slughorn/nanosvg.hpp`
 backend.
 
-*NOTE*: Similar to the emoji support, gradients are not currently supported.
+*NOTE*: Some SVG features (strokes, text) are **possible**, but have not yet
+been implemented.
 
 </td>
 </tr>
