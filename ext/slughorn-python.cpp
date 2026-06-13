@@ -871,9 +871,10 @@ PYBIND11_MODULE(slughorn, m) {
 				case slughorn::Atlas::TextureData::Format::RGBA32F: return "RGBA32F";
 				case slughorn::Atlas::TextureData::Format::RGBA16UI: return "RGBA16UI";
 				case slughorn::Atlas::TextureData::Format::RGBA8: return "RGBA8";
+				case slughorn::Atlas::TextureData::Format::RGB32F: return "RGB32F";
 			}
 			return "unknown";
-		}, "String: 'RGBA32F' (curve texture), 'RGBA16UI' (band texture), or 'RGBA8' (gradient texture).")
+		}, "String: 'RGBA32F' (curve), 'RGBA16UI' (band), 'RGBA8' (gradient), 'RGB32F' (MSDF array).")
 		.def_property_readonly("bytes", [](const slughorn::Atlas::TextureData& td) {
 			return bytesView(td.bytes);
 		}, "Zero-copy memoryview of the raw pixel data (row-major). "
@@ -1076,6 +1077,39 @@ PYBIND11_MODULE(slughorn, m) {
 		)
 
 #ifdef SLUGHORN_HAS_MSDF
+		.def("register_msdf",
+			[](slughorn::Atlas& a, slughorn::Key key, uint32_t tileSize, double range) {
+				return a.registerMSDF(key, tileSize, range);
+			},
+			"key"_a, "tile_size"_a=128, "range"_a=0.1,
+			"Opt this shape in to MSDF tile generation.\n"
+			"Must be called after build(), before the graphics adapter packs textures.\n"
+			"Returns the layer index in the resulting Texture2DArray.\n"
+			"Shape.msdf_layer is updated in-place; all tiles must share the same tile_size."
+		)
+
+		.def("get_msdf_layer",
+			[](const slughorn::Atlas& a, slughorn::Key key) { return a.getMSDFLayer(key); },
+			"key"_a,
+			"Return the Texture2DArray layer index for key, or -1 if not registered."
+		)
+
+		.def("get_msdf_texture_data",
+			[](const slughorn::Atlas& a) -> py::object {
+				const auto& td = a.getMSDFTextureData();
+
+				if(td.empty()) return py::none();
+
+				return py::memoryview::from_memory(
+					const_cast<uint8_t*>(td.bytes.data()),
+					static_cast<py::ssize_t>(td.bytes.size())
+				);
+			},
+			"Return a zero-copy memoryview over the packed RGB32F MSDF tile data.\n"
+			"Cast to float32 and reshape to (depth, tile_size, tile_size, 3).\n"
+			"Returns None when no shapes are registered."
+		)
+
 		.def("render_sdf",
 			[](const slughorn::Atlas& a, slughorn::Key key, uint32_t tileSize, double range) {
 				return slughorn::render::renderSDF(a, key, tileSize, range);
@@ -1091,9 +1125,20 @@ PYBIND11_MODULE(slughorn, m) {
 				return slughorn::render::renderMSDF(a, key, tileSize, range);
 			},
 			"key"_a, "tile_size"_a=128, "range"_a=0.1,
-			"Generate a multi-channel SDF tile via msdfgen.\n"
+			"Generate a multi-channel SDF tile via msdfgen. Aspect-ratio preserving.\n"
 			"Returns an MSDFGrid; use memoryview(grid) for a (H, W, 3) float32 view,\n"
 			"or np.asarray(grid) for NumPy. Reconstruct in shader: median(r, g, b)."
+		)
+
+		.def("render_msdf_tile",
+			[](const slughorn::Atlas& a, slughorn::Key key, uint32_t tileSize, double range) {
+				return slughorn::render::renderMSDFTile(a, key, tileSize, range);
+			},
+			"key"_a, "tile_size"_a=128, "range"_a=0.2,
+			"Generate a square tile_size x tile_size MSDF tile for GPU Texture2DArray use.\n"
+			"Unlike render_msdf(), dimensions are always exactly tile_size x tile_size;\n"
+			"non-square shapes are letterboxed. range=0.2 default suits HUD glow effects.\n"
+			"Returns an MSDFGrid; use memoryview(grid) for a (H, W, 3) float32 view."
 		)
 #endif // SLUGHORN_HAS_MSDF
 
@@ -1356,13 +1401,15 @@ PYBIND11_MODULE(slughorn, m) {
 				"Band-accelerated software sample mirroring the GPU shader path."
 			)
 			.def("render_grid",
-				[](const Sampler& d, uint32_t size, slug_t margin, bool banded) {
-					return d.renderGrid(size, margin, banded);
+				[](const Sampler& d, uint32_t size, slug_t margin, bool banded, bool parallel) {
+					py::gil_scoped_release release;
+					return d.renderGrid(size, margin, banded, parallel);
 				},
-				"size"_a=128, "margin"_a=0_cv, "banded"_a=true,
+				"size"_a=128, "margin"_a=0_cv, "banded"_a=true, "parallel"_a=false,
 				"Render a full grayscale coverage grid.\n"
 				"Returns a Grid; use memoryview(grid) for a zero-copy (H, W) float32 view,\n"
-				"or np.asarray(grid) for NumPy users."
+				"or np.asarray(grid) for NumPy users.\n"
+				"parallel=True uses OpenMP row parallelism (requires SLUGHORN_RENDER_PARALLEL=ON)."
 			)
 			.def("__repr__", [](const Sampler& d) {
 				return "Sampler(curves=" + std::to_string(d.curves.size()) +
@@ -1382,6 +1429,36 @@ PYBIND11_MODULE(slughorn, m) {
 			"atlas"_a, "key"_a,
 			"Decode a built atlas shape into a slughorn.render.Sampler."
 		);
+
+#ifdef SLUGHORN_HAS_MSDF
+		render.def("sdf",
+			[](const slughorn::Atlas& atlas, slughorn::Key key, uint32_t tileSize, double range) {
+				return slughorn::render::renderSDF(atlas, key, tileSize, range);
+			},
+			"atlas"_a, "key"_a, "tile_size"_a=128, "range"_a=0.1,
+			"Generate a single-channel SDF tile. Aspect-ratio preserving.\n"
+			"Returns a Grid with values in [0, 1]; edge pixels are ~0.5."
+		);
+
+		render.def("msdf",
+			[](const slughorn::Atlas& atlas, slughorn::Key key, uint32_t tileSize, double range) {
+				return slughorn::render::renderMSDF(atlas, key, tileSize, range);
+			},
+			"atlas"_a, "key"_a, "tile_size"_a=128, "range"_a=0.1,
+			"Generate a multi-channel SDF tile. Aspect-ratio preserving.\n"
+			"Returns an MSDFGrid; reconstruct signed distance with median(r, g, b)."
+		);
+
+		render.def("msdf_tile",
+			[](const slughorn::Atlas& atlas, slughorn::Key key, uint32_t tileSize, double range) {
+				return slughorn::render::renderMSDFTile(atlas, key, tileSize, range);
+			},
+			"atlas"_a, "key"_a, "tile_size"_a=128, "range"_a=0.2,
+			"Generate a square tile_size x tile_size MSDF tile for GPU Texture2DArray use.\n"
+			"Non-square shapes are letterboxed. range=0.2 default suits HUD glow effects.\n"
+			"Returns an MSDFGrid; reconstruct signed distance with median(r, g, b)."
+		);
+#endif
 	}
 
 	// =========================================================================

@@ -576,6 +576,10 @@ public:
 		// branching (Task 0 clean fix: Custom must not subtract originX/Y from transform).
 		ShapeInfo::Origin origin;
 
+		// Layer index in the MSDF Texture2DArray; -1 = no MSDF registered for this shape.
+		// Set by Atlas::registerMSDF() after build().
+		int msdfLayer = -1;
+
 		// Original em-space curves, retained post-build and post-load.
 		// Enables canvas::glyphOutline() and strokeText() without re-running font backends.
 		// Populated by Atlas::build() and by serial::read() via render::decode().
@@ -627,14 +631,17 @@ public:
 	// RGBA16UI - four 16-bit unsigned ints per texel (band texture)
 	// --------------------------------------------------------------------------------------------
 	struct TextureData {
-		enum class Format { RGBA32F, RGBA16UI, RGBA8 };
+		enum class Format { RGBA32F, RGBA16UI, RGBA8, RGB32F };
 
 		std::vector<uint8_t> bytes;
 
 		uint32_t width = 0;
 		uint32_t height = 0;
+		uint32_t depth = 0; // >0: array texture (number of layers); 0: 2D texture
 
 		Format format = Format::RGBA32F;
+
+		bool empty() const { return bytes.empty(); }
 	};
 
 	// --------------------------------------------------------------------------------------------
@@ -902,6 +909,34 @@ public:
 	const TextureData& getGradientTextureData() const { return _gradientData; }
 	const SDFAtlas& getSDFAtlasData() const { return _sdfAtlas; }
 
+	// --------------------------------------------------------------------------------------------
+	// Per-shape MSDF opt-in (requires SLUGHORN_MSDF=ON)
+	//
+	// Call registerMSDF() for each shape that needs a distance field, after build() and before
+	// the graphics adapter calls packTextures(). All tiles must share the same tileSize so the
+	// result can be uploaded as a Texture2DArray.
+	//
+	// getMSDFTextureData() packs registered tiles into a single RGB32F TextureData on first call;
+	// subsequent calls return the cached result. depth == number of layers.
+	//
+	// Shape::msdfLayer is updated in-place by registerMSDF() so callers can read it from
+	// getShape() without a separate lookup.
+	// --------------------------------------------------------------------------------------------
+
+#ifdef SLUGHORN_HAS_MSDF
+	int registerMSDF(Key key, uint32_t tileSize = 128, double range = 0.1);
+	const TextureData& getMSDFTextureData() const;
+#endif
+
+	// Always available; returns -1 when SLUGHORN_MSDF is off or the shape was not registered.
+	int getMSDFLayer(Key key) const {
+#ifdef SLUGHORN_HAS_MSDF
+		auto it = _msdfLayerMap.find(key);
+		if(it != _msdfLayerMap.end()) return it->second;
+#endif
+		return -1;
+	}
+
 	// Gradient list (valid after build() if any gradients were registered).
 	const std::vector<GradientInfo>& getGradients() const { return _gradients; }
 
@@ -1007,6 +1042,14 @@ private:
 
 	std::optional<SDFOptions> _sdfOptions;
 	SDFAtlas _sdfAtlas;
+
+#ifdef SLUGHORN_HAS_MSDF
+	std::unordered_map<Key, int, KeyHash> _msdfLayerMap;
+	std::vector<std::vector<float>> _msdfTileData; // raw RGB32F floats per registered tile
+	uint32_t _msdfTileSize = 0;
+	mutable TextureData _msdfData;   // packed lazily by getMSDFTextureData()
+	mutable bool _msdfDirty = false; // set true by registerMSDF(), cleared on pack
+#endif
 
 	PackingStats _packingStats; // populated by packTextures()
 
@@ -1503,6 +1546,7 @@ inline std::ostream& operator<<(std::ostream& os, Atlas::TextureData::Format for
 		case Atlas::TextureData::Format::RGBA32F: return os << "RGBA32F";
 		case Atlas::TextureData::Format::RGBA16UI: return os << "RGBA16UI";
 		case Atlas::TextureData::Format::RGBA8: return os << "RGBA8";
+		case Atlas::TextureData::Format::RGB32F: return os << "RGB32F";
 	}
 
 	return os << "TextureData::Format(?)";

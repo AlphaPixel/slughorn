@@ -32,7 +32,7 @@ OUT_JSON = "slughorn_sdf_atlas.json"
 # --- msdfgen path (preferred) ---
 
 def make_sdf_tile_msdfgen(atlas, key):
-	arr = atlas.render_sdf(key, tile_size=TILE, range=SDF_RANGE) # float32 (H, W)
+	arr = np.asarray(atlas.render_sdf(key, tile_size=TILE, range=SDF_RANGE)) # float32 (H, W)
 	if arr.max() < 0.5:
 		return None # no interior -- empty/whitespace shape
 	return Image.fromarray((np.clip(arr, 0.0, 1.0) * 255).astype("uint8"))
@@ -47,7 +47,7 @@ def make_sdf_tile_scipy(atlas, key):
 	RENDER_MARGIN = MAX_DIST_FRAC / (1.0 - 2.0 * MAX_DIST_FRAC)
 
 	decoded = atlas.decode(key)
-	coverage = decoded.render_grid(TILE * SUPERSAMPLE, RENDER_MARGIN, True)
+	coverage = np.asarray(decoded.render_grid(TILE * SUPERSAMPLE, RENDER_MARGIN, True))
 
 	if float(coverage.max()) < 0.01:
 		return None

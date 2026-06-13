@@ -664,6 +664,75 @@ void Atlas::rasterizeSDFAtlas() {
 }
 
 // ================================================================================================
+// Atlas::registerMSDF / getMSDFTextureData
+//
+// Per-shape opt-in MSDF generation. registerMSDF() must be called after build() (curves must
+// exist) but before the graphics adapter uploads textures. All tiles share the same tileSize
+// so they can be uploaded as a Texture2DArray layer.
+//
+// getMSDFTextureData() packs all registered tiles into a single RGB32F TextureData on first
+// call (lazy). depth == number of layers; width == height == tileSize.
+// ================================================================================================
+
+#ifdef SLUGHORN_HAS_MSDF
+int Atlas::registerMSDF(Key key, uint32_t tileSize, double range) {
+	if(!_built)
+		throw std::runtime_error("Atlas::registerMSDF: call after build()");
+
+	auto sit = _shapes.find(key);
+
+	if(sit == _shapes.end())
+		throw std::out_of_range("Atlas::registerMSDF: key not found in atlas");
+
+	auto existing = _msdfLayerMap.find(key);
+
+	if(existing != _msdfLayerMap.end()) return existing->second;
+
+	if(_msdfTileSize != 0 && tileSize != _msdfTileSize)
+		throw std::runtime_error(
+			"Atlas::registerMSDF: all tiles must share the same tileSize for Texture2DArray"
+		);
+
+	_msdfTileSize = tileSize;
+
+	const int layer = static_cast<int>(_msdfTileData.size());
+	auto grid = render::renderMSDFTile(*this, key, tileSize, range);
+
+	_msdfTileData.push_back(std::move(grid.data));
+	_msdfLayerMap[key] = layer;
+	sit->second.msdfLayer = layer;
+	_msdfDirty = true;
+
+	return layer;
+}
+
+const Atlas::TextureData& Atlas::getMSDFTextureData() const {
+	if(!_msdfDirty || _msdfTileData.empty()) return _msdfData;
+
+	const uint32_t ts = _msdfTileSize;
+	const uint32_t numLayers = static_cast<uint32_t>(_msdfTileData.size());
+	const size_t floatsPerTile = size_t{ts} * ts * 3;
+
+	_msdfData.format = TextureData::Format::RGB32F;
+	_msdfData.width = ts;
+	_msdfData.height = ts;
+	_msdfData.depth = numLayers;
+	_msdfData.bytes.resize(floatsPerTile * numLayers * sizeof(float));
+
+	auto* dst = reinterpret_cast<float*>(_msdfData.bytes.data());
+
+	for(const auto& tile : _msdfTileData) {
+		std::memcpy(dst, tile.data(), tile.size() * sizeof(float));
+		dst += tile.size();
+	}
+
+	_msdfDirty = false;
+
+	return _msdfData;
+}
+#endif
+
+// ================================================================================================
 // Atlas::getShape
 // ================================================================================================
 

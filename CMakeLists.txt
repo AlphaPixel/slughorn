@@ -45,6 +45,7 @@ option(SLUGHORN_SERIAL "Include serialization support (requires nlohmann)" OFF)
 option(SLUGHORN_NANOSVG "Include NanoSVG support (requires nanosvg)" OFF)
 option(SLUGHORN_FREETYPE "Include FreeType support (requires freetype2)" OFF)
 option(SLUGHORN_MSDF "Include MSDF support (requires msdfgen)" OFF)
+option(SLUGHORN_RENDER_PARALLEL "Enable std::execution parallel pixel rendering (requires TBB on Linux)" OFF)
 # option(SLUGHORN_GLFW "Include GLFW support (requires glfw3)" OFF)
 
 add_library(slughorn STATIC "slughorn/slughorn.cpp")
@@ -141,6 +142,17 @@ if(SLUGHORN_MSDF)
 			$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/ext/msdfgen>
 	)
 	target_link_libraries(slughorn PUBLIC msdfgen-core)
+endif()
+
+if(SLUGHORN_RENDER_PARALLEL)
+	find_package(OpenMP QUIET)
+	if(OpenMP_CXX_FOUND)
+		target_compile_definitions(slughorn PUBLIC SLUGHORN_HAS_PARALLEL)
+		target_link_libraries(slughorn PUBLIC OpenMP::OpenMP_CXX)
+		message(STATUS "SLUGHORN_RENDER_PARALLEL: using OpenMP")
+	else()
+		message(WARNING "SLUGHORN_RENDER_PARALLEL=ON but OpenMP not found; parallel rendering disabled")
+	endif()
 endif()
 
 # =============================================================================

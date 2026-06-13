@@ -1,8 +1,17 @@
 """
 Tests for slughorn/render.hpp — slughorn.render submodule.
 
-Exposes: render.Sample, render.Sampler, render.decode(atlas, key).
-Atlas.decode(key) is a convenience wrapper for the same thing; tested here too.
+render submodule free functions (atlas as first arg):
+  render.decode(atlas, key)    -> Sampler
+  render.sdf(atlas, key, ...)  -> Grid        (requires SLUGHORN_MSDF)
+  render.msdf(atlas, key, ...) -> MSDFGrid    (requires SLUGHORN_MSDF)
+  render.msdf_tile(atlas, key, ...) -> MSDFGrid  (square tiles; requires SLUGHORN_MSDF)
+
+Atlas convenience wrappers (key as first arg, atlas implicit):
+  atlas.decode(key)            -> Sampler
+  atlas.render_sdf(key, ...)   -> Grid        (requires SLUGHORN_MSDF)
+  atlas.render_msdf(key, ...)  -> MSDFGrid    (requires SLUGHORN_MSDF)
+  atlas.render_msdf_tile(key, ...) -> MSDFGrid   (square tiles; requires SLUGHORN_MSDF)
 """
 
 import math
@@ -248,3 +257,118 @@ def test_render_grid_unbanded_matches_banded():
 	b = memoryview(banded).cast('B').cast('f')
 	u = memoryview(unbanded).cast('B').cast('f')
 	assert all(abs(b[i] - u[i]) < 1e-4 for i in range(len(b)))
+
+
+# ---------------------------------------------------------------------------
+# SDF / MSDF — render submodule free functions and atlas convenience wrappers
+# (skipped when slughorn is built without SLUGHORN_MSDF=ON)
+# ---------------------------------------------------------------------------
+
+msdf = pytest.importorskip("slughorn", reason="slughorn module missing")
+HAS_MSDF = hasattr(slughorn.render, "sdf")
+
+
+@pytest.mark.skipif(not HAS_MSDF, reason="built without SLUGHORN_MSDF=ON")
+def test_render_submodule_sdf_exists():
+	assert hasattr(slughorn.render, "sdf")
+
+@pytest.mark.skipif(not HAS_MSDF, reason="built without SLUGHORN_MSDF=ON")
+def test_render_submodule_msdf_exists():
+	assert hasattr(slughorn.render, "msdf")
+
+@pytest.mark.skipif(not HAS_MSDF, reason="built without SLUGHORN_MSDF=ON")
+def test_render_submodule_msdf_tile_exists():
+	assert hasattr(slughorn.render, "msdf_tile")
+
+@pytest.mark.skipif(not HAS_MSDF, reason="built without SLUGHORN_MSDF=ON")
+def test_atlas_render_msdf_tile_exists():
+	assert hasattr(slughorn.Atlas, "render_msdf_tile")
+
+
+# render.sdf
+
+@pytest.mark.skipif(not HAS_MSDF, reason="built without SLUGHORN_MSDF=ON")
+def test_render_sdf_returns_grid():
+	atlas = _make_built_atlas()
+	grid = slughorn.render.sdf(atlas, "rect", 32)
+	assert isinstance(grid, slughorn.render.Grid)
+
+@pytest.mark.skipif(not HAS_MSDF, reason="built without SLUGHORN_MSDF=ON")
+def test_render_sdf_interior_exterior():
+	atlas = _make_built_atlas()
+	grid = slughorn.render.sdf(atlas, "rect", 32)
+	flat = memoryview(grid).cast('B').cast('f')
+	assert max(flat) > 0.5, "interior should be > 0.5"
+	assert min(flat) < 0.5, "exterior should be < 0.5"
+
+
+# render.msdf
+
+@pytest.mark.skipif(not HAS_MSDF, reason="built without SLUGHORN_MSDF=ON")
+def test_render_msdf_returns_msdf_grid():
+	atlas = _make_built_atlas()
+	grid = slughorn.render.msdf(atlas, "rect", 32)
+	assert isinstance(grid, slughorn.render.MSDFGrid)
+
+@pytest.mark.skipif(not HAS_MSDF, reason="built without SLUGHORN_MSDF=ON")
+def test_render_msdf_interior_exterior():
+	import numpy as np
+	atlas = _make_built_atlas()
+	arr = np.asarray(slughorn.render.msdf(atlas, "rect", 32))
+	def median3(r, g, b): return max(min(r, g), min(max(r, g), b))
+	h, w = arr.shape[:2]
+	center = median3(arr[h//2, w//2, 0], arr[h//2, w//2, 1], arr[h//2, w//2, 2])
+	corner = median3(arr[0, 0, 0], arr[0, 0, 1], arr[0, 0, 2])
+	assert center > 0.5, "center should be interior (>0.5)"
+	assert corner < 0.5, "corner should be exterior (<0.5)"
+
+@pytest.mark.skipif(not HAS_MSDF, reason="built without SLUGHORN_MSDF=ON")
+def test_render_msdf_matches_atlas_render_msdf():
+	import numpy as np
+	atlas = _make_built_atlas()
+	via_module = np.asarray(slughorn.render.msdf(atlas, "rect", 32))
+	via_atlas  = np.asarray(atlas.render_msdf("rect", tile_size=32))
+	assert np.allclose(via_module, via_atlas)
+
+
+# render.msdf_tile / atlas.render_msdf_tile
+
+@pytest.mark.skipif(not HAS_MSDF, reason="built without SLUGHORN_MSDF=ON")
+def test_render_msdf_tile_is_square():
+	atlas = _make_built_atlas()
+	grid = slughorn.render.msdf_tile(atlas, "rect", 64)
+	assert grid.width == 64
+	assert grid.height == 64
+
+@pytest.mark.skipif(not HAS_MSDF, reason="built without SLUGHORN_MSDF=ON")
+def test_render_msdf_tile_interior_exterior():
+	import numpy as np
+	# Use a diamond shape (vertices at the mid-points of the unit bbox) so that
+	# the bbox corners are genuinely exterior.  renderMSDFTile maps the tile
+	# exactly to the shape's bounding box with no range expansion, so a rect
+	# would put every tile pixel inside-or-on-boundary of the shape.
+	atlas = slughorn.Atlas()
+	d = slughorn.CurveDecomposer()
+	d.move_to(0.5, 0.0)
+	d.line_to(1.0, 0.5)
+	d.line_to(0.5, 1.0)
+	d.line_to(0.0, 0.5)
+	d.close()
+	info = slughorn.ShapeInfo()
+	info.curves = d.get_curves()
+	atlas.add_shape(slughorn.Key("diamond"), info)
+	atlas.build()
+	arr = np.asarray(slughorn.render.msdf_tile(atlas, "diamond", 64))
+	def median3(r, g, b): return max(min(r, g), min(max(r, g), b))
+	center = median3(arr[32, 32, 0], arr[32, 32, 1], arr[32, 32, 2])
+	corner = median3(arr[0, 0, 0], arr[0, 0, 1], arr[0, 0, 2])
+	assert center > 0.5, "center should be interior (>0.5)"
+	assert corner < 0.5, "corner should be exterior (<0.5)"
+
+@pytest.mark.skipif(not HAS_MSDF, reason="built without SLUGHORN_MSDF=ON")
+def test_render_msdf_tile_matches_atlas_wrapper():
+	import numpy as np
+	atlas = _make_built_atlas()
+	via_module = np.asarray(slughorn.render.msdf_tile(atlas, "rect", 64))
+	via_atlas  = np.asarray(atlas.render_msdf_tile("rect", tile_size=64))
+	assert np.allclose(via_module, via_atlas)

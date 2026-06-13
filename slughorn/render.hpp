@@ -29,6 +29,7 @@
 #include <unordered_map>
 #include <vector>
 
+
 #ifdef SLUGHORN_HAS_MSDF
 #include <msdfgen.h>
 #endif
@@ -257,7 +258,7 @@ struct Sampler {
 		return out;
 	}
 
-	Grid renderGrid(uint32_t sizeHint=128, slug_t margin=0_cv, bool banded=true) const {
+	Grid renderGrid(uint32_t sizeHint=128, slug_t margin=0_cv, bool banded=true, bool parallel=false) const {
 		const auto [width, height] = computeRenderSize(sizeHint);
 
 		auto [ox, oy] = emOrigin();
@@ -273,7 +274,7 @@ struct Sampler {
 		const slug_t ppeX = cv(width);
 		const slug_t ppeY = cv(height);
 
-		for(uint32_t j = 0; j < height; j++) {
+		auto renderRow = [&](uint32_t j) {
 			for(uint32_t i = 0; i < width; i++) {
 				const slug_t u = (cv(i) + 0.5_cv) / cv(width);
 				const slug_t v = (cv(j) + 0.5_cv) / cv(height);
@@ -287,7 +288,19 @@ struct Sampler {
 
 				grid.data[j * width + i] = result.fill;
 			}
+		};
+
+#ifdef SLUGHORN_HAS_PARALLEL
+		if(parallel) {
+			#pragma omp parallel for schedule(static)
+			for(uint32_t j = 0; j < height; j++) renderRow(j);
+			return grid;
 		}
+#else
+		(void)parallel;
+#endif
+
+		for(uint32_t j = 0; j < height; j++) renderRow(j);
 
 		return grid;
 	}
@@ -575,7 +588,7 @@ inline msdfgen::Shape toMSDFShape(const Atlas& atlas, Key key) {
 // - unproject: shape = pixel/scale - translate
 // To map b.l (shape) -> 0 (pixel): 0 = scale*(b.l + translate) -> translate = -b.l
 // Translate is em-space, NOT pixel-space.
-inline msdfgen::SDFTransformation _msdfTransform(
+inline msdfgen::SDFTransformation msdfTransform(
 	const msdfgen::Shape::Bounds& b,
 	uint32_t tileW,
 	uint32_t tileH,
@@ -617,7 +630,7 @@ inline Grid renderSDF(
 	std::vector<float> buf(tileW * tileH);
 
 	msdfgen::BitmapSection<float, 1> bmp(buf.data(), static_cast<int>(tileW), static_cast<int>(tileH));
-	msdfgen::generateSDF(bmp, msdfShape, _msdfTransform(bounds, tileW, tileH, range));
+	msdfgen::generateSDF(bmp, msdfShape, msdfTransform(bounds, tileW, tileH, range));
 
 	// msdfgen is Y-up (row 0 = bottom); flip to Y-down (row 0 = top) for Grid.
 	// Values are clamped to [0, 1]: edge = 0.5, interior > 0.5, exterior < 0.5.
@@ -631,6 +644,46 @@ inline Grid renderSDF(
 			0.f,
 			1.f
 		);
+	}
+
+	return grid;
+}
+
+// Generate a square tileSize × tileSize MSDF tile for the given key.
+// Unlike renderMSDF(), dimensions are always exactly tileSize × tileSize — shapes are
+// letterboxed/pillarboxed as needed. Use this when building a sampler2DArray where all
+// layers must have identical dimensions.
+inline MSDFGrid renderMSDFTile(
+	const Atlas& atlas,
+	Key key,
+	uint32_t tileSize = 128,
+	double range = 0.1
+) {
+	msdfgen::Shape msdfShape = toMSDFShape(atlas, key);
+
+	if(msdfShape.contours.empty()) {
+		return MSDFGrid{tileSize, tileSize, std::vector<float>(tileSize * tileSize * 3, 0.f)};
+	}
+
+	msdfgen::edgeColoringSimple(msdfShape, 3.0);
+
+	// Use exact shape bounds (no range expansion) so tile UV [0,1] maps directly
+	// to the shape's bounding box. This aligns osgSlug_SampleMSDF(v_uv) with the
+	// fragment shader's v_uv, which also covers the shape's bounding box. The range
+	// parameter is passed to DistanceMapping only (controls gradient depth, not coverage).
+	const auto bounds = msdfShape.getBounds();
+	std::vector<float> buf(tileSize * tileSize * 3);
+	msdfgen::BitmapSection<float, 3> bmp(buf.data(), static_cast<int>(tileSize), static_cast<int>(tileSize));
+	msdfgen::generateMSDF(bmp, msdfShape, msdfTransform(bounds, tileSize, tileSize, range));
+
+	MSDFGrid grid{tileSize, tileSize, std::vector<float>(tileSize * tileSize * 3)};
+
+	for(uint32_t row = 0; row < tileSize; row++) {
+		const uint32_t src = tileSize - 1 - row;
+
+		for(uint32_t col = 0; col < tileSize; col++)
+			for(uint32_t ch = 0; ch < 3; ch++)
+				grid.data[(row * tileSize + col) * 3 + ch] = buf[(src * tileSize + col) * 3 + ch];
 	}
 
 	return grid;
@@ -660,7 +713,7 @@ inline MSDFGrid renderMSDF(
 
 	std::vector<float> buf(tileW * tileH * 3);
 	msdfgen::BitmapSection<float, 3> bmp(buf.data(), static_cast<int>(tileW), static_cast<int>(tileH));
-	msdfgen::generateMSDF(bmp, msdfShape, _msdfTransform(bounds, tileW, tileH, range));
+	msdfgen::generateMSDF(bmp, msdfShape, msdfTransform(bounds, tileW, tileH, range));
 
 	// Flip Y
 	MSDFGrid grid{tileW, tileH, std::vector<float>(tileW * tileH * 3)};
