@@ -664,44 +664,54 @@ void Atlas::rasterizeSDFAtlas() {
 }
 
 // ================================================================================================
-// Atlas::registerMSDF / getMSDFTextureData
+// Atlas::setMSDFTileSize / registerMSDF / getMSDFTextureData
 //
-// Per-shape opt-in MSDF generation. registerMSDF() must be called after build() (curves must
-// exist) but before the graphics adapter uploads textures. All tiles share the same tileSize
-// so they can be uploaded as a Texture2DArray layer.
+// Per-shape opt-in MSDF generation. setMSDFTileSize() locks in the tile dimensions for the
+// atlas; all layers in a sampler2DArray must be identical (hard GPU constraint).
+// registerMSDF() must be called after build() but before packTextures().
 //
 // getMSDFTextureData() packs all registered tiles into a single RGB32F TextureData on first
 // call (lazy). depth == number of layers; width == height == tileSize.
 // ================================================================================================
 
 #ifdef SLUGHORN_HAS_MSDF
-int Atlas::registerMSDF(Key key, uint32_t tileSize, double range) {
-	if(!_built)
-		throw std::runtime_error("Atlas::registerMSDF: call after build()");
+void Atlas::setMSDFTileSize(uint32_t tileSize) {
+	if(!_msdfTileData.empty()) throw std::runtime_error(
+		"Atlas::setMSDFTileSize: cannot change tile size after registerMSDF() has been called"
+	);
+
+	_msdfTileSize = tileSize;
+}
+
+uint32_t Atlas::getMSDFTileSize() const {
+	return _msdfTileSize != 0 ? _msdfTileSize : 128u;
+}
+
+int Atlas::registerMSDF(Key key, slug_t range, MSDFEdgeColoring coloring) {
+	if(!_built) throw std::runtime_error("Atlas::registerMSDF: call after build()");
 
 	auto sit = _shapes.find(key);
 
-	if(sit == _shapes.end())
-		throw std::out_of_range("Atlas::registerMSDF: key not found in atlas");
+	if(sit == _shapes.end()) throw std::out_of_range("Atlas::registerMSDF: key not found in atlas");
 
 	auto existing = _msdfLayerMap.find(key);
 
 	if(existing != _msdfLayerMap.end()) return existing->second;
 
-	if(_msdfTileSize != 0 && tileSize != _msdfTileSize)
-		throw std::runtime_error(
-			"Atlas::registerMSDF: all tiles must share the same tileSize for Texture2DArray"
-		);
+	const uint32_t tileSize = _msdfTileSize != 0 ? _msdfTileSize : 128u;
 
 	_msdfTileSize = tileSize;
 
 	const int layer = static_cast<int>(_msdfTileData.size());
-	auto grid = render::renderMSDFTile(*this, key, tileSize, range);
+	auto grid = render::renderMSDFTile(*this, key, tileSize, range, coloring);
 
 	_msdfTileData.push_back(std::move(grid.data));
+
 	_msdfLayerMap[key] = layer;
-	sit->second.msdfLayer = layer;
 	_msdfDirty = true;
+
+	sit->second.msdfLayer = layer;
+	sit->second.msdfRange = range;
 
 	return layer;
 }

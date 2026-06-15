@@ -580,6 +580,10 @@ public:
 		// Set by Atlas::registerMSDF() after build().
 		int msdfLayer = -1;
 
+		// Em-space SDF range used when this shape's tile was generated.
+		// Packed alongside msdfLayer into effectData.z for the shader.
+		slug_t msdfRange = 0_cv;
+
 		// Original em-space curves, retained post-build and post-load.
 		// Enables canvas::glyphOutline() and strokeText() without re-running font backends.
 		// Populated by Atlas::build() and by serial::read() via render::decode().
@@ -656,25 +660,27 @@ public:
 	// --------------------------------------------------------------------------------------------
 	// Options for SDF/MSDF atlas rasterization. Pass to setSDFOptions() before build().
 	// msdf=false: single-channel SDF (R replicated to RGB8).
-	// msdf=true:  3-channel MSDF (RGB8, reconstruct with median(r,g,b) in shader).
+	// msdf=true: 3-channel MSDF (RGB8, reconstruct with median(r,g,b) in shader).
 	// Both paths require SLUGHORN_MSDF=ON (msdfgen). Without it, rasterizeSDFAtlas() is a no-op.
 	struct SDFOptions {
-		uint32_t tileSize   = 128;
-		double   range      = 0.1;
+		uint32_t tileSize = 128;
+		slug_t range = 0.1_cv;
 		uint32_t atlasWidth = 1024;
-		bool     msdf       = false;
+		bool msdf = false;
 	};
 
 	// UV record for one shape tile inside the packed SDF atlas texture.
 	struct SDFRecord {
-		uint32_t atlasX = 0, atlasY = 0; // top-left corner (texels)
-		uint32_t tileW  = 0, tileH  = 0; // tile dimensions  (texels)
+		// top-left corner (texels)
+		uint32_t atlasX = 0, atlasY = 0;
+		// tile dimensions (texels)
+		uint32_t tileW = 0, tileH = 0;
 	};
 
 	// Packed SDF/MSDF texture + per-shape UV records.
 	// Populated by build() when setSDFOptions() was called beforehand.
 	struct SDFAtlas {
-		TextureData texture;                               // RGB8
+		TextureData texture; // RGB8
 		std::unordered_map<Key, SDFRecord, KeyHash> recs;
 
 		bool empty() const { return recs.empty(); }
@@ -912,19 +918,35 @@ public:
 	// --------------------------------------------------------------------------------------------
 	// Per-shape MSDF opt-in (requires SLUGHORN_MSDF=ON)
 	//
-	// Call registerMSDF() for each shape that needs a distance field, after build() and before
-	// the graphics adapter calls packTextures(). All tiles must share the same tileSize so the
-	// result can be uploaded as a Texture2DArray.
+	// Call setMSDFTileSize() once before the registerMSDF() loop to set the tile dimensions
+	// for the entire atlas. All layers in a sampler2DArray must be identical - mixing sizes
+	// is a hard GPU constraint. Defaults to 128 if never called.
 	//
-	// getMSDFTextureData() packs registered tiles into a single RGB32F TextureData on first call;
-	// subsequent calls return the cached result. depth == number of layers.
+	// Call registerMSDF() for each shape after build() and before packTextures().
+	// range controls the em-space spread of the distance gradient (default 0.1).
+	// coloring selects the msdfgen edge-coloring algorithm: ByDistance eliminates corner
+	// spike artifacts at the cost of slightly more CPU work; Simple is faster but prone
+	// to artifacts at convex corners.
+	//
+	// getMSDFTextureData() packs registered tiles into a single RGB32F TextureData on first
+	// call (lazy). depth == number of layers; width == height == tileSize.
 	//
 	// Shape::msdfLayer is updated in-place by registerMSDF() so callers can read it from
 	// getShape() without a separate lookup.
 	// --------------------------------------------------------------------------------------------
 
 #ifdef SLUGHORN_HAS_MSDF
-	int registerMSDF(Key key, uint32_t tileSize = 128, double range = 0.1);
+	enum class MSDFEdgeColoring { Simple, ByDistance };
+
+	void setMSDFTileSize(uint32_t tileSize);
+	uint32_t getMSDFTileSize() const;
+
+	int registerMSDF(
+		Key key,
+		slug_t range=0.1_cv,
+		MSDFEdgeColoring coloring=MSDFEdgeColoring::ByDistance
+	);
+
 	const TextureData& getMSDFTextureData() const;
 #endif
 
@@ -932,6 +954,7 @@ public:
 	int getMSDFLayer(Key key) const {
 #ifdef SLUGHORN_HAS_MSDF
 		auto it = _msdfLayerMap.find(key);
+
 		if(it != _msdfLayerMap.end()) return it->second;
 #endif
 		return -1;
@@ -1047,7 +1070,7 @@ private:
 	std::unordered_map<Key, int, KeyHash> _msdfLayerMap;
 	std::vector<std::vector<float>> _msdfTileData; // raw RGB32F floats per registered tile
 	uint32_t _msdfTileSize = 0;
-	mutable TextureData _msdfData;   // packed lazily by getMSDFTextureData()
+	mutable TextureData _msdfData; // packed lazily by getMSDFTextureData()
 	mutable bool _msdfDirty = false; // set true by registerMSDF(), cleared on pack
 #endif
 

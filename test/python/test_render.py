@@ -343,10 +343,9 @@ def test_render_msdf_tile_is_square():
 @pytest.mark.skipif(not HAS_MSDF, reason="built without SLUGHORN_MSDF=ON")
 def test_render_msdf_tile_interior_exterior():
 	import numpy as np
-	# Use a diamond shape (vertices at the mid-points of the unit bbox) so that
-	# the bbox corners are genuinely exterior.  renderMSDFTile maps the tile
-	# exactly to the shape's bounding box with no range expansion, so a rect
-	# would put every tile pixel inside-or-on-boundary of the shape.
+	# renderMSDFTile expands the tile bbox by `range` on all sides (via getBounds(range)),
+	# so tile corners are always in the exterior margin — a rect shape works fine.
+	# Using a diamond here still makes the center vs. corner contrast obvious.
 	atlas = slughorn.Atlas()
 	d = slughorn.CurveDecomposer()
 	d.move_to(0.5, 0.0)
@@ -372,3 +371,159 @@ def test_render_msdf_tile_matches_atlas_wrapper():
 	via_module = np.asarray(slughorn.render.msdf_tile(atlas, "rect", 64))
 	via_atlas  = np.asarray(atlas.render_msdf_tile("rect", tile_size=64))
 	assert np.allclose(via_module, via_atlas)
+
+
+# ---------------------------------------------------------------------------
+# Atlas.MSDFEdgeColoring enum
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(not HAS_MSDF, reason="built without SLUGHORN_MSDF=ON")
+def test_msdf_edge_coloring_enum_exists():
+	assert hasattr(slughorn.Atlas, "MSDFEdgeColoring")
+
+@pytest.mark.skipif(not HAS_MSDF, reason="built without SLUGHORN_MSDF=ON")
+def test_msdf_edge_coloring_values():
+	ec = slughorn.Atlas.MSDFEdgeColoring
+	assert hasattr(ec, "Simple")
+	assert hasattr(ec, "ByDistance")
+	assert ec.Simple != ec.ByDistance
+
+
+# ---------------------------------------------------------------------------
+# Atlas.msdf_tile_size property
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(not HAS_MSDF, reason="built without SLUGHORN_MSDF=ON")
+def test_msdf_tile_size_default():
+	atlas = _make_built_atlas()
+	assert atlas.msdf_tile_size == 128
+
+@pytest.mark.skipif(not HAS_MSDF, reason="built without SLUGHORN_MSDF=ON")
+def test_msdf_tile_size_set_then_get():
+	atlas = _make_built_atlas()
+	atlas.msdf_tile_size = 64
+	assert atlas.msdf_tile_size == 64
+
+@pytest.mark.skipif(not HAS_MSDF, reason="built without SLUGHORN_MSDF=ON")
+def test_msdf_tile_size_set_then_register():
+	atlas = _make_built_atlas()
+	atlas.msdf_tile_size = 64
+	layer = atlas.register_msdf("rect")
+	assert layer == 0
+
+@pytest.mark.skipif(not HAS_MSDF, reason="built without SLUGHORN_MSDF=ON")
+def test_msdf_tile_size_set_after_register_raises():
+	atlas = _make_built_atlas()
+	atlas.register_msdf("rect")
+	with pytest.raises(RuntimeError):
+		atlas.msdf_tile_size = 64
+
+
+# ---------------------------------------------------------------------------
+# Atlas.register_msdf — new signature (no tile_size, coloring added)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(not HAS_MSDF, reason="built without SLUGHORN_MSDF=ON")
+def test_register_msdf_default_args():
+	atlas = _make_built_atlas()
+	layer = atlas.register_msdf("rect")
+	assert layer == 0
+
+@pytest.mark.skipif(not HAS_MSDF, reason="built without SLUGHORN_MSDF=ON")
+def test_register_msdf_custom_range():
+	atlas = _make_built_atlas()
+	layer = atlas.register_msdf("rect", range=0.05)
+	assert layer >= 0
+
+@pytest.mark.skipif(not HAS_MSDF, reason="built without SLUGHORN_MSDF=ON")
+def test_register_msdf_coloring_simple():
+	atlas = _make_built_atlas()
+	layer = atlas.register_msdf("rect", coloring=slughorn.Atlas.MSDFEdgeColoring.Simple)
+	assert layer >= 0
+
+@pytest.mark.skipif(not HAS_MSDF, reason="built without SLUGHORN_MSDF=ON")
+def test_register_msdf_coloring_by_distance():
+	atlas = _make_built_atlas()
+	layer = atlas.register_msdf("rect", coloring=slughorn.Atlas.MSDFEdgeColoring.ByDistance)
+	assert layer >= 0
+
+@pytest.mark.skipif(not HAS_MSDF, reason="built without SLUGHORN_MSDF=ON")
+def test_register_msdf_is_idempotent():
+	atlas = _make_built_atlas()
+	layer1 = atlas.register_msdf("rect")
+	layer2 = atlas.register_msdf("rect")
+	assert layer1 == layer2
+
+
+# ---------------------------------------------------------------------------
+# Shape.msdf_layer / Shape.msdf_range
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(not HAS_MSDF, reason="built without SLUGHORN_MSDF=ON")
+def test_shape_msdf_layer_unregistered():
+	atlas = _make_built_atlas()
+	shape = atlas.get_shape("rect")
+	assert shape is not None
+	assert shape.msdf_layer == -1
+
+@pytest.mark.skipif(not HAS_MSDF, reason="built without SLUGHORN_MSDF=ON")
+def test_shape_msdf_layer_after_register():
+	atlas = _make_built_atlas()
+	atlas.register_msdf("rect")
+	shape = atlas.get_shape("rect")
+	assert shape is not None
+	assert shape.msdf_layer == 0
+
+@pytest.mark.skipif(not HAS_MSDF, reason="built without SLUGHORN_MSDF=ON")
+def test_shape_msdf_range_unregistered():
+	atlas = _make_built_atlas()
+	shape = atlas.get_shape("rect")
+	assert shape is not None
+	assert shape.msdf_range == pytest.approx(0.0, abs=1e-6)
+
+@pytest.mark.skipif(not HAS_MSDF, reason="built without SLUGHORN_MSDF=ON")
+def test_shape_msdf_range_after_register():
+	atlas = _make_built_atlas()
+	atlas.register_msdf("rect", range=0.15)
+	shape = atlas.get_shape("rect")
+	assert shape is not None
+	assert shape.msdf_range == pytest.approx(0.15, abs=1e-5)
+
+@pytest.mark.skipif(not HAS_MSDF, reason="built without SLUGHORN_MSDF=ON")
+def test_shape_msdf_layer_increments():
+	atlas = slughorn.Atlas()
+	for name in ("a", "b", "c"):
+		d = slughorn.CurveDecomposer()
+		d.move_to(0.0, 0.0); d.line_to(1.0, 0.0); d.line_to(1.0, 1.0); d.line_to(0.0, 1.0); d.close()
+		info = slughorn.ShapeInfo(); info.curves = d.get_curves()
+		atlas.add_shape(slughorn.Key(name), info)
+	atlas.build()
+	for i, name in enumerate(("a", "b", "c")):
+		atlas.register_msdf(name)
+		assert atlas.get_shape(name).msdf_layer == i
+
+
+# ---------------------------------------------------------------------------
+# coloring parameter on render.msdf_tile and atlas.render_msdf_tile
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(not HAS_MSDF, reason="built without SLUGHORN_MSDF=ON")
+def test_render_msdf_tile_coloring_simple():
+	atlas = _make_built_atlas()
+	grid = slughorn.render.msdf_tile(atlas, "rect", 32, 0.1, slughorn.Atlas.MSDFEdgeColoring.Simple)
+	assert isinstance(grid, slughorn.render.MSDFGrid)
+	assert grid.width == 32
+
+@pytest.mark.skipif(not HAS_MSDF, reason="built without SLUGHORN_MSDF=ON")
+def test_render_msdf_tile_coloring_by_distance():
+	atlas = _make_built_atlas()
+	grid = slughorn.render.msdf_tile(atlas, "rect", 32, 0.1, slughorn.Atlas.MSDFEdgeColoring.ByDistance)
+	assert isinstance(grid, slughorn.render.MSDFGrid)
+	assert grid.width == 32
+
+@pytest.mark.skipif(not HAS_MSDF, reason="built without SLUGHORN_MSDF=ON")
+def test_atlas_render_msdf_tile_coloring_kwarg():
+	atlas = _make_built_atlas()
+	grid = atlas.render_msdf_tile("rect", tile_size=32, coloring=slughorn.Atlas.MSDFEdgeColoring.ByDistance)
+	assert isinstance(grid, slughorn.render.MSDFGrid)
+	assert grid.width == 32

@@ -817,11 +817,22 @@ PYBIND11_MODULE(slughorn, m) {
 			"Preserved post-build for diagnostics and computeQuad branching."
 		)
 
+#ifdef SLUGHORN_HAS_MSDF
+		.def_readonly("msdf_layer", &slughorn::Atlas::Shape::msdfLayer,
+			"Texture2DArray layer index for this shape's MSDF tile. "
+			"-1 if register_msdf() has not been called for this key."
+		)
+		.def_readonly("msdf_range", &slughorn::Atlas::Shape::msdfRange,
+			"Em-space SDF range used when the MSDF tile was generated. "
+			"0.0 if register_msdf() has not been called for this key."
+		)
+#endif
+
 		// Convenience: recover em-space origin and size (mirrors slug_EmToUV logic)
 		.def_property_readonly("em_origin", [](const slughorn::Atlas::Shape& s) {
 			// emOrigin = -bandOffset / bandScale
-			slug_t ox = (s.bandScaleX != 0.f) ? -s.bandOffsetX / s.bandScaleX : 0.f;
-			slug_t oy = (s.bandScaleY != 0.f) ? -s.bandOffsetY / s.bandScaleY : 0.f;
+			slug_t ox = (s.bandScaleX != 0_cv) ? -s.bandOffsetX / s.bandScaleX : 0_cv;
+			slug_t oy = (s.bandScaleY != 0_cv) ? -s.bandOffsetY / s.bandScaleY : 0_cv;
 
 			return py::make_tuple(ox, oy);
 		}, "Em-space (x, y) of the shape's bottom-left corner. "
@@ -829,18 +840,18 @@ PYBIND11_MODULE(slughorn, m) {
 		)
 		.def_property_readonly("em_size", [](const slughorn::Atlas::Shape& s) {
 			// emSize = INDIRECTION_SIZE / bandScale (mirrors slug_EmToUV's emSize)
-			slug_t sx = (s.bandScaleX != 0.f) ? float(slughorn::Atlas::INDIRECTION_SIZE) / s.bandScaleX : 0.f;
-			slug_t sy = (s.bandScaleY != 0.f) ? float(slughorn::Atlas::INDIRECTION_SIZE) / s.bandScaleY : 0.f;
+			slug_t sx = (s.bandScaleX != 0_cv) ? cv(slughorn::Atlas::INDIRECTION_SIZE) / s.bandScaleX : 0_cv;
+			slug_t sy = (s.bandScaleY != 0_cv) ? cv(slughorn::Atlas::INDIRECTION_SIZE) / s.bandScaleY : 0_cv;
 			return py::make_tuple(sx, sy);
 		}, "Em-space (width, height) of the shape's bounding box. "
 			"Mirrors slug_EmToUV's emSize computation."
 		)
 		.def("em_to_uv", [](const slughorn::Atlas::Shape& s, slug_t ex, slug_t ey) {
 			// Direct Python port of slug_EmToUV()
-			slug_t ox = (s.bandScaleX != 0.f) ? -s.bandOffsetX / s.bandScaleX : 0.f;
-			slug_t oy = (s.bandScaleY != 0.f) ? -s.bandOffsetY / s.bandScaleY : 0.f;
-			slug_t sx = (s.bandScaleX != 0.f) ? float(slughorn::Atlas::INDIRECTION_SIZE) / s.bandScaleX : 1.f;
-			slug_t sy = (s.bandScaleY != 0.f) ? float(slughorn::Atlas::INDIRECTION_SIZE) / s.bandScaleY : 1.f;
+			slug_t ox = (s.bandScaleX != 0_cv) ? -s.bandOffsetX / s.bandScaleX : 0_cv;
+			slug_t oy = (s.bandScaleY != 0_cv) ? -s.bandOffsetY / s.bandScaleY : 0_cv;
+			slug_t sx = (s.bandScaleX != 0_cv) ? cv(slughorn::Atlas::INDIRECTION_SIZE) / s.bandScaleX : 1_cv;
+			slug_t sy = (s.bandScaleY != 0_cv) ? cv(slughorn::Atlas::INDIRECTION_SIZE) / s.bandScaleY : 1_cv;
 
 			return py::make_tuple((ex - ox) / sx, (ey - oy) / sy);
 		}, "em_x"_a, "em_y"_a,
@@ -908,7 +919,7 @@ PYBIND11_MODULE(slughorn, m) {
 	// slughorn.Atlas
 	// ============================================================================================
 	// py::class_<slughorn::Atlas, std::shared_ptr<slughorn::Atlas>>(m, "Atlas")
-	py::class_<slughorn::Atlas>(m, "Atlas")
+	auto atlas_ = py::class_<slughorn::Atlas>(m, "Atlas")
 		.def(py::init<>())
 
 		.def("add_shape", &slughorn::Atlas::addShape,
@@ -1076,72 +1087,6 @@ PYBIND11_MODULE(slughorn, m) {
 			"Returns a slughorn.render.Sampler."
 		)
 
-#ifdef SLUGHORN_HAS_MSDF
-		.def("register_msdf",
-			[](slughorn::Atlas& a, slughorn::Key key, uint32_t tileSize, double range) {
-				return a.registerMSDF(key, tileSize, range);
-			},
-			"key"_a, "tile_size"_a=128, "range"_a=0.1,
-			"Opt this shape in to MSDF tile generation.\n"
-			"Must be called after build(), before the graphics adapter packs textures.\n"
-			"Returns the layer index in the resulting Texture2DArray.\n"
-			"Shape.msdf_layer is updated in-place; all tiles must share the same tile_size."
-		)
-
-		.def("get_msdf_layer",
-			[](const slughorn::Atlas& a, slughorn::Key key) { return a.getMSDFLayer(key); },
-			"key"_a,
-			"Return the Texture2DArray layer index for key, or -1 if not registered."
-		)
-
-		.def("get_msdf_texture_data",
-			[](const slughorn::Atlas& a) -> py::object {
-				const auto& td = a.getMSDFTextureData();
-
-				if(td.empty()) return py::none();
-
-				return py::memoryview::from_memory(
-					const_cast<uint8_t*>(td.bytes.data()),
-					static_cast<py::ssize_t>(td.bytes.size())
-				);
-			},
-			"Return a zero-copy memoryview over the packed RGB32F MSDF tile data.\n"
-			"Cast to float32 and reshape to (depth, tile_size, tile_size, 3).\n"
-			"Returns None when no shapes are registered."
-		)
-
-		.def("render_sdf",
-			[](const slughorn::Atlas& a, slughorn::Key key, uint32_t tileSize, double range) {
-				return slughorn::render::renderSDF(a, key, tileSize, range);
-			},
-			"key"_a, "tile_size"_a=128, "range"_a=0.1,
-			"Generate a single-channel SDF tile via msdfgen.\n"
-			"Returns a Grid; use memoryview(grid) for a (H, W) float32 view,\n"
-			"or np.asarray(grid) for NumPy. Edge pixels are ~0.5."
-		)
-
-		.def("render_msdf",
-			[](const slughorn::Atlas& a, slughorn::Key key, uint32_t tileSize, double range) {
-				return slughorn::render::renderMSDF(a, key, tileSize, range);
-			},
-			"key"_a, "tile_size"_a=128, "range"_a=0.1,
-			"Generate a multi-channel SDF tile via msdfgen. Aspect-ratio preserving.\n"
-			"Returns an MSDFGrid; use memoryview(grid) for a (H, W, 3) float32 view,\n"
-			"or np.asarray(grid) for NumPy. Reconstruct in shader: median(r, g, b)."
-		)
-
-		.def("render_msdf_tile",
-			[](const slughorn::Atlas& a, slughorn::Key key, uint32_t tileSize, double range) {
-				return slughorn::render::renderMSDFTile(a, key, tileSize, range);
-			},
-			"key"_a, "tile_size"_a=128, "range"_a=0.2,
-			"Generate a square tile_size x tile_size MSDF tile for GPU Texture2DArray use.\n"
-			"Unlike render_msdf(), dimensions are always exactly tile_size x tile_size;\n"
-			"non-square shapes are letterboxed. range=0.2 default suits HUD glow effects.\n"
-			"Returns an MSDFGrid; use memoryview(grid) for a (H, W, 3) float32 view."
-		)
-#endif // SLUGHORN_HAS_MSDF
-
 #if 0
 		.def_static("compute_adaptive_splits",
 			[](const slughorn::Atlas::Curves& curves, int num_bands_x, int num_bands_y)
@@ -1187,6 +1132,114 @@ PYBIND11_MODULE(slughorn, m) {
 		)
 	;
 
+	// The MSDFEdgeColoring enum must be registered on atlas_ BEFORE the MSDF methods below,
+	// because pybind11 evaluates default argument values at .def() call time and needs
+	// MSDFEdgeColoring to be a known Python type before it appears as a default.
+#ifdef SLUGHORN_HAS_MSDF
+	py::enum_<slughorn::Atlas::MSDFEdgeColoring>(atlas_, "MSDFEdgeColoring",
+		"Edge-coloring algorithm used by msdfgen when generating MSDF tiles.\n\n"
+		"ByDistance: assigns edge colors by measuring angles to all contours - eliminates\n"
+		"corner spike artifacts at the cost of slightly more CPU work. Recommended default.\n"
+		"Simple: uses a greedy angle-threshold approach - faster but prone to artifacts at\n"
+		"convex corners with acute angles."
+	)
+		.value("Simple", slughorn::Atlas::MSDFEdgeColoring::Simple)
+		.value("ByDistance", slughorn::Atlas::MSDFEdgeColoring::ByDistance)
+		.export_values()
+	;
+
+	atlas_
+		.def_property("msdf_tile_size",
+			&slughorn::Atlas::getMSDFTileSize,
+			&slughorn::Atlas::setMSDFTileSize,
+			"Tile size for MSDF tiles (default 128). All layers in a sampler2DArray must be\n"
+			"identical - hard GPU constraint. Read any time; write only before register_msdf().\n"
+			"Setting after register_msdf() has been called raises RuntimeError."
+		)
+
+		.def("register_msdf",
+			[](
+				slughorn::Atlas& a,
+				slughorn::Key key,
+				slug_t range,
+				slughorn::Atlas::MSDFEdgeColoring coloring
+			) {
+				return a.registerMSDF(key, range, coloring);
+			},
+			"key"_a, "range"_a=0.1, "coloring"_a=slughorn::Atlas::MSDFEdgeColoring::ByDistance,
+			"Opt this shape in to MSDF tile generation.\n"
+			"Must be called after build() and before the graphics adapter packs textures.\n"
+			"range: em-space SDF spread; controls gradient depth and tile bbox margin.\n"
+			"coloring: MSDFEdgeColoring.ByDistance (default, fewer artifacts) or .Simple (faster).\n"
+			"Returns the layer index in the resulting Texture2DArray.\n"
+			"Shape.msdf_layer and .msdf_range are updated in-place. Idempotent for repeated keys."
+		)
+
+		.def("get_msdf_layer",
+			[](const slughorn::Atlas& a, slughorn::Key key) { return a.getMSDFLayer(key); },
+			"key"_a,
+			"Return the Texture2DArray layer index for key, or -1 if not registered."
+		)
+
+		.def("get_msdf_texture_data",
+			[](const slughorn::Atlas& a) -> py::object {
+				const auto& td = a.getMSDFTextureData();
+
+				if(td.empty()) return py::none();
+
+				return py::memoryview::from_memory(
+					const_cast<uint8_t*>(td.bytes.data()),
+					static_cast<py::ssize_t>(td.bytes.size())
+				);
+			},
+			"Return a zero-copy memoryview over the packed RGB32F MSDF tile data.\n"
+			"Cast to float32 and reshape to (depth, tile_size, tile_size, 3).\n"
+			"Returns None when no shapes are registered."
+		)
+
+		.def("render_sdf",
+			[](const slughorn::Atlas& a, slughorn::Key key, uint32_t tileSize, slug_t range) {
+				return slughorn::render::renderSDF(a, key, tileSize, range);
+			},
+			"key"_a, "tile_size"_a=128, "range"_a=0.1,
+			"Generate a single-channel SDF tile via msdfgen.\n"
+			"Returns a Grid; use memoryview(grid) for a (H, W) float32 view,\n"
+			"or np.asarray(grid) for NumPy. Edge pixels are ~0.5."
+		)
+
+		.def("render_msdf",
+			[](const slughorn::Atlas& a, slughorn::Key key, uint32_t tileSize, slug_t range) {
+				return slughorn::render::renderMSDF(a, key, tileSize, range);
+			},
+			"key"_a, "tile_size"_a=128, "range"_a=0.1,
+			"Generate a multi-channel SDF tile via msdfgen. Aspect-ratio preserving.\n"
+			"Returns an MSDFGrid; use memoryview(grid) for a (H, W, 3) float32 view,\n"
+			"or np.asarray(grid) for NumPy. Reconstruct in shader: median(r, g, b)."
+		)
+
+		.def("render_msdf_tile",
+			[](
+				const slughorn::Atlas& a,
+				slughorn::Key key,
+				uint32_t tileSize,
+				slug_t range,
+				slughorn::Atlas::MSDFEdgeColoring coloring
+			) {
+				return slughorn::render::renderMSDFTile(a, key, tileSize, range, coloring);
+			},
+			"key"_a,
+			"tile_size"_a=128,
+			"range"_a=0.1,
+			"coloring"_a=slughorn::Atlas::MSDFEdgeColoring::ByDistance,
+			"Generate a square tile_size x tile_size MSDF tile for GPU Texture2DArray use.\n"
+			"Uses anisotropic projection: UV [0,1] fills the tile exactly in both axes.\n"
+			"range: em-space SDF spread; also sets the tile bbox margin to prevent ghost fringes.\n"
+			"coloring: MSDFEdgeColoring.ByDistance (default) or .Simple.\n"
+			"Returns an MSDFGrid; use memoryview(grid) for a (H, W, 3) float32 view."
+		)
+	;
+#endif // SLUGHORN_HAS_MSDF
+
 	// ============================================================================================
 	// slughorn.CurveDecomposer
 	//
@@ -1199,7 +1252,10 @@ PYBIND11_MODULE(slughorn, m) {
 		"Call get_curves() to retrieve the resulting Curves list, then pass "
 		"it to ShapeInfo.curves.")
 		.def(py::init<>())
-		.def_property("tolerance", &PyCurveDecomposer::getTolerance, &PyCurveDecomposer::setTolerance,
+		.def_property(
+			"tolerance",
+			&PyCurveDecomposer::getTolerance,
+			&PyCurveDecomposer::setTolerance,
 			"Flatness threshold for cubic decomposition in curve-space units."
 		)
 		.def("move_to", &PyCurveDecomposer::moveTo, "x"_a, "y"_a)
@@ -1246,7 +1302,10 @@ PYBIND11_MODULE(slughorn, m) {
 		"Non-owning view over an internal CurveDecomposer.\n\n"
 		"Returned by canvas.Path.decomposer() and canvas.Canvas.decomposer() to expose\n"
 		"the underlying tolerance control without copying the decomposer state.")
-		.def_property("tolerance", &CurveDecomposerRef::getTolerance, &CurveDecomposerRef::setTolerance,
+		.def_property(
+			"tolerance",
+			&CurveDecomposerRef::getTolerance,
+			&CurveDecomposerRef::setTolerance,
 			"Flatness threshold for cubic decomposition in curve-space units."
 		)
 		.def("mark", &CurveDecomposerRef::mark,
@@ -1298,8 +1357,8 @@ PYBIND11_MODULE(slughorn, m) {
 			.def_buffer([](MSDFGrid& g) -> py::buffer_info {
 				return py::buffer_info(
 					g.data.data(),
-					sizeof(float),
-					py::format_descriptor<float>::format(),
+					sizeof(slug_t),
+					py::format_descriptor<slug_t>::format(),
 					3,
 					{
 						static_cast<py::ssize_t>(g.height),
@@ -1307,9 +1366,9 @@ PYBIND11_MODULE(slughorn, m) {
 						static_cast<py::ssize_t>(3)
 					},
 					{
-						static_cast<py::ssize_t>(g.width * 3 * sizeof(float)),
-						static_cast<py::ssize_t>(3 * sizeof(float)),
-						static_cast<py::ssize_t>(sizeof(float))
+						static_cast<py::ssize_t>(g.width * 3 * sizeof(slug_t)),
+						static_cast<py::ssize_t>(3 * sizeof(slug_t)),
+						static_cast<py::ssize_t>(sizeof(slug_t))
 					}
 				);
 			})
@@ -1367,7 +1426,9 @@ PYBIND11_MODULE(slughorn, m) {
 				return arrayView1D(d.indirX);
 			}, "Band indirection table for X, length INDIRECTION_SIZE.")
 			.def("get_hband", [](const Sampler& d, uint32_t i) {
-				if(i + 1 >= d.hbandOffsets.size()) throw py::index_error("horizontal band out of range");
+				if(i + 1 >= d.hbandOffsets.size()) {
+					throw py::index_error("horizontal band out of range");
+				}
 
 				py::list out;
 
@@ -1377,7 +1438,9 @@ PYBIND11_MODULE(slughorn, m) {
 				return out;
 			}, "index"_a)
 			.def("get_vband", [](const Sampler& d, uint32_t i) {
-				if(i + 1 >= d.vbandOffsets.size()) throw py::index_error("vertical band out of range");
+				if(i + 1 >= d.vbandOffsets.size()) {
+					throw py::index_error("vertical band out of range");
+				}
 
 				py::list out;
 
@@ -1432,7 +1495,7 @@ PYBIND11_MODULE(slughorn, m) {
 
 #ifdef SLUGHORN_HAS_MSDF
 		render.def("sdf",
-			[](const slughorn::Atlas& atlas, slughorn::Key key, uint32_t tileSize, double range) {
+			[](const slughorn::Atlas& atlas, slughorn::Key key, uint32_t tileSize, slug_t range) {
 				return slughorn::render::renderSDF(atlas, key, tileSize, range);
 			},
 			"atlas"_a, "key"_a, "tile_size"_a=128, "range"_a=0.1,
@@ -1441,7 +1504,7 @@ PYBIND11_MODULE(slughorn, m) {
 		);
 
 		render.def("msdf",
-			[](const slughorn::Atlas& atlas, slughorn::Key key, uint32_t tileSize, double range) {
+			[](const slughorn::Atlas& atlas, slughorn::Key key, uint32_t tileSize, slug_t range) {
 				return slughorn::render::renderMSDF(atlas, key, tileSize, range);
 			},
 			"atlas"_a, "key"_a, "tile_size"_a=128, "range"_a=0.1,
@@ -1450,12 +1513,24 @@ PYBIND11_MODULE(slughorn, m) {
 		);
 
 		render.def("msdf_tile",
-			[](const slughorn::Atlas& atlas, slughorn::Key key, uint32_t tileSize, double range) {
-				return slughorn::render::renderMSDFTile(atlas, key, tileSize, range);
+			[](
+				const slughorn::Atlas& atlas,
+				slughorn::Key key,
+				uint32_t tileSize,
+				slug_t range,
+				slughorn::Atlas::MSDFEdgeColoring coloring
+			) {
+				return slughorn::render::renderMSDFTile(atlas, key, tileSize, range, coloring);
 			},
-			"atlas"_a, "key"_a, "tile_size"_a=128, "range"_a=0.2,
+			"atlas"_a,
+			"key"_a,
+			"tile_size"_a=128,
+			"range"_a=0.1,
+			"coloring"_a=slughorn::Atlas::MSDFEdgeColoring::ByDistance,
 			"Generate a square tile_size x tile_size MSDF tile for GPU Texture2DArray use.\n"
-			"Non-square shapes are letterboxed. range=0.2 default suits HUD glow effects.\n"
+			"Uses anisotropic projection: UV [0,1] fills the tile exactly in both axes.\n"
+			"range: em-space SDF spread; also sets the tile bbox margin to prevent ghost fringes.\n"
+			"coloring: Atlas.MSDFEdgeColoring.ByDistance (default) or .Simple.\n"
 			"Returns an MSDFGrid; reconstruct signed distance with median(r, g, b)."
 		);
 #endif
@@ -1711,7 +1786,10 @@ PYBIND11_MODULE(slughorn, m) {
 				"Append all curves from an explicit Path into the canvas's internal path."
 			)
 			.def("add_path",
-				py::overload_cast<const slughorn::canvas::Path&, const slughorn::Matrix&>(&slughorn::canvas::Canvas::addPath),
+				py::overload_cast<
+					const slughorn::canvas::Path&,
+					const slughorn::Matrix&
+				>(&slughorn::canvas::Canvas::addPath),
 				"other"_a, "transform"_a,
 				"Append curves from an explicit Path with each control point transformed by transform.\n"
 				"Matches HTML Canvas Path2D.addPath(path, DOMMatrix) semantics."
@@ -2386,8 +2464,15 @@ PYBIND11_MODULE(slughorn, m) {
 			.value("ForceInclude", slughorn::nanosvg::ShapePolicy::ForceInclude)
 			.value("ForceExclude", slughorn::nanosvg::ShapePolicy::ForceExclude)
 			.value("GeometryOnly", slughorn::nanosvg::ShapePolicy::GeometryOnly)
-			.def("__or__", [](slughorn::nanosvg::ShapePolicy a, slughorn::nanosvg::ShapePolicy b) { return a | b; })
-			.def("__ror__", [](slughorn::nanosvg::ShapePolicy a, slughorn::nanosvg::ShapePolicy b) { return a | b; });
+			.def("__or__", [](
+				slughorn::nanosvg::ShapePolicy a,
+				slughorn::nanosvg::ShapePolicy b
+			) { return a | b; })
+			.def("__ror__", [](
+				slughorn::nanosvg::ShapePolicy a,
+				slughorn::nanosvg::ShapePolicy b
+			) { return a | b; })
+		;
 
 		py::class_<slughorn::nanosvg::ShapeRule>(nanosvg, "ShapeRule")
 			.def(py::init([](
@@ -2425,7 +2510,7 @@ PYBIND11_MODULE(slughorn, m) {
 			"path"_a,
 			"atlas"_a,
 			"keys"_a=slughorn::KeyIterator(),
-			"dpi"_a=96.0f,
+			"dpi"_a=96_cv,
 			"log"_a=py::none(),
 			"rules"_a=std::vector<slughorn::nanosvg::ShapeRule>(),
 			"auto_metrics"_a=true,
@@ -2463,7 +2548,7 @@ PYBIND11_MODULE(slughorn, m) {
 			"svg"_a,
 			"atlas"_a,
 			"keys"_a=slughorn::KeyIterator(),
-			"dpi"_a=96.0f,
+			"dpi"_a=96_cv,
 			"log"_a=py::none(),
 			"rules"_a=std::vector<slughorn::nanosvg::ShapeRule>(),
 			"auto_metrics"_a=true,

@@ -258,7 +258,12 @@ struct Sampler {
 		return out;
 	}
 
-	Grid renderGrid(uint32_t sizeHint=128, slug_t margin=0_cv, bool banded=true, bool parallel=false) const {
+	Grid renderGrid(
+		uint32_t sizeHint=128,
+		slug_t margin=0_cv,
+		bool banded=true,
+		bool parallel=false
+	) const {
 		const auto [width, height] = computeRenderSize(sizeHint);
 
 		auto [ox, oy] = emOrigin();
@@ -297,7 +302,7 @@ struct Sampler {
 			return grid;
 		}
 #else
-		(void)parallel;
+		static_cast<void>(parallel);
 #endif
 
 		for(uint32_t j = 0; j < height; j++) renderRow(j);
@@ -592,13 +597,17 @@ inline msdfgen::SDFTransformation msdfTransform(
 	const msdfgen::Shape::Bounds& b,
 	uint32_t tileW,
 	uint32_t tileH,
-	double range
+	slug_t range
 ) {
 	const double bw = b.r - b.l;
 	const double bh = b.t - b.b;
-	const double scale = std::min(tileW / bw, tileH / bh);
 
-	const msdfgen::Projection proj({scale, scale}, {-b.l, -b.b});
+	// Fill the tile in both dimensions independently so UV [0,1] maps exactly to
+	// [b.l,b.r] x [b.b,b.t]. renderSDF/renderMSDF already aspect-ratio-match their
+	// tiles, so scaleX ~= scaleY there. renderMSDFTile (always square) needs this to
+	// avoid letterboxing narrow/tall glyphs, which would make tileUV in the shader
+	// overshoot into empty exterior space.
+	const msdfgen::Projection proj({tileW / bw, tileH / bh}, {-b.l, -b.b});
 
 	// Distance mapping: [-range, range] em-units -> [0, 1]; edge pixel -> 0.5
 	const msdfgen::DistanceMapping dmap(msdfgen::Range(2.0 * range));
@@ -613,7 +622,7 @@ inline Grid renderSDF(
 	const Atlas& atlas,
 	Key key,
 	uint32_t tileSize=128,
-	double range=0.1
+	slug_t range=0.1_cv
 ) {
 	msdfgen::Shape msdfShape = toMSDFShape(atlas, key);
 
@@ -649,15 +658,16 @@ inline Grid renderSDF(
 	return grid;
 }
 
-// Generate a square tileSize × tileSize MSDF tile for the given key.
-// Unlike renderMSDF(), dimensions are always exactly tileSize × tileSize — shapes are
+// Generate a square tileSize x tileSize MSDF tile for the given key.
+// Unlike renderMSDF(), dimensions are always exactly tileSize x tileSize - shapes are
 // letterboxed/pillarboxed as needed. Use this when building a sampler2DArray where all
 // layers must have identical dimensions.
 inline MSDFGrid renderMSDFTile(
 	const Atlas& atlas,
 	Key key,
-	uint32_t tileSize = 128,
-	double range = 0.1
+	uint32_t tileSize=128,
+	slug_t range=0.1_cv,
+	Atlas::MSDFEdgeColoring coloring=Atlas::MSDFEdgeColoring::ByDistance
 ) {
 	msdfgen::Shape msdfShape = toMSDFShape(atlas, key);
 
@@ -665,26 +675,39 @@ inline MSDFGrid renderMSDFTile(
 		return MSDFGrid{tileSize, tileSize, std::vector<float>(tileSize * tileSize * 3, 0.f)};
 	}
 
-	msdfgen::edgeColoringSimple(msdfShape, 3.0);
+	if(coloring == Atlas::MSDFEdgeColoring::ByDistance) msdfgen::edgeColoringByDistance(msdfShape, 3.0);
+	else msdfgen::edgeColoringSimple(msdfShape, 3.0);
 
-	// Use exact shape bounds (no range expansion) so tile UV [0,1] maps directly
-	// to the shape's bounding box. This aligns osgSlug_SampleMSDF(v_uv) with the
-	// fragment shader's v_uv, which also covers the shape's bounding box. The range
-	// parameter is passed to DistanceMapping only (controls gradient depth, not coverage).
-	const auto bounds = msdfShape.getBounds();
+	// Expand bounds by range on all sides so the tile edge is deeply exterior (SDF << 0.5).
+	// Without this, curves touching the tight bbox boundary leave edge texels at SDF ~= 0.5, which
+	// CLAMP_TO_EDGE propagates into the expand-padded quad region as ghost fringes. The shader's
+	// tileUV accounts for this margin: (emCoord - emOrigin + range) / (emSize + 2*range).
+	const auto bounds = msdfShape.getBounds(range);
 	std::vector<float> buf(tileSize * tileSize * 3);
-	msdfgen::BitmapSection<float, 3> bmp(buf.data(), static_cast<int>(tileSize), static_cast<int>(tileSize));
+
+	msdfgen::BitmapSection<float, 3> bmp(
+		buf.data(),
+		static_cast<int>(tileSize),
+		static_cast<int>(tileSize)
+	);
 	msdfgen::generateMSDF(bmp, msdfShape, msdfTransform(bounds, tileSize, tileSize, range));
 
+	// No Y-flip. This function has exactly one purpose: feeding the GPU sampler2DArray
+	// via Atlas::registerMSDF() -> packTextures(). For that path all three conventions
+	// agree without a flip, and a flip would break all of them simultaneously:
+	//
+	// msdfgen native : row 0 = bottom of shape (Y-up coordinate space)
+	// osg::Image/GL : row 0 -> V=0 -> bottom of texture (OpenGL convention)
+	// v_uv in shader : V=0 = bottom of shape bounding box
+	//
+	// There is intentionally no "flip" parameter here. A boolean that controls Y
+	// orientation would push the burden of knowing the GPU contract onto every call
+	// site, and both values would never be equally correct for this function's single
+	// purpose. If you need Y-down (row 0 = top) for CPU display or image export, use
+	// renderMSDF() - it keeps the flip for exactly that use case.
 	MSDFGrid grid{tileSize, tileSize, std::vector<float>(tileSize * tileSize * 3)};
 
-	for(uint32_t row = 0; row < tileSize; row++) {
-		const uint32_t src = tileSize - 1 - row;
-
-		for(uint32_t col = 0; col < tileSize; col++)
-			for(uint32_t ch = 0; ch < 3; ch++)
-				grid.data[(row * tileSize + col) * 3 + ch] = buf[(src * tileSize + col) * 3 + ch];
-	}
+	std::memcpy(grid.data.data(), buf.data(), buf.size() * sizeof(float));
 
 	return grid;
 }
@@ -695,7 +718,7 @@ inline MSDFGrid renderMSDF(
 	const Atlas& atlas,
 	Key key,
 	uint32_t tileSize=128,
-	double range=0.1
+	slug_t range=0.1_cv
 ) {
 	msdfgen::Shape msdfShape = toMSDFShape(atlas, key);
 
@@ -712,7 +735,12 @@ inline MSDFGrid renderMSDF(
 	const auto tileH = static_cast<uint32_t>(std::max(1.0, std::round(bh * scale)));
 
 	std::vector<float> buf(tileW * tileH * 3);
-	msdfgen::BitmapSection<float, 3> bmp(buf.data(), static_cast<int>(tileW), static_cast<int>(tileH));
+
+	msdfgen::BitmapSection<float, 3> bmp(
+		buf.data(),
+		static_cast<int>(tileW),
+		static_cast<int>(tileH)
+	);
 	msdfgen::generateMSDF(bmp, msdfShape, msdfTransform(bounds, tileW, tileH, range));
 
 	// Flip Y
