@@ -125,7 +125,7 @@ if(SLUGHORN_MSDF)
 	set(MSDFGEN_CORE_ONLY      ON  CACHE BOOL "" FORCE)
 	set(MSDFGEN_BUILD_STANDALONE OFF CACHE BOOL "" FORCE)
 	set(MSDFGEN_USE_VCPKG      OFF CACHE BOOL "" FORCE)
-	set(MSDFGEN_USE_OPENMP     OFF CACHE BOOL "" FORCE)
+	set(MSDFGEN_USE_OPENMP     ${SLUGHORN_RENDER_PARALLEL} CACHE BOOL "" FORCE)
 	set(MSDFGEN_USE_SKIA       OFF CACHE BOOL "" FORCE)
 	set(MSDFGEN_DISABLE_SVG    OFF CACHE BOOL "" FORCE)
 	set(MSDFGEN_DISABLE_PNG    OFF CACHE BOOL "" FORCE)
@@ -146,6 +146,7 @@ endif()
 
 if(SLUGHORN_RENDER_PARALLEL)
 	find_package(OpenMP QUIET)
+
 	if(OpenMP_CXX_FOUND)
 		target_compile_definitions(slughorn PUBLIC SLUGHORN_HAS_PARALLEL)
 		target_link_libraries(slughorn PUBLIC OpenMP::OpenMP_CXX)
@@ -242,13 +243,12 @@ if(SLUGHORN_BUILD_TESTS)
 		# Convenience targets: regenerate canvas.slug when the binary changes,
 		# then inspect it via the CLI without needing to type paths manually.
 		#
-		#   make canvas-list - list all shape + composite keys
-		#   make canvas-info - atlas summary (dimensions, packing stats)
-		#
+		# make canvas-list - list all shape + composite keys
+		# make canvas-info - atlas summary (dimensions, packing stats)
 		set(_CANVAS_SLUG "${CMAKE_CURRENT_BINARY_DIR}/canvas.slug")
 
 		add_custom_command(
-			OUTPUT  ${_CANVAS_SLUG}
+			OUTPUT ${_CANVAS_SLUG}
 			COMMAND $<TARGET_FILE:slughorn-test-canvas> ${_CANVAS_SLUG}
 			DEPENDS slughorn-test-canvas
 			COMMENT "Generating canvas.slug"

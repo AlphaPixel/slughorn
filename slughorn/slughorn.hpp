@@ -374,11 +374,13 @@ struct CompositeShape {
 	// reused with any compatible atlas - useful for font/convention swaps without re-authoring.
 	Layer& layer(Key key) {
 		for(auto& l : layers) if(l.key == key) return l;
+
 		throw std::out_of_range("CompositeShape::layer: key not found");
 	}
 
 	const Layer& layer(Key key) const {
 		for(const auto& l : layers) if(l.key == key) return l;
+
 		throw std::out_of_range("CompositeShape::layer: key not found");
 	}
 
@@ -503,12 +505,12 @@ public:
 		int numBandsX = 0;
 		int numBandsY = 0;
 
-		// Interior X split positions as normalized [0,1] fractions of the shape's X range
-		// (sorted ascending). If non-empty, overrides numBandsX; resulting numBands = splitsX.size() + 1.
+		// Interior X split positions as normalized [0,1] fractions of the shape's X range (sorted
+		// ascending). If non-empty, overrides numBandsX; resulting numBands = splitsX.size() + 1.
 		std::vector<slug_t> splitsX;
 
-		// Interior Y split positions as normalized [0,1] fractions of the shape's Y range
-		// (sorted ascending). If non-empty, overrides numBandsY; resulting numBands = splitsY.size() + 1.
+		// Interior Y split positions as normalized [0,1] fractions of the shape's Y range (sorted
+		// ascending). If non-empty, overrides numBandsY; resulting numBands = splitsY.size() + 1.
 		std::vector<slug_t> splitsY;
 
 		// Controls where the transform origin (Layer::transform.dx/dy) is placed relative to the
@@ -519,11 +521,12 @@ public:
 		// that needs no explicit coordinates.
 		// Origin(px, py) - Custom: caller-specified pivot in authoring space; unambiguously
 		// Custom because no other variant takes coordinates.
+		//
 		// Layer::transform.dx/dy will equal (px, py) scaled to em-space,
 		// giving the GPU the correct rotation pivot.
 		struct Origin {
 			// Default - quad placed at bbox corner; originData = (0, 0).
-			// Centered - quad placed at bbox center; originData = (width/2, height/2) in local em-space.
+			// Centered - quad placed at bbox center; originData = (width/2, height/2) in em-space.
 			// Pivot - quad placed at (px, py) in authoring space; originData = pivot in local
 			//         em-space (bbox-min subtracted). Use with osgSlug_Vertex_Rotate and similar
 			//         helpers that expect a local-em-space anchor.
@@ -943,6 +946,12 @@ public:
 
 	int registerMSDF(
 		Key key,
+		slug_t range=0.1_cv,
+		MSDFEdgeColoring coloring=MSDFEdgeColoring::ByDistance
+	);
+
+	void registerMSDF(
+		const std::vector<Key>& keys,
 		slug_t range=0.1_cv,
 		MSDFEdgeColoring coloring=MSDFEdgeColoring::ByDistance
 	);

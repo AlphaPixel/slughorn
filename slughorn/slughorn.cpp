@@ -716,6 +716,63 @@ int Atlas::registerMSDF(Key key, slug_t range, MSDFEdgeColoring coloring) {
 	return layer;
 }
 
+void Atlas::registerMSDF(const std::vector<Key>& keys, slug_t range, MSDFEdgeColoring coloring) {
+	if(!_built) throw std::runtime_error("Atlas::registerMSDF: call after build()");
+
+	// Filter to new keys only; validate all exist before touching any state.
+	std::vector<Key> newKeys;
+	newKeys.reserve(keys.size());
+
+	for(const Key& key : keys) {
+		if(_msdfLayerMap.count(key)) continue;
+
+		if(_shapes.find(key) == _shapes.end()) throw std::out_of_range(
+			"Atlas::registerMSDF: key not found in atlas"
+		);
+
+		newKeys.push_back(key);
+	}
+
+	if(newKeys.empty()) return;
+
+	const uint32_t tileSize = _msdfTileSize != 0 ? _msdfTileSize : 128u;
+
+	_msdfTileSize = tileSize;
+
+	// Render all tiles - each is fully independent, no atlas writes inside the parallel region.
+	std::vector<render::MSDFGrid> grids(newKeys.size());
+
+#ifdef SLUGHORN_HAS_PARALLEL
+	#pragma omp parallel for schedule(dynamic)
+#endif
+	for(int i = 0; i < static_cast<int>(newKeys.size()); ++i) {
+		grids[static_cast<size_t>(i)] = render::renderMSDFTile(
+			*this,
+			newKeys[static_cast<size_t>(i)],
+			tileSize,
+			range,
+			coloring
+		);
+	}
+
+	// Serial commit - deterministic layer ordering.
+	const int baseLayer = static_cast<int>(_msdfTileData.size());
+
+	for(size_t i = 0; i < newKeys.size(); ++i) {
+		const int layer = baseLayer + static_cast<int>(i);
+
+		_msdfTileData.push_back(std::move(grids[i].data));
+		_msdfLayerMap[newKeys[i]] = layer;
+
+		auto& shape = _shapes.at(newKeys[i]);
+
+		shape.msdfLayer = layer;
+		shape.msdfRange = range;
+	}
+
+	_msdfDirty = true;
+}
+
 const Atlas::TextureData& Atlas::getMSDFTextureData() const {
 	if(!_msdfDirty || _msdfTileData.empty()) return _msdfData;
 

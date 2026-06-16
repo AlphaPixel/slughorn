@@ -1175,6 +1175,22 @@ PYBIND11_MODULE(slughorn, m) {
 			"Shape.msdf_layer and .msdf_range are updated in-place. Idempotent for repeated keys."
 		)
 
+		.def("register_msdf",
+			[](
+				slughorn::Atlas& a,
+				const std::vector<slughorn::Key>& keys,
+				slug_t range,
+				slughorn::Atlas::MSDFEdgeColoring coloring
+			) {
+				a.registerMSDF(keys, range, coloring);
+			},
+			"keys"_a, "range"_a=0.1, "coloring"_a=slughorn::Atlas::MSDFEdgeColoring::ByDistance,
+			"Batch overload: register MSDF tiles for a list of keys.\n"
+			"Tiles are rendered in parallel (when built with SLUGHORN_RENDER_PARALLEL=ON),\n"
+			"then committed in deterministic order. Idempotent for already-registered keys.\n"
+			"Must be called after build() and before the graphics adapter packs textures."
+		)
+
 		.def("get_msdf_layer",
 			[](const slughorn::Atlas& a, slughorn::Key key) { return a.getMSDFLayer(key); },
 			"key"_a,
