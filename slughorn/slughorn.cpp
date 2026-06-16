@@ -620,12 +620,14 @@ void Atlas::rasterizeSDFAtlas() {
 	// Pass 2: shelf-pack tiles and measure total atlas height.
 	const uint32_t atlasW = opts.atlasWidth;
 	uint32_t cx = 0, cy = 0, rowH = 0, atlasH = 0;
+	uint32_t texelsUsed = 0;
 
 	for(const auto& e : tiles) {
 		if(cx + e.w > atlasW) { cy += rowH; cx = 0; rowH = 0; }
 
 		cx += e.w;
 		rowH = std::max(rowH, e.h);
+		texelsUsed += e.w * e.h;
 	}
 
 	atlasH = cy + rowH;
@@ -636,6 +638,11 @@ void Atlas::rasterizeSDFAtlas() {
 	_sdfAtlas.texture.format = TextureData::Format::RGBA8;
 
 	_sdfAtlas.texture.bytes.assign(size_t{atlasW} * atlasH * 4, 0);
+
+	_packingStats.sdfTileCount = static_cast<uint32_t>(tiles.size());
+	_packingStats.sdfTexelsUsed = texelsUsed;
+	_packingStats.sdfTexelsTotal = atlasW * atlasH;
+	_packingStats.sdfTexelsPadding = _packingStats.sdfTexelsTotal - texelsUsed;
 
 	// Pass 3: blit tiles and record SDFRecords.
 	cx = 0; cy = 0; rowH = 0;
@@ -713,6 +720,10 @@ int Atlas::registerMSDF(Key key, slug_t range, MSDFEdgeColoring coloring) {
 	sit->second.msdfLayer = layer;
 	sit->second.msdfRange = range;
 
+	_packingStats.msdfTileSize = tileSize;
+	_packingStats.msdfLayerCount = static_cast<uint32_t>(_msdfTileData.size());
+	_packingStats.msdfTexelsTotal = tileSize * tileSize * _packingStats.msdfLayerCount;
+
 	return layer;
 }
 
@@ -771,6 +782,10 @@ void Atlas::registerMSDF(const std::vector<Key>& keys, slug_t range, MSDFEdgeCol
 	}
 
 	_msdfDirty = true;
+
+	_packingStats.msdfTileSize = tileSize;
+	_packingStats.msdfLayerCount = static_cast<uint32_t>(_msdfTileData.size());
+	_packingStats.msdfTexelsTotal = tileSize * tileSize * _packingStats.msdfLayerCount;
 }
 
 const Atlas::TextureData& Atlas::getMSDFTextureData() const {

@@ -908,10 +908,29 @@ PYBIND11_MODULE(slughorn, m) {
 			"Number of registered gradients (0 when none).")
 		.def_readonly("gradient_texels_total", &slughorn::Atlas::PackingStats::gradientTexelsTotal,
 			"Total gradient texture texels (GRADIENT_STRIP_WIDTH * gradient_count).")
+		.def_readonly("sdf_tile_count", &slughorn::Atlas::PackingStats::sdfTileCount,
+			"Number of shapes with a packed SDF/MSDF atlas tile (0 unless set_sdf_options() was used).")
+		.def_readonly("sdf_texels_used", &slughorn::Atlas::PackingStats::sdfTexelsUsed)
+		.def_readonly("sdf_texels_padding", &slughorn::Atlas::PackingStats::sdfTexelsPadding)
+		.def_readonly("sdf_texels_total", &slughorn::Atlas::PackingStats::sdfTexelsTotal)
+		.def_readonly("msdf_layer_count", &slughorn::Atlas::PackingStats::msdfLayerCount,
+			"Number of layers registered via register_msdf() (0 unless used).")
+		.def_readonly("msdf_tile_size", &slughorn::Atlas::PackingStats::msdfTileSize)
+		.def_readonly("msdf_texels_total", &slughorn::Atlas::PackingStats::msdfTexelsTotal)
 		.def("curve_utilization", &slughorn::Atlas::PackingStats::curveUtilization)
 		.def("band_utilization", &slughorn::Atlas::PackingStats::bandUtilization)
+		.def("sdf_utilization", &slughorn::Atlas::PackingStats::sdfUtilization)
 		.def("curve_padding_ratio", &slughorn::Atlas::PackingStats::curvePaddingRatio)
 		.def("band_padding_ratio", &slughorn::Atlas::PackingStats::bandPaddingRatio)
+		.def("sdf_padding_ratio", &slughorn::Atlas::PackingStats::sdfPaddingRatio)
+		.def("curve_bytes", &slughorn::Atlas::PackingStats::curveBytes)
+		.def("band_bytes", &slughorn::Atlas::PackingStats::bandBytes)
+		.def("gradient_bytes", &slughorn::Atlas::PackingStats::gradientBytes)
+		.def("sdf_bytes", &slughorn::Atlas::PackingStats::sdfBytes)
+		.def("msdf_bytes", &slughorn::Atlas::PackingStats::msdfBytes)
+		.def("total_bytes", &slughorn::Atlas::PackingStats::totalBytes,
+			"Total GPU memory across every channel, in bytes "
+			"(curve + band + gradient + SDF atlas + MSDF array).")
 		.def("__repr__", [](const slughorn::Atlas::PackingStats& p) { return streamRepr(p); })
 	;
 

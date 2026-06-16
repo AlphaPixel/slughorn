@@ -29,7 +29,7 @@ else()
 		"-W"
 		"-Wall"
 		"-Wshadow"
-		"-Wsign-conversion"
+		"-Wconversion"
 		"-Wpedantic"
 		"-Wextra"
 		"-Werror"
@@ -87,7 +87,7 @@ if(SLUGHORN_NANOSVG)
 	target_compile_definitions(slughorn PRIVATE SLUGHORN_NANOSVG_IMPLEMENTATION)
 	target_compile_definitions(slughorn PUBLIC SLUGHORN_HAS_NANOSVG)
 	target_include_directories(slughorn
-		PUBLIC
+		SYSTEM PUBLIC
 			$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/ext/nanosvg/src>
 	)
 endif()

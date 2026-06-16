@@ -690,19 +690,33 @@ public:
 	};
 
 	struct PackingStats {
-		// Curve texture
+		// Curve texture (RGBA32F, 16 bytes/texel)
 		uint32_t curveTexelsUsed = 0; // texels written with actual curve data
 		uint32_t curveTexelsPadding = 0; // texels wasted to row-alignment bumps
 		uint32_t curveTexelsTotal = 0; // width * height (allocated)
 
-		// Band texture
+		// Band texture (RGBA16UI, 8 bytes/texel)
 		uint32_t bandTexelsUsed = 0;
 		uint32_t bandTexelsPadding = 0;
 		uint32_t bandTexelsTotal = 0;
 
-		// Gradient texture (one GRADIENT_STRIP_WIDTH-wide RGBA8 row per gradient; no padding)
+		// Gradient texture (RGBA8, 4 bytes/texel; one GRADIENT_STRIP_WIDTH-wide row per
+		// gradient; no padding)
 		uint32_t gradientCount = 0;
 		uint32_t gradientTexelsTotal = 0;
+
+		// Shelf-packed SDF/MSDF atlas (RGBA8, 4 bytes/texel) - populated by rasterizeSDFAtlas()
+		// when setSDFOptions() was called beforehand. All fields stay 0 otherwise.
+		uint32_t sdfTileCount = 0; // number of shapes with a packed tile
+		uint32_t sdfTexelsUsed = 0; // sum of each tile's w * h
+		uint32_t sdfTexelsPadding = 0; // shelf-packing waste (atlas area not covered by a tile)
+		uint32_t sdfTexelsTotal = 0; // atlas width * height (allocated)
+
+		// Per-shape MSDF Texture2DArray (RGB32F, 12 bytes/texel) - updated incrementally by
+		// registerMSDF() as shapes opt in. All fields stay 0 if never called.
+		uint32_t msdfLayerCount = 0; // number of registered layers
+		uint32_t msdfTileSize = 0; // width == height of each layer
+		uint32_t msdfTexelsTotal = 0; // tileSize * tileSize * msdfLayerCount
 
 		// Fraction of allocated texels actually containing live data [0, 1].
 		float curveUtilization() const {
@@ -719,6 +733,13 @@ public:
 			;
 		}
 
+		float sdfUtilization() const {
+			return sdfTexelsTotal
+				? float(sdfTexelsUsed) / float(sdfTexelsTotal)
+				: 0.f
+			;
+		}
+
 		// Fraction of live texels that are padding (not curve data) [0, 1]. High values suggest
 		// band count or shape ordering could be improved.
 		float curvePaddingRatio() const {
@@ -731,6 +752,24 @@ public:
 			const uint32_t live = bandTexelsUsed + bandTexelsPadding;
 
 			return live ? float(bandTexelsPadding) / float(live) : 0.f;
+		}
+
+		float sdfPaddingRatio() const {
+			const uint32_t live = sdfTexelsUsed + sdfTexelsPadding;
+
+			return live ? float(sdfTexelsPadding) / float(live) : 0.f;
+		}
+
+		// GPU bytes allocated per channel, derived from each channel's fixed texture format.
+		size_t curveBytes() const { return size_t(curveTexelsTotal) * 16; } // RGBA32F
+		size_t bandBytes() const { return size_t(bandTexelsTotal) * 8; } // RGBA16UI
+		size_t gradientBytes() const { return size_t(gradientTexelsTotal) * 4; } // RGBA8
+		size_t sdfBytes() const { return size_t(sdfTexelsTotal) * 4; } // RGBA8
+		size_t msdfBytes() const { return size_t(msdfTexelsTotal) * 12; } // RGB32F
+
+		// Total GPU memory across every channel: curve + band + gradient + SDF atlas + MSDF array.
+		size_t totalBytes() const {
+			return curveBytes() + bandBytes() + gradientBytes() + sdfBytes() + msdfBytes();
 		}
 	};
 
@@ -1569,6 +1608,15 @@ inline std::ostream& operator<<(std::ostream& os, const Atlas::PackingStats& p) 
 		<< " gradient" << (p.gradientCount != 1 ? "s" : "")
 		<< " (" << Atlas::GRADIENT_STRIP_WIDTH << "x" << p.gradientCount
 		<< " RGBA8, " << p.gradientTexelsTotal << " texels)"
+		<< " | sdf: " << p.sdfTileCount << " tile" << (p.sdfTileCount != 1 ? "s" : "")
+		<< " (" << p.sdfTexelsUsed << " used"
+		<< " + " << p.sdfTexelsPadding << " padding"
+		<< " / " << p.sdfTexelsTotal << " total"
+		<< " RGBA8, " << int(p.sdfUtilization() * 100.f) << "% util)"
+		<< " | msdf: " << p.msdfLayerCount << " layer" << (p.msdfLayerCount != 1 ? "s" : "")
+		<< " (" << p.msdfTileSize << "x" << p.msdfTileSize << " RGB32F, "
+		<< p.msdfTexelsTotal << " texels)"
+		<< " | total: " << (static_cast<double>(p.totalBytes()) / 1024.0 / 1024.0) << " MiB"
 		<< ")"
 	;
 }

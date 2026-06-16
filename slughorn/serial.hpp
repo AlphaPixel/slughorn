@@ -253,7 +253,14 @@ json packingStatsToJson(const Atlas::PackingStats& p) {
 		{"band_texels_padding", p.bandTexelsPadding},
 		{"band_texels_total", p.bandTexelsTotal},
 		{"gradient_count", p.gradientCount},
-		{"gradient_texels_total", p.gradientTexelsTotal}
+		{"gradient_texels_total", p.gradientTexelsTotal},
+		{"sdf_tile_count", p.sdfTileCount},
+		{"sdf_texels_used", p.sdfTexelsUsed},
+		{"sdf_texels_padding", p.sdfTexelsPadding},
+		{"sdf_texels_total", p.sdfTexelsTotal},
+		{"msdf_layer_count", p.msdfLayerCount},
+		{"msdf_tile_size", p.msdfTileSize},
+		{"msdf_texels_total", p.msdfTexelsTotal}
 	};
 }
 
@@ -268,6 +275,13 @@ Atlas::PackingStats packingStatsFromJson(const json& j) {
 	p.bandTexelsTotal = j.at("band_texels_total").get<uint32_t>();
 	p.gradientCount = j.value("gradient_count", 0u);
 	p.gradientTexelsTotal = j.value("gradient_texels_total", 0u);
+	p.sdfTileCount = j.value("sdf_tile_count", 0u);
+	p.sdfTexelsUsed = j.value("sdf_texels_used", 0u);
+	p.sdfTexelsPadding = j.value("sdf_texels_padding", 0u);
+	p.sdfTexelsTotal = j.value("sdf_texels_total", 0u);
+	p.msdfLayerCount = j.value("msdf_layer_count", 0u);
+	p.msdfTileSize = j.value("msdf_tile_size", 0u);
+	p.msdfTexelsTotal = j.value("msdf_texels_total", 0u);
 
 	return p;
 }
