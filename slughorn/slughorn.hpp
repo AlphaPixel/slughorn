@@ -584,7 +584,7 @@ public:
 		int msdfLayer = -1;
 
 		// Em-space SDF range used when this shape's tile was generated.
-		// Packed alongside msdfLayer into effectData.z for the shader.
+		// Packed alongside msdfLayer into effectData.z for the shader (16 bits per value).
 		slug_t msdfRange = 0_cv;
 
 		// Original em-space curves, retained post-build and post-load.
@@ -1039,6 +1039,7 @@ public:
 		TextureData curveData;
 		TextureData bandData;
 		TextureData gradientData;
+		TextureData msdfData;
 		PackingStats packingStats;
 		std::unordered_map<Key, Shape, KeyHash> shapes;
 		std::unordered_map<Key, CompositeShape, KeyHash> composites;
@@ -1053,6 +1054,17 @@ public:
 		_packingStats = sd.packingStats;
 		_shapes = std::move(sd.shapes);
 		_compositeShapes = std::move(sd.composites);
+#ifdef SLUGHORN_HAS_MSDF
+		if(!sd.msdfData.bytes.empty()) {
+			_msdfData = std::move(sd.msdfData);
+			_msdfDirty = false;
+			_msdfTileSize = _packingStats.msdfTileSize;
+
+			for(const auto& [key, shape] : _shapes) {
+				if(shape.msdfLayer >= 0) _msdfLayerMap[key] = shape.msdfLayer;
+			}
+		}
+#endif
 		_built = true;
 	}
 

@@ -692,15 +692,15 @@ inline MSDFGrid renderMSDFTile(
 	);
 	msdfgen::generateMSDF(bmp, msdfShape, msdfTransform(bounds, tileSize, tileSize, range));
 
-	// msdfgen's DistanceMapping linearly maps [-range, range] -> [0, 1] with NO clamp —
-	// any point whose true distance exceeds range (always true somewhere in the
-	// expand-padded margin renderMSDFTile's own bounds computation above creates) comes out
-	// <0 or >1. The GL_RGB32F texture this feeds is real floats with no automatic clamping
-	// (unlike a normalized 8-bit format), so that overshoot reaches the shader verbatim —
-	// a legitimately-very-exterior point can sample as negative, indistinguishable from a
-	// "no MSDF tile" sentinel unless the caller checks v_msdfLayer directly instead of the
-	// sampled value's sign. Clamping here (matching renderSDF's existing pattern) keeps the
-	// data itself well-defined regardless of how callers interpret it.
+	// msdfgen's DistanceMapping linearly maps [-range, range] -> [0, 1] with NO clamp; any point
+	// whose true distance exceeds range (always true somewhere in the expand-padded margin
+	// renderMSDFTile's own bounds computation above creates) comes out <0 or >1. The GL_RGB32F
+	// texture this feeds is real floats with no automatic clamping (unlike a normalized 8-bit
+	// format), so that overshoot reaches the shader verbatim, and a legitimately-very-exterior
+	// point can sample as negative, indistinguishable from a "no MSDF tile" sentinel unless the
+	// caller checks v_msdfLayer directly instead of the sampled value's sign. Clamping here
+	// (matching renderSDF's existing pattern) keeps the data itself well-defined regardless of how
+	// callers interpret it.
 	for(float& v : buf) v = std::clamp(v, 0.0f, 1.0f);
 
 	// No Y-flip. This function has exactly one purpose: feeding the GPU sampler2DArray

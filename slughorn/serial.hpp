@@ -51,10 +51,14 @@
 //     },
 //     "bufferViews": [
 //       { "byteOffset": 0,    "byteLength": N, "format": "RGBA32F",  "width": 512, "height": H },
-//       { "byteOffset": N,    "byteLength": M, "format": "RGBA16UI", "width": 512, "height": H }
+//       { "byteOffset": N,    "byteLength": M, "format": "RGBA16UI", "width": 512, "height": H },
+//       { "byteOffset": ...,  "byteLength": P, "format": "RGBA8",    "width": 512, "height": H },  // optional gradient
+//       { "byteOffset": ...,  "byteLength": Q, "format": "RGB32F",   "width": T,   "height": T, "depth": L } // optional MSDF array
 //     ],
 //     "curve_texture": 0,
 //     "band_texture":  1,
+//     "gradient_texture": 2,   // optional
+//     "msdf_texture": 2,       // optional (index depends on whether gradient is present)
 //     "shapes": [
 //       {
 //         "key": { "type": "codepoint", "value": 70 },
@@ -63,7 +67,8 @@
 //         "band_scale_x": 2.0, "band_scale_y": 2.0,
 //         "band_offset_x": 0.0, "band_offset_y": 0.0,
 //         "bearing_x": 0.0, "bearing_y": 0.7,
-//         "width": 1.0, "height": 0.7, "advance": 1.0
+//         "width": 1.0, "height": 0.7, "advance": 1.0,
+//         "msdf_layer": 0, "msdf_range": 0.1  // optional; only when registerMSDF() was called
 //       }
 //     ],
 //     "composites": [
@@ -317,12 +322,19 @@ json buildJson(
 	bool embedBase64,
 	uint32_t curveByteOffset=0,
 	uint32_t bandByteOffset=0,
-	uint32_t gradByteOffset=0
+	uint32_t gradByteOffset=0,
+	uint32_t msdfByteOffset=0
 ) {
 	const Atlas::TextureData& curve = atlas.getCurveTextureData();
 	const Atlas::TextureData& band = atlas.getBandTextureData();
 	const Atlas::TextureData& grad = atlas.getGradientTextureData();
 	const bool hasGradients = !grad.bytes.empty();
+#ifdef SLUGHORN_HAS_MSDF
+	const Atlas::TextureData& msdf = atlas.getMSDFTextureData();
+	const bool hasMSDF = !msdf.bytes.empty();
+#else
+	const bool hasMSDF = false;
+#endif
 
 	json j;
 
@@ -384,6 +396,30 @@ json buildJson(
 		j["gradient_texture"] = 2;
 	}
 
+#ifdef SLUGHORN_HAS_MSDF
+	if(hasMSDF) {
+		const size_t msdfBvIdx = bufferViews.size();
+
+		json bvMSDF = {
+			{"byteLength", msdf.bytes.size()},
+			{"format", "RGB32F"},
+			{"width", msdf.width},
+			{"height", msdf.height},
+			{"depth", msdf.depth}
+		};
+
+		if(embedBase64) {
+			bvMSDF["byteOffset"] = 0;
+			bvMSDF["data"] = base64Encode(msdf.bytes);
+		}
+
+		else bvMSDF["byteOffset"] = msdfByteOffset;
+
+		bufferViews.push_back(bvMSDF);
+		j["msdf_texture"] = msdfBvIdx;
+	}
+#endif
+
 	j["bufferViews"] = bufferViews;
 	j["curve_texture"] = 0;
 	j["band_texture"] = 1;
@@ -425,7 +461,10 @@ json buildJson(
 	json shapes = json::array();
 
 	for(const auto& [key, shape] : atlas.getShapes()) {
-		shapes.push_back({
+		std::ostringstream originType;
+		originType << shape.origin.type;
+
+		json jshape = {
 			{"key", keyToJson(key)},
 			{"band_tex_x", shape.bandTexX},
 			{"band_tex_y", shape.bandTexY},
@@ -442,12 +481,15 @@ json buildJson(
 			{"advance", shape.advance},
 			{"origin_x", shape.originX},
 			{"origin_y", shape.originY},
-			{"origin", [&]() {
-				std::ostringstream oss;
-				oss << shape.origin.type;
-				return json{{"type", oss.str()}, {"x", shape.origin.x}, {"y", shape.origin.y}};
-			}()}
-		});
+			{"origin", {{"type", originType.str()}, {"x", shape.origin.x}, {"y", shape.origin.y}}}
+		};
+
+		if(shape.msdfLayer >= 0) {
+			jshape["msdf_layer"] = shape.msdfLayer;
+			jshape["msdf_range"] = shape.msdfRange;
+		}
+
+		shapes.push_back(std::move(jshape));
 	}
 
 	j["shapes"] = shapes;
@@ -500,12 +542,14 @@ Atlas atlasFromJson(
 
 		td.width = bv.at("width");
 		td.height = bv.at("height");
+		td.depth = bv.value("depth", 0u);
 
 		const std::string fmt = bv.at("format");
 
 		if (fmt == "RGBA32F") td.format = Atlas::TextureData::Format::RGBA32F;
 		else if(fmt == "RGBA16UI") td.format = Atlas::TextureData::Format::RGBA16UI;
 		else if(fmt == "RGBA8") td.format = Atlas::TextureData::Format::RGBA8;
+		else if(fmt == "RGB32F") td.format = Atlas::TextureData::Format::RGB32F;
 		else throw std::runtime_error("slughorn-serial: unknown texture format '" + fmt + "'");
 
 		if(binChunk) {
@@ -537,6 +581,7 @@ Atlas atlasFromJson(
 	sd.packingStats = packingStatsFromJson(j.at("packing_stats"));
 
 	if(j.contains("gradient_texture")) sd.gradientData = loadTexture(j.at("gradient_texture"));
+	if(j.contains("msdf_texture")) sd.msdfData = loadTexture(j.at("msdf_texture"));
 
 	if(j.contains("gradients")) {
 		for(const json& jg : j.at("gradients")) {
@@ -589,6 +634,8 @@ Atlas atlasFromJson(
 		shape.advance = js.at("advance");
 		shape.originX = js.value("origin_x", 0_cv);
 		shape.originY = js.value("origin_y", 0_cv);
+		shape.msdfLayer = js.value("msdf_layer", -1);
+		shape.msdfRange = js.value("msdf_range", 0_cv);
 
 		if(js.contains("origin")) {
 			const auto& jo = js.at("origin");
@@ -726,10 +773,18 @@ void writeBinary(const Atlas& atlas, std::ostream& out) {
 
 	if(!grad.bytes.empty()) binData.insert(binData.end(), grad.bytes.begin(), grad.bytes.end());
 
+#ifdef SLUGHORN_HAS_MSDF
+	const Atlas::TextureData& msdfBin = atlas.getMSDFTextureData();
+	const uint32_t msdfByteOffset = static_cast<uint32_t>(binData.size());
+	if(!msdfBin.bytes.empty()) binData.insert(binData.end(), msdfBin.bytes.begin(), msdfBin.bytes.end());
+#else
+	const uint32_t msdfByteOffset = 0;
+#endif
+
 	padTo4(binData, 0x00);
 
 	// Build JSON chunk
-	const json j = buildJson(atlas, /*embedBase64=*/false, curveByteOffset, bandByteOffset, gradByteOffset);
+	const json j = buildJson(atlas, /*embedBase64=*/false, curveByteOffset, bandByteOffset, gradByteOffset, msdfByteOffset);
 	const std::string jsonStr = j.dump();
 
 	std::vector<uint8_t> jsonData(jsonStr.begin(), jsonStr.end());
