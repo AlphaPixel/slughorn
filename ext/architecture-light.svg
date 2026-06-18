@@ -1,0 +1,215 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 400" width="900" height="400"
+     font-family="'Segoe UI', system-ui, -apple-system, sans-serif">
+  <defs>
+    <marker id="arr-green" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0,10 3.5,0 7" fill="#10b981"/>
+    </marker>
+    <marker id="arr-amber" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0,10 3.5,0 7" fill="#f59e0b"/>
+    </marker>
+    <marker id="arr-violet" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0,10 3.5,0 7" fill="#7c3aed"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="900" height="400" fill="#f8fafc"/>
+
+  <!-- ── Section headers ────────────────────────────────────────────── -->
+  <text x="116" y="19" text-anchor="middle" font-size="9.5" font-weight="700"
+        fill="#94a3b8" letter-spacing="1.8">INPUT</text>
+  <text x="450" y="19" text-anchor="middle" font-size="9.5" font-weight="700"
+        fill="#94a3b8" letter-spacing="1.8">CORE</text>
+  <text x="757" y="19" text-anchor="middle" font-size="9.5" font-weight="700"
+        fill="#94a3b8" letter-spacing="1.8">GPU TARGETS</text>
+
+  <!-- Subtle column dividers -->
+  <line x1="252" y1="26" x2="252" y2="388" stroke="#e2e8f0" stroke-width="1"/>
+  <line x1="618" y1="26" x2="618" y2="388" stroke="#e2e8f0" stroke-width="1"/>
+
+  <!-- ── Direct authoring section (top-left) ────────────────────────── -->
+  <rect x="12" y="28" width="222" height="92" rx="7"
+        fill="#ecfdf5" stroke="#10b981" stroke-width="1.5"/>
+  <text x="123" y="43" text-anchor="middle" font-size="9" font-weight="700"
+        fill="#059669" letter-spacing="1.2">DIRECT AUTHORING</text>
+  <rect x="22" y="50" width="202" height="60" rx="5"
+        fill="#bbf7d0" stroke="#10b981" stroke-width="1"/>
+  <text x="123" y="72" text-anchor="middle" font-size="14" font-weight="700"
+        fill="#064e3b">slughorn Canvas</text>
+  <text x="123" y="88" text-anchor="middle" font-size="10" fill="#065f46">
+    HTML Canvas-like API
+  </text>
+  <text x="123" y="102" text-anchor="middle" font-size="9" fill="#047857">
+    C++ · Python bindings
+  </text>
+
+  <!-- ── Adapter backends section (bottom-left) ─────────────────────── -->
+  <rect x="12" y="132" width="222" height="248" rx="7"
+        fill="#fffbeb" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="123" y="148" text-anchor="middle" font-size="9" font-weight="700"
+        fill="#d97706" letter-spacing="1.2">ADAPTER BACKENDS</text>
+
+  <!-- FreeType -->
+  <rect x="22" y="155" width="202" height="38" rx="5"
+        fill="#fef3c7" stroke="#f59e0b" stroke-width="1"/>
+  <text x="123" y="171" text-anchor="middle" font-size="13" font-weight="600"
+        fill="#92400e">FreeType</text>
+  <text x="123" y="185" text-anchor="middle" font-size="9" fill="#b45309">
+    text · glyphs · COLRv0/v1 emoji
+  </text>
+
+  <!-- NanoSVG -->
+  <rect x="22" y="201" width="202" height="38" rx="5"
+        fill="#fef3c7" stroke="#f59e0b" stroke-width="1"/>
+  <text x="123" y="217" text-anchor="middle" font-size="13" font-weight="600"
+        fill="#92400e">NanoSVG</text>
+  <text x="123" y="231" text-anchor="middle" font-size="9" fill="#b45309">
+    paths · gradients
+  </text>
+
+  <!-- Blend2D -->
+  <rect x="22" y="247" width="202" height="38" rx="5"
+        fill="#fef3c7" stroke="#f59e0b" stroke-width="1"/>
+  <text x="123" y="263" text-anchor="middle" font-size="13" font-weight="600"
+        fill="#92400e">Blend2D</text>
+  <text x="123" y="277" text-anchor="middle" font-size="9" fill="#b45309">
+    paths · stroke-to-path
+  </text>
+
+  <!-- Cairo + Skia side-by-side -->
+  <rect x="22" y="293" width="96" height="38" rx="5"
+        fill="#fef3c7" stroke="#f59e0b" stroke-width="1"/>
+  <text x="70" y="316" text-anchor="middle" font-size="13" font-weight="600"
+        fill="#92400e">Cairo</text>
+
+  <rect x="128" y="293" width="96" height="38" rx="5"
+        fill="#fef3c7" stroke="#f59e0b" stroke-width="1"/>
+  <text x="176" y="316" text-anchor="middle" font-size="13" font-weight="600"
+        fill="#92400e">Skia</text>
+
+  <!-- Custom backend hint (dashed) -->
+  <rect x="22" y="339" width="202" height="34" rx="5"
+        fill="none" stroke="#f59e0b" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="123" y="356" text-anchor="middle" font-size="10" fill="#b45309"
+        font-style="italic">+ any custom backend</text>
+  <text x="123" y="368" text-anchor="middle" font-size="9" fill="#d97706">
+    via CurveDecomposer
+  </text>
+
+  <!-- ── slughorn core (center) ─────────────────────────────────────── -->
+  <rect x="267" y="96" width="340" height="208" rx="10" fill="#1e3a8a"/>
+  <rect x="272" y="101" width="330" height="198" rx="7"
+        fill="none" stroke="#3b82f6" stroke-width="0.75" opacity="0.5"/>
+
+  <text x="437" y="160" text-anchor="middle" font-size="34" font-weight="800"
+        fill="white" letter-spacing="-1">slughorn</text>
+
+  <line x1="297" y1="172" x2="577" y2="172"
+        stroke="#60a5fa" stroke-width="0.75" opacity="0.4"/>
+
+  <text x="437" y="194" text-anchor="middle" font-size="11" fill="#93c5fd">
+    Atlas management
+  </text>
+  <text x="437" y="212" text-anchor="middle" font-size="11" fill="#93c5fd">
+    Bezier curve processing  ·  Slug GPU algorithm
+  </text>
+  <text x="437" y="230" text-anchor="middle" font-size="11" fill="#93c5fd">
+    SDF generation  ·  MSDF generation
+  </text>
+
+  <line x1="297" y1="244" x2="577" y2="244"
+        stroke="#60a5fa" stroke-width="0.75" opacity="0.3"/>
+
+  <text x="437" y="263" text-anchor="middle" font-size="9.5" fill="#60a5fa"
+        font-style="italic">graphics-API agnostic  ·  C++20  ·  glTF-compatible output</text>
+  <text x="437" y="278" text-anchor="middle" font-size="9.5" fill="#60a5fa"
+        font-style="italic">Python bindings  ·  offline asset pipeline  ·  parallel processing</text>
+
+  <!-- ── GPU targets (right) ────────────────────────────────────────── -->
+
+  <!-- OpenGL -->
+  <rect x="628" y="58" width="260" height="62" rx="6"
+        fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="758" y="82" text-anchor="middle" font-size="14" font-weight="700"
+        fill="#3b0764">OpenGL</text>
+  <text x="758" y="98" text-anchor="middle" font-size="10" fill="#5b21b6">
+    osgSlug · raw GLSL shaders
+  </text>
+  <text x="758" y="112" text-anchor="middle" font-size="9" fill="#7c3aed">
+    OpenSceneGraph · osgEarth
+  </text>
+
+  <!-- Vulkan -->
+  <rect x="628" y="130" width="260" height="62" rx="6"
+        fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="758" y="154" text-anchor="middle" font-size="14" font-weight="700"
+        fill="#3b0764">Vulkan</text>
+  <text x="758" y="170" text-anchor="middle" font-size="10" fill="#5b21b6">
+    raw Vulkan · SPIR-V shaders
+  </text>
+  <text x="758" y="184" text-anchor="middle" font-size="9" fill="#7c3aed">
+    VulkanSceneGraph / VSG
+  </text>
+
+  <!-- WebGL / WebGPU -->
+  <rect x="628" y="202" width="260" height="62" rx="6"
+        fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="758" y="226" text-anchor="middle" font-size="14" font-weight="700"
+        fill="#3b0764">WebGL · WebGPU</text>
+  <text x="758" y="242" text-anchor="middle" font-size="10" fill="#5b21b6">
+    browser or native WASM
+  </text>
+  <text x="758" y="256" text-anchor="middle" font-size="9" fill="#7c3aed">
+    emscripten · Dawn · wgpu
+  </text>
+
+  <!-- DirectX / Metal -->
+  <rect x="628" y="274" width="260" height="62" rx="6"
+        fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="758" y="298" text-anchor="middle" font-size="14" font-weight="700"
+        fill="#3b0764">DirectX · Metal</text>
+  <text x="758" y="314" text-anchor="middle" font-size="10" fill="#5b21b6">
+    Windows · macOS · iOS
+  </text>
+  <text x="758" y="328" text-anchor="middle" font-size="9" fill="#7c3aed">
+    HLSL · MSL shaders
+  </text>
+
+  <!-- ── Connectors ─────────────────────────────────────────────────── -->
+
+  <!-- Canvas API → slughorn core (green) -->
+  <!-- From right edge of Canvas inner box (224, 80) curves to slughorn left (267, 168) -->
+  <path d="M 224 80 C 245 80,245 168,267 168"
+        fill="none" stroke="#10b981" stroke-width="2"
+        marker-end="url(#arr-green)"/>
+
+  <!-- Adapter backends → slughorn core (amber) -->
+  <!-- From right edge of adapter section (234, 258) curves to slughorn left (267, 210) -->
+  <path d="M 234 258 C 250 258,250 210,267 210"
+        fill="none" stroke="#f59e0b" stroke-width="2"
+        marker-end="url(#arr-amber)"/>
+
+  <!-- slughorn → GPU bus (violet) -->
+  <!-- Horizontal from slughorn right (607, 200) to bus at x=619 -->
+  <line x1="607" y1="200" x2="618" y2="200"
+        stroke="#7c3aed" stroke-width="2"/>
+  <!-- Vertical bus: y=89 to y=305 -->
+  <line x1="618" y1="89" x2="618" y2="305"
+        stroke="#7c3aed" stroke-width="1.5" opacity="0.5"/>
+  <!-- Branches to each GPU box -->
+  <line x1="618" y1="89"  x2="628" y2="89"
+        stroke="#7c3aed" stroke-width="2" marker-end="url(#arr-violet)"/>
+  <line x1="618" y1="161" x2="628" y2="161"
+        stroke="#7c3aed" stroke-width="2" marker-end="url(#arr-violet)"/>
+  <line x1="618" y1="233" x2="628" y2="233"
+        stroke="#7c3aed" stroke-width="2" marker-end="url(#arr-violet)"/>
+  <line x1="618" y1="305" x2="628" y2="305"
+        stroke="#7c3aed" stroke-width="2" marker-end="url(#arr-violet)"/>
+
+  <!-- ── Footer ─────────────────────────────────────────────────────── -->
+  <text x="450" y="392" text-anchor="middle" font-size="9" fill="#94a3b8"
+        font-style="italic">
+    slughorn produces GPU-ready curve atlas data; your graphics layer consumes it via
+    a shader pair — no graphics dependency in slughorn itself
+  </text>
+</svg>

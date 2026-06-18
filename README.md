@@ -1,6 +1,9 @@
 <table border="0">
 <tr>
-<td><img src="logo.svg" width="300" alt="slughorn"></td>
+<td><picture>
+  <source media="(prefers-color-scheme: light)" srcset="ext/logo.svg">
+  <img src="ext/logo-light.svg" width="300" alt="slughorn">
+</picture></td>
 <td>
 
 https://github.com/user-attachments/assets/5ca6563e-a7d3-44df-9800-beb8716efcad
@@ -37,12 +40,33 @@ Furthermore, `slughorn` provides tools for traditional "offline asset"
 processing (primarily in Python), as well as a [glTF](#)-compatible JSON file
 format.
 
+# Architecture
+
+`slughorn` operates in two complementary modes. As a **first-class authoring tool**,
+it provides a Canvas-like API for building vector content directly in code — shapes,
+text, gradients, and composited layers — all flowing into the GPU atlas without any
+intermediate library. As an **adapter**, it bridges existing vector ecosystems (Cairo,
+Skia, Blend2D, NanoSVG, FreeType) into that same GPU-ready pipeline, letting you keep
+your current authoring workflow while gaining resolution-independent,
+perspective-correct GPU rendering. Most GPU vector renderers want to own the authoring;
+`slughorn` is being developed to support: *bring your own source.*
+
+<div align="center">
+
+<picture>
+  <source media="(prefers-color-scheme: light)" srcset="ext/architecture-light.svg">
+  <img alt="slughorn architecture" src="ext/architecture.svg">
+</picture>
+
+</div>
+
 # Current Supported Backends
 
 - FreeType
-- NanoSVG
-- Skia
-- Cairo
+- NanoSVG (paths & gradients)
+- Skia (paths only, stroke-to-path)
+- Cairo (paths only)
+- Blend2D (paths only, stroke-to-path)
 
 In addition to the above backends, `slughorn` provides a "native" API for
 authoring vector graphics inspired by the standard HTML `Canvas` element.
@@ -50,6 +74,10 @@ authoring vector graphics inspired by the standard HTML `Canvas` element.
 Adding support for other backends is generally as easy as using a single helper
 class: `slughorn::CurveDecomposer`. If your vector data can be reduced into
 simple quadratic Bezier curves, `slughorn` can make it render.
+
+> Supporting *most* of the missing Skia/Cairo/Blend2D features (gradients,
+> patterns, text, clipping/masking) is entirely **possible**, it just requires
+> time/effort. As slughorn continues to evolve, so will those backends.
 
 # Demos
 
