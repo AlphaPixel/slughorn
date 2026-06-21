@@ -554,7 +554,7 @@ PYBIND11_MODULE(slughorn, m) {
 	// ============================================================================================
 	// slughorn.Layer
 	//
-	// key, color, transform, effectId - all four fields now present.
+	// key, color, transform, effectId, effectParam - all fields present.
 	// ============================================================================================
 	py::class_<slughorn::Layer>(m, "Layer")
 		.def(py::init<>())
@@ -566,6 +566,7 @@ PYBIND11_MODULE(slughorn, m) {
 				slughorn::Transform transform,
 				slug_t scale,
 				uint32_t effectId,
+				slug_t effectParam,
 				uint32_t gradientId,
 				slug_t expand,
 				slughorn::DrawMode drawMode,
@@ -584,6 +585,7 @@ PYBIND11_MODULE(slughorn, m) {
 				layer.transform = transform;
 				layer.scale = scale;
 				layer.effectId = effectId;
+				layer.effectParam = effectParam;
 				layer.gradientId = gradientId;
 				layer.expand = expand;
 				layer.drawMode = drawMode;
@@ -596,6 +598,7 @@ PYBIND11_MODULE(slughorn, m) {
 			"transform"_a=slughorn::Transform{},
 			"scale"_a=1_cv,
 			"effectId"_a=0,
+			"effectParam"_a=0_cv,
 			"gradientId"_a=0,
 			"expand"_a=0.01_cv,
 			"drawMode"_a=slughorn::DrawMode::Visible,
@@ -619,6 +622,10 @@ PYBIND11_MODULE(slughorn, m) {
 			"Fragment-shader fill mode selector. "
 			"0 = standard Slug fill (default). "
 			"See osgSlug-frag.glsl slug_ApplyEffect() for the full table.")
+		.def_readwrite("effectParam", &slughorn::Layer::effectParam,
+			"Per-layer float hint passed to the frontend vertex shader. "
+			"slughorn does not interpret this value; typical uses include rotation speed, "
+			"scale factor, or any other per-layer scalar the vertex hook needs.")
 		.def_readwrite("gradientId", &slughorn::Layer::gradientId,
 			"Gradient fill ID. 0 = flat color (layer.color used). "
 			"Non-zero = 1-based index into the atlas gradient list "

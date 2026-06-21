@@ -506,6 +506,7 @@ json buildJson(
 				{"color", {layer.color.r, layer.color.g, layer.color.b, layer.color.a}},
 				{"transform", {layer.transform.x, layer.transform.y, layer.transform.z}},
 				{"effect_id", layer.effectId},
+				{"effect_param", static_cast<float>(layer.effectParam)},
 				{"gradient_id", layer.gradientId},
 				{"draw_mode", static_cast<uint8_t>(layer.drawMode)},
 				{"blend_mode", static_cast<uint8_t>(layer.blendMode)}
@@ -674,6 +675,7 @@ Atlas atlasFromJson(
 
 			layer.key = keyFromJson(jl.at("key"));
 			layer.effectId = jl.at("effect_id");
+			layer.effectParam = jl.value("effect_param", 0.0f);
 			layer.gradientId = jl.value("gradient_id", 0u);
 			layer.drawMode = static_cast<DrawMode>(jl.value("draw_mode", uint8_t(0)));
 			layer.blendMode = static_cast<BlendMode>(jl.value("blend_mode", uint8_t(0)));

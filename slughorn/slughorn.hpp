@@ -365,6 +365,10 @@ struct Layer {
 	// slughorn itself, but rather passed wholesale to the frontend.
 	uint32_t effectId = 0;
 
+	// Per-layer float hint passed to the frontend vertex shader (e.g. rotation speed, scale factor).
+	// Like effectId, slughorn itself does not interpret this value.
+	slug_t effectParam = 0_cv;
+
 	// Gradient fill; 0 = flat color (layer.color used). Non-zero = 1-based index into the atlas
 	// gradient list (registered via addGradient()). When non-zero, layer.color.rgb is ignored and
 	// layer.color.a acts as a global opacity multiplier.
