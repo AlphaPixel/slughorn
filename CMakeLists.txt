@@ -312,6 +312,11 @@ if(SLUGHORN_BUILD_TESTS)
 	add_executable(slughorn-test-bands "test/slughorn-test-bands.cpp")
 	target_link_libraries(slughorn-test-bands PRIVATE slughorn)
 	target_compile_options(slughorn-test-bands PRIVATE ${SLUGHORN_COMPILE_OPTIONS})
+
+	add_executable(slughorn-test-scanlinesweep "test/slughorn-test-scanlinesweep.cpp")
+	target_link_libraries(slughorn-test-scanlinesweep PRIVATE slughorn)
+	target_compile_options(slughorn-test-scanlinesweep PRIVATE ${SLUGHORN_COMPILE_OPTIONS})
+	add_test(NAME scanlinesweep COMMAND slughorn-test-scanlinesweep)
 endif()
 
 # Let's be honest... I mostly care about the frontends I care about! So, these

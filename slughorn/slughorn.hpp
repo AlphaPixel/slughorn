@@ -621,6 +621,12 @@ public:
 		// branching (Task 0 clean fix: Custom must not subtract originX/Y from transform).
 		ShapeInfo::Origin origin;
 
+		// Scanline Sweeper: start texel and curve count in the scanline curve texture.
+		// scanlineCurveStart is an absolute texel index; each curve occupies 2 texels.
+		// Both are 0 for shapes with no geometry.
+		uint32_t scanlineCurveStart = 0;
+		uint32_t scanlineCurveCount = 0;
+
 		// Layer index in the MSDF Texture2DArray; -1 = no MSDF registered for this shape.
 		// Set by Atlas::registerMSDF() after build().
 		int msdfLayer = -1;
@@ -760,6 +766,10 @@ public:
 		uint32_t msdfTileSize = 0; // width == height of each layer
 		uint32_t msdfTexelsTotal = 0; // tileSize * tileSize * msdfLayerCount
 
+		// Scanline Sweeper curve texture (RGBA32F, same format as curveTexels; no band indirection).
+		// Sequential: 2 texels per monotonic quadratic, no alignment gaps.
+		uint32_t scanlineTexelsTotal = 0;
+
 		// Fraction of allocated texels actually containing live data [0, 1].
 		float curveUtilization() const {
 			return curveTexelsTotal
@@ -808,10 +818,11 @@ public:
 		size_t gradientBytes() const { return size_t(gradientTexelsTotal) * 4; } // RGBA8
 		size_t sdfBytes() const { return size_t(sdfTexelsTotal) * 4; } // RGBA8
 		size_t msdfBytes() const { return size_t(msdfTexelsTotal) * 12; } // RGB32F
+		size_t scanlineBytes() const { return size_t(scanlineTexelsTotal) * 16; } // RGBA32F
 
-		// Total GPU memory across every channel: curve + band + gradient + SDF atlas + MSDF array.
+		// Total GPU memory across every channel.
 		size_t totalBytes() const {
-			return curveBytes() + bandBytes() + gradientBytes() + sdfBytes() + msdfBytes();
+			return curveBytes() + bandBytes() + gradientBytes() + sdfBytes() + msdfBytes() + scanlineBytes();
 		}
 	};
 
@@ -920,6 +931,12 @@ public:
 	// RGB8 texture retrievable via getSDFAtlasData(). No-op if called after build().
 	void setSDFOptions(const SDFOptions& opts) { if(!_built) _sdfOptions = opts; }
 
+	// Opt in to scanline curve texture generation. Must be called before build().
+	// When set, build() decomposes every shape's curves into monotonic segments and packs them
+	// into a flat RGBA32F texture retrievable via getScanlineCurveTextureData().
+	// No-op if called after build().
+	void enableScanlineData() { if(!_built) _scanlineEnabled = true; }
+
 	// Register a geometry shape under @p key.
 	//
 	// Must be called before build(). Calling addShape() with an already-registered key silently
@@ -997,6 +1014,7 @@ public:
 	const TextureData& getCurveTextureData() const { return _curveData; }
 	const TextureData& getBandTextureData() const { return _bandData; }
 	const TextureData& getGradientTextureData() const { return _gradientData; }
+	const TextureData& getScanlineCurveTextureData() const { return _scanlineCurveData; }
 	const SDFAtlas& getSDFAtlasData() const { return _sdfAtlas; }
 
 	// --------------------------------------------------------------------------------------------
@@ -1162,6 +1180,7 @@ private:
 	TextureData _curveData;
 	TextureData _bandData;
 	TextureData _gradientData;
+	TextureData _scanlineCurveData;
 
 	std::vector<GradientInfo> _gradients;
 
@@ -1179,6 +1198,7 @@ private:
 	PackingStats _packingStats; // populated by packTextures()
 
 	bool _built = false;
+	bool _scanlineEnabled = false;
 
 	uint32_t _texWidth;
 };
@@ -1522,6 +1542,94 @@ private:
 };
 
 // ================================================================================================
+// Monotonic Decomposition (Scanline Sweeper preprocessing)
+//
+// toMonotonicCurves() decomposes one quadratic Bezier into at most 4 sub-curves that are each
+// monotonic in both x and y. Required preprocessing for the Scanline Sweeper rendering algorithm.
+// Each call appends sub-curves to `out`; initialize `out` before the first call.
+//
+// Horizontal linear segments (zero y-range in all three control points) are silently dropped:
+// they contribute zero swept area and would cause a divide-by-zero in the vertical fast-path.
+// ================================================================================================
+
+namespace detail {
+
+// De Casteljau split of a quadratic Bezier at parameter t in (0,1).
+inline std::pair<Atlas::Curve, Atlas::Curve> quadSplitAt(const Atlas::Curve& c, slug_t t) {
+	const slug_t m01x = c.x1 + t * (c.x2 - c.x1);
+	const slug_t m01y = c.y1 + t * (c.y2 - c.y1);
+	const slug_t m12x = c.x2 + t * (c.x3 - c.x2);
+	const slug_t m12y = c.y2 + t * (c.y3 - c.y2);
+	const slug_t midx = m01x + t * (m12x - m01x);
+	const slug_t midy = m01y + t * (m12y - m01y);
+
+	return {
+		{c.x1, c.y1, m01x, m01y, midx, midy},
+		{midx, midy, m12x, m12y, c.x3, c.y3}
+	};
+}
+
+// Returns t* in (0,1) where a quadratic has an extremum in the x (useY=false) or y (useY=true)
+// dimension, or -1 if the curve is already monotonic in that dimension.
+inline slug_t quadExtrema(const Atlas::Curve& c, bool useY) {
+	const slug_t c0 = useY ? c.y1 : c.x1;
+	const slug_t c1 = useY ? c.y2 : c.x2;
+	const slug_t c2 = useY ? c.y3 : c.x3;
+	const slug_t denom = c0 - 2_cv * c1 + c2;
+
+	if(std::abs(denom) < 1e-6_cv) return -1.0_cv;
+
+	const slug_t t = (c0 - c1) / denom;
+
+	return (t > 0_cv && t < 1_cv) ? t : -1.0_cv;
+}
+
+} // namespace detail
+
+// Decomposes one quadratic Bezier into monotonic-in-both-axes sub-curves (at most 4).
+// Appends results to `out`. Horizontal linear segments are dropped.
+inline void toMonotonicCurves(const Atlas::Curve& c, Atlas::Curves& out) {
+	constexpr slug_t eps = 1e-6_cv;
+
+	// Horizontal linear segments: all y-coordinates equal; zero swept area.
+	if(std::abs(c.y3 - c.y1) < eps && std::abs(c.y2 - c.y1) < eps) return;
+
+	// Split at y-extremum first to get y-monotonic halves, then check x per half.
+	const slug_t ty = detail::quadExtrema(c, true);
+
+	if(ty < 0.0_cv) {
+		// Already y-monotonic; check x only.
+		const slug_t tx = detail::quadExtrema(c, false);
+
+		if(tx < 0.0_cv) out.push_back(c);
+
+		else {
+			auto [l, r] = detail::quadSplitAt(c, tx);
+
+			out.push_back(l);
+			out.push_back(r);
+		}
+	}
+
+	else {
+		auto [ly, ry] = detail::quadSplitAt(c, ty);
+
+		for(const Atlas::Curve* half : {&ly, &ry}) {
+			const slug_t tx = detail::quadExtrema(*half, false);
+
+			if(tx < 0.0_cv) out.push_back(*half);
+
+			else {
+				auto [lx, rx] = detail::quadSplitAt(*half, tx);
+
+				out.push_back(lx);
+				out.push_back(rx);
+			}
+		}
+	}
+}
+
+// ================================================================================================
 // Debugging Helpers
 // ================================================================================================
 
@@ -1671,6 +1779,7 @@ inline std::ostream& operator<<(std::ostream& os, const Atlas::PackingStats& p) 
 		<< " | msdf: " << p.msdfLayerCount << " layer" << (p.msdfLayerCount != 1 ? "s" : "")
 		<< " (" << p.msdfTileSize << "x" << p.msdfTileSize << " RGB32F, "
 		<< p.msdfTexelsTotal << " texels)"
+		<< " | scanline: " << p.scanlineTexelsTotal << " texels RGBA32F"
 		<< " | total: " << (static_cast<double>(p.totalBytes()) / 1024.0 / 1024.0) << " MiB"
 		<< ")"
 	;

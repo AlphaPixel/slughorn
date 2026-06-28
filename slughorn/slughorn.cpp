@@ -1205,6 +1205,40 @@ void Atlas::packTextures() {
 	_bandData.bytes.assign(size_t{_texWidth} * bandTexHeight * 4 * sizeof(uint16_t), 0);
 
 	// --------------------------------------------------------------------------------------------
+	// Pass 1: pre-compute monotonic curve decomposition for Scanline Sweeper (opt-in)
+	//
+	// Run toMonotonicCurves() on every shape's curves now so we know the exact texel
+	// count before allocation. No alignment waste: scanline curves are packed sequentially
+	// (2 texels per curve) without the row-alignment gaps that band indirection requires.
+	// --------------------------------------------------------------------------------------------
+	std::unordered_map<Key, Curves, KeyHash> scanlineMap;
+	uint32_t scanlineTexHeight = 0;
+
+	if(_scanlineEnabled) {
+		uint32_t totalScanlineTexels = 0;
+
+		for(const auto& kv : _build) {
+			Curves mono;
+
+			for(const auto& c : kv.second.curves) toMonotonicCurves(c, mono);
+
+			totalScanlineTexels += static_cast<uint32_t>(mono.size()) * 2;
+			scanlineMap[kv.first] = std::move(mono);
+		}
+
+		scanlineTexHeight = std::max(
+			1u,
+			(totalScanlineTexels + _texWidth - 1) / _texWidth
+		);
+
+		_scanlineCurveData.width = _texWidth;
+		_scanlineCurveData.height = scanlineTexHeight;
+		_scanlineCurveData.format = TextureData::Format::RGBA32F;
+
+		_scanlineCurveData.bytes.assign(size_t{_texWidth} * scanlineTexHeight * 4 * sizeof(float), 0);
+	}
+
+	// --------------------------------------------------------------------------------------------
 	// Write helpers - write directly into TextureData::bytes
 	// --------------------------------------------------------------------------------------------
 	auto writeCurveTexel = [&](uint32_t idx, slug_t r, slug_t g, slug_t b, slug_t a) {
@@ -1233,6 +1267,19 @@ void Atlas::packTextures() {
 		p[0] = r; p[1] = g; p[2] = b; p[3] = a;
 	};
 
+	auto writeScanlineTexel = [&](uint32_t idx, slug_t r, slug_t g, slug_t b, slug_t a) {
+		const uint32_t x = idx % _texWidth;
+		const uint32_t y = idx / _texWidth;
+
+		if(y >= scanlineTexHeight) return;
+
+		float* p = reinterpret_cast<float*>(
+			_scanlineCurveData.bytes.data() + (size_t{y} * _texWidth + x) * 4 * sizeof(float)
+		);
+
+		p[0] = r; p[1] = g; p[2] = b; p[3] = a;
+	};
+
 	// --------------------------------------------------------------------------------------------
 	// Pass 2: real packing
 	//
@@ -1241,6 +1288,7 @@ void Atlas::packTextures() {
 	_packingStats = PackingStats{};
 	_packingStats.curveTexelsTotal = _texWidth * curveTexHeight;
 	_packingStats.bandTexelsTotal = _texWidth * bandTexHeight;
+	_packingStats.scanlineTexelsTotal = _texWidth * scanlineTexHeight;
 
 	auto alignCurve = [&](uint32_t cursor, uint32_t span) -> uint32_t {
 		const uint32_t aligned = alignCursorForSpan(cursor, _texWidth, span);
@@ -1260,6 +1308,7 @@ void Atlas::packTextures() {
 
 	uint32_t curveTexelOffset = 0;
 	uint32_t bandTexelOffset = 0;
+	uint32_t scanlineTexelOffset = 0;
 
 	for(auto& kv : _build) {
 		const Key& key = kv.first;
@@ -1378,6 +1427,21 @@ void Atlas::packTextures() {
 		_packingStats.bandTexelsUsed += numBandHeaders;
 
 		bandTexelOffset = cursor;
+
+		if(_scanlineEnabled) {
+			// Write monotonic curves for Scanline Sweeper. Sequential, no alignment gaps.
+			const auto& mono = scanlineMap[key];
+
+			sd.scanlineCurveStart = scanlineTexelOffset;
+			sd.scanlineCurveCount = static_cast<uint32_t>(mono.size());
+
+			for(const auto& c : mono) {
+				writeScanlineTexel(scanlineTexelOffset, c.x1, c.y1, c.x2, c.y2);
+				writeScanlineTexel(scanlineTexelOffset + 1, c.x3, c.y3, 0_cv, 0_cv);
+
+				scanlineTexelOffset += 2;
+			}
+		}
 
 		sd.curves = std::move(g.curves);
 
