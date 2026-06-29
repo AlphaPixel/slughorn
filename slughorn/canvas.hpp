@@ -180,10 +180,12 @@ public:
 	Path& clear() {
 		_pendingCurves.clear();
 		_activeCurves.clear();
+
 		_decomposer._x = _decomposer._y = 0_cv;
 		_decomposer._sx = _decomposer._sy = 0_cv;
 		_penX = _penY = 0_cv;
 		_lutDirty = true;
+
 		return *this;
 	}
 
@@ -194,6 +196,7 @@ public:
 		for(const auto& c : other._activeCurves) _pendingCurves.push_back(c);
 
 		_lutDirty = true;
+
 		return *this;
 	}
 
@@ -202,9 +205,11 @@ public:
 	Path& addPath(const Path& other, const slughorn::Matrix& transform) {
 		auto xform = [&](const slughorn::Atlas::Curve& c) {
 			slughorn::Atlas::Curve out;
+
 			transform.apply(c.x1, c.y1, out.x1, out.y1);
 			transform.apply(c.x2, c.y2, out.x2, out.y2);
 			transform.apply(c.x3, c.y3, out.x3, out.y3);
+
 			return out;
 		};
 
@@ -212,6 +217,7 @@ public:
 		for(const auto& c : other._activeCurves) _pendingCurves.push_back(xform(c));
 
 		_lutDirty = true;
+
 		return *this;
 	}
 
@@ -347,6 +353,7 @@ public:
 		lineTo(x + w, y);
 		lineTo(x + w, y + h);
 		lineTo(x, y + h);
+
 		return closePath();
 	}
 
@@ -367,6 +374,7 @@ public:
 		bezierTo(x + r - kr, y + h, x, y + h - r + kr, x, y + h - r);
 		lineTo(x, y + r);
 		bezierTo(x, y + r - kr, x + r - kr, y, x + r, y);
+
 		return closePath();
 	}
 
@@ -382,6 +390,7 @@ public:
 		bezierTo(cx - kx, cy + ry, cx - rx, cy + ky, cx - rx, cy);
 		bezierTo(cx - rx, cy - ky, cx - kx, cy - ry, cx, cy - ry);
 		bezierTo(cx + kx, cy - ry, cx + rx, cy - ky, cx + rx, cy);
+
 		return closePath();
 	}
 
@@ -537,7 +546,8 @@ public:
 			// Pass 2b: per-point miter-corrected normals.
 			const bool isClosed =
 				std::abs(pts.back().first - pts.front().first) < 1e-6_cv &&
-				std::abs(pts.back().second - pts.front().second) < 1e-6_cv;
+				std::abs(pts.back().second - pts.front().second) < 1e-6_cv
+			;
 
 			auto calcMiter = [&](size_t prev, size_t cur) -> PN {
 				slug_t nx = segN[prev].first + segN[cur].first;
@@ -807,8 +817,8 @@ public:
 	CurveDecomposer& decomposer() { return _path.decomposer(); }
 	const CurveDecomposer& decomposer() const { return _path.decomposer(); }
 
-	void     setTolerance(slug_t tol) { _path.decomposer().tolerance = tol; }
-	slug_t   getTolerance() const     { return _path.decomposer().tolerance; }
+	void setTolerance(slug_t tol) { _path.decomposer().tolerance = tol; }
+	slug_t getTolerance() const { return _path.decomposer().tolerance; }
 
 	// -------------------------------------------------------------------------
 	// Path snapshot
@@ -839,6 +849,7 @@ public:
 	Canvas& save() {
 		_path.save();
 		_ctmStack.push_back({_ctm, _autoMetrics, _splitsX, _splitsY});
+
 		return *this;
 	}
 
@@ -901,6 +912,7 @@ public:
 
 	Canvas& bezierTo(slug_t c1x, slug_t c1y, slug_t c2x, slug_t c2y, slug_t x, slug_t y) {
 		_path.bezierTo(c1x, c1y, c2x, c2y, x, y);
+
 		return *this;
 	}
 
@@ -919,11 +931,13 @@ public:
 
 	Canvas& arc(slug_t cx, slug_t cy, slug_t r, slug_t startAngle, slug_t endAngle, bool ccw=false) {
 		_path.arc(cx, cy, r, startAngle, endAngle, ccw);
+
 		return *this;
 	}
 
 	Canvas& arcTo(slug_t x1, slug_t y1, slug_t x2, slug_t y2, slug_t r) {
 		_path.arcTo(x1, y1, x2, y2, r);
+
 		return *this;
 	}
 
@@ -975,6 +989,7 @@ public:
 		_splitsX = std::move(splitsX);
 		_splitsY = std::move(splitsY);
 		_splitStrategy = {};
+
 		return *this;
 	}
 
@@ -1476,6 +1491,7 @@ private:
 		}
 
 		Atlas::Curves local;
+
 		Matrix transform = Matrix::identity();
 
 		if(_autoMetrics) {
@@ -1508,6 +1524,7 @@ private:
 		}
 
 		_applySplits(info);
+
 		_atlas.addShape(key, info);
 
 		Layer layer{ .key = key, .color = color };
