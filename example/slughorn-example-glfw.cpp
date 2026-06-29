@@ -1,10 +1,10 @@
-// XXX: This example was created entirely by AI! osgSlug is the REAL "testbed" (for now)...
-//
 // Minimal single-file GLFW + GLAD demo for the slughorn Atlas pipeline.
 //
-// Builds an Atlas via slughorn::canvas::Canvas (same API as osgslug-shape-canvas),
-// uploads the two Slug textures, assembles a VAO from Layer data, and renders
-// with a stripped-down Slug fragment shader.
+// Loads a TTF/OTF font passed as argv[1], packs the glyphs for the word
+// "slughorn" into an Atlas, uploads the two Slug textures, assembles a VAO
+// from Layer data, and renders with a stripped-down Slug fragment shader.
+//
+// Usage: slughorn-example-glfw <font.ttf>
 //
 // Interaction:
 // - Left drag: orbit camera
@@ -18,12 +18,12 @@
 //
 // Build requirements:
 //
-// - slughorn (slughorn.hpp / slughorn.cpp)
-// - slughorn-canvas.hpp (SLUGHORN_CANVAS=ON or include path)
+// - slughorn (slughorn.hpp / slughorn.cpp) with SLUGHORN_FREETYPE=ON
+// - FreeType 2
 // - GLFW 3.x
 // - GLAD (GL 3.3 core, generated for your platform)
 //
-// See CMakeLists.txt (slughorn-test-glfw) for a minimal build target.
+// See example/CMakeLists.txt for the build target.
 //
 // Shader uniforms (intentionally renamed away from osgSlug names):
 //
@@ -32,7 +32,7 @@
 // u_curveTexture sampler2D  (unit 0) RGBA32F curve data
 // u_bandTexture  usampler2D (unit 1) RGBA16UI band data
 
-#include "slughorn/canvas.hpp"
+#include "slughorn/freetype.hpp"
 
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
@@ -429,10 +429,10 @@ static void multiplyMatrix4(const float a[16], const float b[16], float out[16])
 }
 
 struct ViewState {
-	Vec3 target = {0.5f, 0.5f, 0.0f};
-	float yaw = 0.55f;
-	float pitch = 0.45f;
-	float distance = 2.4f;
+	Vec3 target = {2.0f, 0.3f, 0.0f};
+	float yaw = 0.0f;
+	float pitch = 0.0f;
+	float distance = 5.0f;
 	bool usePerspective = true;
 
 	bool leftDragging = false;
@@ -441,10 +441,10 @@ struct ViewState {
 	double lastCursorY = 0.0;
 
 	void reset() {
-		target = {0.5f, 0.5f, 0.0f};
-		yaw = 0.55f;
-		pitch = 0.45f;
-		distance = 2.4f;
+		target = {2.0f, 0.3f, 0.0f};
+		yaw = 0.0f;
+		pitch = 0.0f;
+		distance = 5.0f;
 		usePerspective = true;
 		leftDragging = false;
 		rightDragging = false;
@@ -659,38 +659,69 @@ static void onScroll(GLFWwindow* win, double /*xoffset*/, double yoffset) {
 // main
 // ============================================================================
 
-int main(int /*argc*/, char** /*argv*/) {
+int main(int argc, char** argv) {
+	if(argc < 2) {
+		std::fprintf(stderr, "Usage: %s <font.ttf>\n", argv[0]);
+		return 1;
+	}
+
 	// ------------------------------------------------------------------------
-	// 1. Build Atlas via slughorn::canvas::Canvas
-	// (same shape as osgslug-shape-canvas — swap in anything else here)
+	// 1. Load font glyphs for "slughorn" into the Atlas
 	// ------------------------------------------------------------------------
 	slughorn::Atlas atlas;
-	uint32_t keyBase = 0xE0000;
 
-	slughorn::canvas::Canvas canvas(atlas, keyBase);
+	const std::string text = "slughorn";
+	std::vector<uint32_t> codepoints;
 
-	canvas.beginPath();
-	canvas.moveTo(0.0_cv, 0.0_cv);
-	canvas.lineTo(1.0_cv, 0.0_cv);
-	// canvas.lineTo(0.5_cv, 1.0_cv);
-	canvas.quadTo(0.25_cv, 0.5_cv, 0.5_cv, 1.0_cv);
-	canvas.closePath();
+	for(unsigned char ch : text)
+		codepoints.push_back(static_cast<uint32_t>(ch));
 
-	auto shapeLayer = canvas.fill({1_cv, 0_cv, 0_cv, 1_cv});
+	slughorn::freetype::LoadConfig config;
+	const size_t loaded = slughorn::freetype::loadFontGlyphs(argv[1], codepoints, atlas, &config);
+
+	if(loaded == 0) {
+		std::fprintf(stderr, "Failed to load any glyphs from: %s\n", argv[1]);
+		return 1;
+	}
 
 	atlas.build();
 
 	// ------------------------------------------------------------------------
-	// 2. Assemble layers (colour can differ from the fill colour above)
+	// 2. Lay out "slughorn" — one Layer per visible glyph, advancing the cursor
+	//    by each glyph's advance width. Layout follows the osgSlug Text convention:
+	//    transform is em-space offset (cursor / fontSize), scale is world em size.
 	// ------------------------------------------------------------------------
 	std::vector<slughorn::Layer> layers;
 
-	slughorn::Layer layer;
-	layer.key = shapeLayer.key;
-	layer.color = {0.2f, 0.8f, 0.4f, 1.0f};
-	layer.scale = 1.0f;
-	layer.transform = {};
-	layers.push_back(layer);
+	const float fontSize = 1.0f;
+	float cursorX = 0.0f;
+
+	for(unsigned char ch : text) {
+		const uint32_t key = static_cast<uint32_t>(ch);
+		const auto shape = atlas.getShape(key);
+
+		if(!shape) {
+			cursorX += 0.5f * fontSize;
+			continue;
+		}
+
+		if(float(shape->width) < 1e-6f || float(shape->height) < 1e-6f) {
+			cursorX += float(shape->advance) * fontSize;
+			continue;
+		}
+
+		slughorn::Layer layer;
+		layer.key = key;
+		layer.color = {1.0f, 1.0f, 1.0f, 1.0f};
+		layer.transform = slughorn::Transform{
+			.x = cv(cursorX / fontSize),
+			.y = 0_cv
+		};
+		layer.scale = cv(fontSize);
+		layers.push_back(layer);
+
+		cursorX += float(shape->advance) * fontSize;
+	}
 
 	// ------------------------------------------------------------------------
 	// 3. Build interleaved mesh
@@ -724,7 +755,7 @@ int main(int /*argc*/, char** /*argv*/) {
 	glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 #endif
 
-	GLFWwindow* window = glfwCreateWindow(800, 600, "slughorn GLFW demo", nullptr, nullptr);
+	GLFWwindow* window = glfwCreateWindow(800, 600, "slughorn", nullptr, nullptr);
 
 	if(!window) {
 		std::fprintf(stderr, "glfwCreateWindow failed\n");
