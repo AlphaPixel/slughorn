@@ -287,7 +287,6 @@ PYBIND11_MODULE(slughorn, m) {
 	py::enum_<slughorn::Key::Type>(key_, "Type")
 		.value("Codepoint", slughorn::Key::Type::Codepoint)
 		.value("Name", slughorn::Key::Type::Name)
-		.export_values()
 	;
 
 	key_
@@ -450,7 +449,7 @@ PYBIND11_MODULE(slughorn, m) {
 	auto gradinfo_ = py::class_<slughorn::GradientInfo>(m, "GradientInfo")
 		.def(py::init<>(), "Default: linear gradient, no stops.")
 		.def_readwrite("type", &slughorn::GradientInfo::type,
-			"GradientInfo.Type.Linear, .Radial, or .Sweep."
+			"GradientInfo.Type.Linear, .Radial, .AffineRadial, or .Sweep."
 		)
 		.def_readwrite("stops", &slughorn::GradientInfo::stops,
 			"List of GradientStop objects defining the color ramp."
@@ -474,7 +473,7 @@ PYBIND11_MODULE(slughorn, m) {
 		.value("Linear", slughorn::GradientInfo::Type::Linear)
 		.value("Radial", slughorn::GradientInfo::Type::Radial)
 		.value("Sweep", slughorn::GradientInfo::Type::Sweep)
-		.export_values()
+		.value("AffineRadial", slughorn::GradientInfo::Type::AffineRadial)
 	;
 
 	// Free function: convert two em-space endpoints to a GradientInfo::transform matrix.
@@ -557,37 +556,61 @@ PYBIND11_MODULE(slughorn, m) {
 	auto mask_ = py::class_<slughorn::Mask>(m, "Mask")
 		.def(py::init<>())
 		.def_readwrite("key", &slughorn::Mask::key,
-			"Key of a shape whose MSDF tile is used as coverage. Required when type == Mask.Type.MSDF.")
-		.def_readwrite("type", &slughorn::Mask::type,
-			"Mask.Type.MSDF = sample baked MSDF tile; Circle/Rect/Capsule/Arc = analytical SDF.")
+			"Key of a shape whose MSDF tile is used as coverage. "
+			"Required when type == Mask.Type.MSDF."
+		)
+		.def_readwrite("type", &slughorn::Mask::type)
 		.def_property(
 			"params",
 			[](const slughorn::Mask& mk) {
 				py::list out;
+
 				for(size_t i = 0; i < 6; ++i) out.append(mk.params[i]);
+
 				return out;
 			},
 			[](slughorn::Mask& mk, py::sequence seq) {
 				const size_t n = std::min<size_t>(py::len(seq), 6);
+
 				for(size_t i = 0; i < n; ++i) mk.params[i] = py::cast<slug_t>(seq[i]);
 			},
 			"Analytical SDF parameters (up to 6 floats). Interpretation depends on type:\n"
-			"  Circle:  cx, cy, r\n"
-			"  Rect:    x, y, w, h\n"
+			"  Circle: cx, cy, r\n"
+			"  Rect: x, y, w, h\n"
 			"  Capsule: ax, ay, bx, by, r\n"
-			"  Arc:     cx, cy, r, angle_start, angle_end"
+			"  Arc: cx, cy, r, angle_start, angle_end\n"
+			"  ArcBand: cx, cy, r, angle_start, angle_end, stroke_half_width"
 		)
 		.def_readwrite("invert", &slughorn::Mask::invert,
 			"If True, inverts coverage so the outside of the mask shape becomes the inside.")
+		.def_static("msdf", &slughorn::Mask::msdf,
+			py::arg("key"), py::arg("invert") = false,
+			"Construct a baked-MSDF mask. key must be registered with atlas.registerMSDF().")
+		.def_static("circle", &slughorn::Mask::circle,
+			py::arg("cx"), py::arg("cy"), py::arg("r"), py::arg("invert") = false,
+			"Analytical circle mask: center (cx, cy), radius r.")
+		.def_static("rect", &slughorn::Mask::rect,
+			py::arg("x"), py::arg("y"), py::arg("w"), py::arg("h"), py::arg("invert") = false,
+			"Analytical axis-aligned box mask: corner (x, y), size (w, h).")
+		.def_static("capsule", &slughorn::Mask::capsule,
+			py::arg("ax"), py::arg("ay"), py::arg("bx"), py::arg("by"), py::arg("r"), py::arg("invert") = false,
+			"Analytical capsule mask: endpoints (ax,ay)→(bx,by), radius r.")
+		.def_static("arc", &slughorn::Mask::arc,
+			py::arg("cx"), py::arg("cy"), py::arg("r"), py::arg("a0"), py::arg("a1"), py::arg("invert") = false,
+			"Analytical pie-sector mask: center (cx,cy), radius r, angle range [a0,a1] radians (0=+X, CCW).")
+		.def_static("arcBand", &slughorn::Mask::arcBand,
+			py::arg("cx"), py::arg("cy"), py::arg("r"), py::arg("a0"), py::arg("a1"), py::arg("rb"), py::arg("invert") = false,
+			"Analytical stroked-arc mask: center (cx,cy), arc radius r, angle range [a0,a1], stroke half-width rb.")
 		.def("__repr__", [](const slughorn::Mask& mk) { return streamRepr(mk); })
 	;
 
 	py::enum_<slughorn::Mask::Type>(mask_, "Type")
-		.value("MSDF",    slughorn::Mask::Type::MSDF)
-		.value("Circle",  slughorn::Mask::Type::Circle)
-		.value("Rect",    slughorn::Mask::Type::Rect)
+		.value("MSDF", slughorn::Mask::Type::MSDF)
+		.value("Circle", slughorn::Mask::Type::Circle)
+		.value("Rect", slughorn::Mask::Type::Rect)
 		.value("Capsule", slughorn::Mask::Type::Capsule)
-		.value("Arc",     slughorn::Mask::Type::Arc)
+		.value("Arc", slughorn::Mask::Type::Arc)
+		.value("ArcBand", slughorn::Mask::Type::ArcBand)
 	;
 
 	// ============================================================================================
@@ -866,7 +889,6 @@ PYBIND11_MODULE(slughorn, m) {
 		.value("Centered", slughorn::Atlas::ShapeInfo::Origin::Type::Centered)
 		.value("Pivot", slughorn::Atlas::ShapeInfo::Origin::Type::Pivot)
 		.value("Custom", slughorn::Atlas::ShapeInfo::Origin::Type::Custom)
-		.export_values()
 	;
 
 	// ============================================================================================
@@ -1254,7 +1276,6 @@ PYBIND11_MODULE(slughorn, m) {
 	)
 		.value("Simple", slughorn::Atlas::MSDFEdgeColoring::Simple)
 		.value("ByDistance", slughorn::Atlas::MSDFEdgeColoring::ByDistance)
-		.export_values()
 	;
 
 	atlas_

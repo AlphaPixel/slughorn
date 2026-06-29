@@ -536,8 +536,7 @@ CompositeShape loadImage(
 			const slug_t minX_em = cv(shape->bounds[0]) * scale;
 			const slug_t minY_em = cv(shape->bounds[1]) * scale;
 
-			GradientInfo info;
-			info.stops = std::move(stops);
+			GradientInfo info{ .stops = std::move(stops) };
 
 			if(shape->fill.type == NSVG_PAINT_LINEAR_GRADIENT) {
 				// In NanoSVG's convention, the gradient t-axis is the second

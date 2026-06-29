@@ -94,9 +94,13 @@ struct Matrix {
 	slug_t dx = 0_cv, dy = 0_cv; // translation
 
 	static Matrix identity() { return {}; }
-	static Matrix translate(slug_t tx, slug_t ty) { Matrix m; m.dx = tx; m.dy = ty; return m; }
-	static Matrix scale(slug_t sx, slug_t sy) { Matrix m; m.xx = sx; m.yy = sy; return m; }
-	static Matrix rotate(slug_t angle) { const slug_t c = std::cos(angle), s = std::sin(angle); Matrix m; m.xx = c; m.xy = -s; m.yx = s; m.yy = c; return m; }
+	static Matrix translate(slug_t tx, slug_t ty) { return { .dx = tx, .dy = ty }; }
+	static Matrix scale(slug_t sx, slug_t sy) { return { .xx = sx, .yy = sy }; }
+	static Matrix rotate(slug_t angle) {
+		const slug_t c = std::cos(angle), s = std::sin(angle);
+
+		return { .xx = c, .yx = s, .xy = -s, .yy = c };
+	}
 
 	bool isIdentity() const {
 		constexpr slug_t eps = 1e-6_cv;
@@ -121,16 +125,14 @@ struct Matrix {
 
 	// Concatenate: returns (this * rhs), i.e. rhs is applied first.
 	Matrix operator*(const Matrix& rhs) const {
-		Matrix m;
-
-		m.xx = xx * rhs.xx + xy * rhs.yx;
-		m.xy = xx * rhs.xy + xy * rhs.yy;
-		m.yx = yx * rhs.xx + yy * rhs.yx;
-		m.yy = yx * rhs.xy + yy * rhs.yy;
-		m.dx = xx * rhs.dx + xy * rhs.dy + dx;
-		m.dy = yx * rhs.dx + yy * rhs.dy + dy;
-
-		return m;
+		return {
+			.xx = xx * rhs.xx + xy * rhs.yx,
+			.yx = yx * rhs.xx + yy * rhs.yx,
+			.xy = xx * rhs.xy + xy * rhs.yy,
+			.yy = yx * rhs.xy + yy * rhs.yy,
+			.dx = xx * rhs.dx + xy * rhs.dy + dx,
+			.dy = yx * rhs.dx + yy * rhs.dy + dy,
+		};
 	}
 };
 
@@ -184,7 +186,7 @@ struct GradientInfo {
 
 	std::vector<GradientStop> stops;
 
-	Matrix transform;
+	Matrix transform = {};
 
 	// Radial: inner radius in local em-space (0 = point center). See buildRadialGradientMatrix.
 	slug_t innerRadius = 0_cv;
@@ -347,8 +349,9 @@ enum class BlendMode: uint8_t {
 // Mask
 //
 // Per-layer mask specification. Exactly one of two sources drives shape coverage:
-//   - type == MSDF           → frontend samples the MSDF tile baked for key
-//   - type != MSDF           → frontend evaluates a closed-form analytical SDF
+//
+// - type == MSDF -> frontend samples the MSDF tile baked for key
+// - type != MSDF -> frontend evaluates a closed-form analytical SDF
 //
 // Like effectId/effectParam, slughorn stores intent and parameters; the frontend interprets them.
 // An optional gradient modulates coverage multiplicatively (future field; placeholder comment).
@@ -356,17 +359,66 @@ enum class BlendMode: uint8_t {
 struct Mask {
 	enum class Type : uint8_t {
 		MSDF = 0, // key must be set; frontend samples the baked MSDF tile
-		Circle,   // params: cx, cy, r
-		Rect,     // params: x, y, w, h
-		Capsule,  // params: ax, ay, bx, by, r
-		Arc,      // params: cx, cy, r, angle_start, angle_end
+		Circle, // params: cx, cy, r
+		Rect, // params: x, y, w, h
+		Capsule, // params: ax, ay, bx, by, r
+		Arc, // params: cx, cy, r, angle_start, angle_end
+		ArcBand, // params: cx, cy, r, angle_start, angle_end, stroke_half_width
 		// Future: Scanline, Slug
 	};
 
-	std::optional<Key> key;
+	std::optional<Key> key = {};
 	Type type = Type::MSDF;
 	slug_t params[6] = {};
 	bool invert = false;
+
+	static Mask msdf(Key k, bool inv=false) {
+		return {
+			.key = std::move(k),
+			.type = Type::MSDF,
+			.invert = inv,
+		};
+	}
+
+	static Mask circle(slug_t cx, slug_t cy, slug_t r, bool inv=false) {
+		return {
+			.type = Type::Circle,
+			.params = { cx, cy, r },
+			.invert = inv,
+		};
+	}
+
+	static Mask rect(slug_t x, slug_t y, slug_t w, slug_t h, bool inv=false) {
+		return {
+			.type = Type::Rect,
+			.params = { x, y, w, h },
+			.invert = inv,
+		};
+	}
+
+	static Mask capsule(slug_t ax, slug_t ay, slug_t bx, slug_t by, slug_t r, bool inv=false) {
+		return {
+			.type = Type::Capsule,
+			.params = { ax, ay, bx, by, r },
+			.invert = inv,
+		};
+	}
+
+	static Mask arc(slug_t cx, slug_t cy, slug_t r, slug_t a0, slug_t a1, bool inv=false) {
+		return {
+			.type = Type::Arc,
+			.params = { cx, cy, r, a0, a1 },
+			.invert = inv,
+		};
+	}
+
+	static Mask arcBand(slug_t cx, slug_t cy, slug_t r, slug_t a0, slug_t a1, slug_t rb, bool inv=false) {
+		return {
+			.type = Type::ArcBand,
+			.params = { cx, cy, r, a0, a1, rb },
+			.invert = inv,
+		};
+	}
 };
 
 // ================================================================================================
@@ -852,7 +904,10 @@ public:
 
 		// Total GPU memory across every channel.
 		size_t totalBytes() const {
-			return curveBytes() + bandBytes() + gradientBytes() + sdfBytes() + msdfBytes() + scanlineBytes();
+			return
+				curveBytes() + bandBytes() + gradientBytes() +
+				sdfBytes() + msdfBytes() + scanlineBytes()
+			;
 		}
 	};
 
@@ -1254,13 +1309,12 @@ inline Matrix buildLinearGradientMatrix(slug_t x0, slug_t y0, slug_t x1, slug_t 
 
 	const slug_t invLenSq = 1_cv / lenSq;
 
-	Matrix m;
-	m.xx = dx * invLenSq;
-	m.xy = dy * invLenSq;
-	m.dx = -(x0 * dx + y0 * dy) * invLenSq;
 	// yx, yy, dy are unused for linear gradient t computation
-
-	return m;
+	return {
+		.xx = dx * invLenSq,
+		.xy = dy * invLenSq,
+		.dx = -(x0 * dx + y0 * dy) * invLenSq,
+	};
 }
 
 // ================================================================================================
@@ -1279,11 +1333,7 @@ inline Matrix buildLinearGradientMatrix(slug_t x0, slug_t y0, slug_t x1, slug_t 
 //                   = (length(emCoord - center) - r0) / (r1 - r0), clamped to [0, 1].
 // ================================================================================================
 inline Matrix buildRadialGradientMatrix(slug_t cx, slug_t cy, slug_t r1) {
-	Matrix m;
-	m.dx = cx;
-	m.dy = cy;
-	m.xx = r1;
-	return m;
+	return { .xx = r1, .dx = cx, .dy = cy };
 }
 
 // ================================================================================================
@@ -1305,13 +1355,14 @@ inline Matrix buildAffineRadialGradientMatrix(
 	slug_t b00, slug_t b01,
 	slug_t b10, slug_t b11
 ) {
-	Matrix m;
-
-	m.dx = cx; m.dy = cy;
-	m.xx = b00; m.xy = b01;
-	m.yx = b10; m.yy = b11;
-
-	return m;
+	return {
+		.xx = b00,
+		.yx = b10,
+		.xy = b01,
+		.yy = b11,
+		.dx = cx,
+		.dy = cy,
+	};
 }
 
 // ================================================================================================
@@ -1333,12 +1384,7 @@ inline Matrix buildAffineRadialGradientMatrix(
 // values in [-a, a], which exactly covers the sweep, so t goes cleanly from 0 to 1.
 // ================================================================================================
 inline Matrix buildSweepGradientMatrix(slug_t cx, slug_t cy, slug_t startAngle, slug_t arcSpan) {
-	Matrix m;
-	m.dx = cx;
-	m.dy = cy;
-	m.xx = startAngle;
-	m.xy = arcSpan;
-	return m;
+	return { .xx = startAngle, .xy = arcSpan, .dx = cx, .dy = cy };
 }
 
 // ================================================================================================

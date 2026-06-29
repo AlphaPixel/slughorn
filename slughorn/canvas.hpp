@@ -239,34 +239,19 @@ public:
 	Path& transform(const Matrix& m) { _ctm = _ctm * m; return *this; }
 
 	Path& translate(slug_t tx, slug_t ty) {
-		Matrix m;
-
-		m.dx = tx; m.dy = ty;
-
-		_ctm = _ctm * m;
+		_ctm = _ctm * Matrix::translate(tx, ty);
 
 		return *this;
 	}
 
 	Path& rotate(slug_t angle) {
-		const slug_t c = std::cos(angle), s = std::sin(angle);
-
-		Matrix m;
-
-		m.xx = c; m.xy = -s;
-		m.yx = s; m.yy = c;
-
-		_ctm = _ctm * m;
+		_ctm = _ctm * Matrix::rotate(angle);
 
 		return *this;
 	}
 
 	Path& scale(slug_t sx, slug_t sy) {
-		Matrix m;
-
-		m.xx = sx; m.yy = sy;
-
-		_ctm = _ctm * m;
+		_ctm = _ctm * Matrix::scale(sx, sy);
 
 		return *this;
 	}
@@ -882,11 +867,7 @@ public:
 	Canvas& translate(slug_t tx, slug_t ty) {
 		_path.translate(tx, ty);
 
-		Matrix m;
-
-		m.dx = tx; m.dy = ty;
-
-		_ctm = _ctm * m;
+		_ctm = _ctm * Matrix::translate(tx, ty);
 
 		return *this;
 	}
@@ -894,14 +875,7 @@ public:
 	Canvas& rotate(slug_t angle) {
 		_path.rotate(angle);
 
-		const slug_t c = std::cos(angle), s = std::sin(angle);
-
-		Matrix m;
-
-		m.xx = c; m.xy = -s;
-		m.yx = s; m.yy = c;
-
-		_ctm = _ctm * m;
+		_ctm = _ctm * Matrix::rotate(angle);
 
 		return *this;
 	}
@@ -909,11 +883,7 @@ public:
 	Canvas& scale(slug_t sx, slug_t sy) {
 		_path.scale(sx, sy);
 
-		Matrix m;
-
-		m.xx = sx; m.yy = sy;
-
-		_ctm = _ctm * m;
+		_ctm = _ctm * Matrix::scale(sx, sy);
 
 		return *this;
 	}
@@ -1636,10 +1606,10 @@ private:
 
 		if(local.empty()) return Layer{};
 
-		GradientInfo ginfo;
-
-		ginfo.type = handle.type;
-		ginfo.stops = handle.stops;
+		GradientInfo ginfo{
+			.type = handle.type,
+			.stops = handle.stops,
+		};
 
 		if(handle.type == GradientInfo::Type::Radial) {
 			const slug_t cx = handle.x0 * scale - minX;

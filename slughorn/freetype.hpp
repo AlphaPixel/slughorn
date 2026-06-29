@@ -743,14 +743,14 @@ static PaintResult traversePaint(
 				);
 			}
 
-			slughorn::Matrix m;
-
-			m.xx = cv(a.xx) / 65536_cv;
-			m.yx = cv(a.yx) / 65536_cv;
-			m.xy = cv(a.xy) / 65536_cv;
-			m.yy = cv(a.yy) / 65536_cv;
-			m.dx = cv(a.dx) / 65536_cv * emScale;
-			m.dy = cv(a.dy) / 65536_cv * emScale;
+			const slughorn::Matrix m{
+				.xx = cv(a.xx) / 65536_cv,
+				.yx = cv(a.yx) / 65536_cv,
+				.xy = cv(a.xy) / 65536_cv,
+				.yy = cv(a.yy) / 65536_cv,
+				.dx = cv(a.dx) / 65536_cv * emScale,
+				.dy = cv(a.dy) / 65536_cv * emScale,
+			};
 
 			// combined = m * parentMatrix (parentMatrix applied first)
 			const slughorn::Matrix combined = m * parentMatrix;
@@ -767,14 +767,10 @@ static PaintResult traversePaint(
 		// dx/dy are in font units - scale by emScale.
 		// -----------------------------------------------------------------
 		case FT_COLR_PAINTFORMAT_TRANSLATE: {
-			slughorn::Matrix m;
-
-			m.dx = cv(paint.u.translate.dx) / 65536_cv * emScale;
-			m.dy = cv(paint.u.translate.dy) / 65536_cv * emScale;
-			// xx, yy default to 1; yx, xy default to 0 - identity rotation
-
-			// const slughorn::Matrix combined = m * parentMatrix;
-			const auto combined = m * parentMatrix;
+			const auto combined = slughorn::Matrix::translate(
+				cv(paint.u.translate.dx) / 65536_cv * emScale,
+				cv(paint.u.translate.dy) / 65536_cv * emScale
+			) * parentMatrix;
 
 			return traversePaint(
 				face, &paint.u.translate.paint, palette,
@@ -793,12 +789,12 @@ static PaintResult traversePaint(
 			const slug_t cx = cv(s.center_x) / 65536_cv * emScale;
 			const slug_t cy = cv(s.center_y) / 65536_cv * emScale;
 
-			slughorn::Matrix m;
-
-			m.xx = sx;
-			m.yy = sy;
-			m.dx = cx * (1_cv - sx);
-			m.dy = cy * (1_cv - sy);
+			const slughorn::Matrix m{
+				.xx = sx,
+				.yy = sy,
+				.dx = cx * (1_cv - sx),
+				.dy = cy * (1_cv - sy),
+			};
 
 			return traversePaint(
 				face, &s.paint, palette,
@@ -819,14 +815,14 @@ static PaintResult traversePaint(
 			const slug_t cx = cv(r.center_x) / 65536_cv * emScale;
 			const slug_t cy = cv(r.center_y) / 65536_cv * emScale;
 
-			slughorn::Matrix m;
-
-			m.xx = c;
-			m.xy = -s;
-			m.yx = s;
-			m.yy = c;
-			m.dx = cx * (1_cv - c) + s * cy;
-			m.dy = cy * (1_cv - c) - s * cx;
+			const slughorn::Matrix m{
+				.xx = c,
+				.yx = s,
+				.xy = -s,
+				.yy = c,
+				.dx = cx * (1_cv - c) + s * cy,
+				.dy = cy * (1_cv - c) - s * cx,
+			};
 
 			return traversePaint(
 				face, &r.paint, palette,
@@ -846,14 +842,14 @@ static PaintResult traversePaint(
 			const slug_t cx = cv(sk.center_x) / 65536_cv * emScale;
 			const slug_t cy = cv(sk.center_y) / 65536_cv * emScale;
 
-			slughorn::Matrix m;
-
-			m.xx = 1_cv;
-			m.xy = tax;
-			m.yx = tay;
-			m.yy = 1_cv;
-			m.dx = -tax * cy;
-			m.dy = -tay * cx;
+			const slughorn::Matrix m{
+				.xx = 1_cv,
+				.yx = tay,
+				.xy = tax,
+				.yy = 1_cv,
+				.dx = -tax * cy,
+				.dy = -tay * cx,
+			};
 
 			return traversePaint(
 				face, &sk.paint, palette,
@@ -899,11 +895,11 @@ static PaintResult traversePaint(
 			parentMatrix.apply(x0, y0, x0, y0);
 			parentMatrix.apply(x1, y1, x1, y1);
 
-			GradientInfo info;
-
-			info.type = GradientInfo::Type::Linear;
-			info.stops = std::move(stops);
-			info.transform = buildLinearGradientMatrix(x0, y0, x1, y1);
+			const GradientInfo info{
+				.type = GradientInfo::Type::Linear,
+				.stops = std::move(stops),
+				.transform = buildLinearGradientMatrix(x0, y0, x1, y1),
+			};
 
 			return {white, atlas.addGradient(info)};
 		}
@@ -926,12 +922,12 @@ static PaintResult traversePaint(
 
 			parentMatrix.apply(cx, cy, cx, cy);
 
-			GradientInfo info;
-
-			info.type = GradientInfo::Type::Radial;
-			info.stops = std::move(stops);
-			info.transform = buildRadialGradientMatrix(cx, cy, r1);
-			info.innerRadius = r0;
+			const GradientInfo info{
+				.type = GradientInfo::Type::Radial,
+				.stops = std::move(stops),
+				.transform = buildRadialGradientMatrix(cx, cy, r1),
+				.innerRadius = r0,
+			};
 
 			return {white, atlas.addGradient(info)};
 		}
@@ -956,11 +952,11 @@ static PaintResult traversePaint(
 			const slug_t startAngle = cv(sg.start_angle) / 65536_cv * tau;
 			const slug_t arcSpan = cv(sg.end_angle) / 65536_cv * tau - startAngle;
 
-			GradientInfo info;
-
-			info.type = GradientInfo::Type::Sweep;
-			info.stops = std::move(stops);
-			info.transform = buildSweepGradientMatrix(cx, cy, startAngle, arcSpan);
+			const GradientInfo info{
+				.type = GradientInfo::Type::Sweep,
+				.stops = std::move(stops),
+				.transform = buildSweepGradientMatrix(cx, cy, startAngle, arcSpan),
+			};
 
 			return {white, atlas.addGradient(info)};
 		}
