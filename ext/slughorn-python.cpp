@@ -552,6 +552,45 @@ PYBIND11_MODULE(slughorn, m) {
 	;
 
 	// ============================================================================================
+	// slughorn.Mask
+	// ============================================================================================
+	auto mask_ = py::class_<slughorn::Mask>(m, "Mask")
+		.def(py::init<>())
+		.def_readwrite("key", &slughorn::Mask::key,
+			"Key of a shape whose MSDF tile is used as coverage. Required when type == Mask.Type.MSDF.")
+		.def_readwrite("type", &slughorn::Mask::type,
+			"Mask.Type.MSDF = sample baked MSDF tile; Circle/Rect/Capsule/Arc = analytical SDF.")
+		.def_property(
+			"params",
+			[](const slughorn::Mask& mk) {
+				py::list out;
+				for(size_t i = 0; i < 6; ++i) out.append(mk.params[i]);
+				return out;
+			},
+			[](slughorn::Mask& mk, py::sequence seq) {
+				const size_t n = std::min<size_t>(py::len(seq), 6);
+				for(size_t i = 0; i < n; ++i) mk.params[i] = py::cast<slug_t>(seq[i]);
+			},
+			"Analytical SDF parameters (up to 6 floats). Interpretation depends on type:\n"
+			"  Circle:  cx, cy, r\n"
+			"  Rect:    x, y, w, h\n"
+			"  Capsule: ax, ay, bx, by, r\n"
+			"  Arc:     cx, cy, r, angle_start, angle_end"
+		)
+		.def_readwrite("invert", &slughorn::Mask::invert,
+			"If True, inverts coverage so the outside of the mask shape becomes the inside.")
+		.def("__repr__", [](const slughorn::Mask& mk) { return streamRepr(mk); })
+	;
+
+	py::enum_<slughorn::Mask::Type>(mask_, "Type")
+		.value("MSDF",    slughorn::Mask::Type::MSDF)
+		.value("Circle",  slughorn::Mask::Type::Circle)
+		.value("Rect",    slughorn::Mask::Type::Rect)
+		.value("Capsule", slughorn::Mask::Type::Capsule)
+		.value("Arc",     slughorn::Mask::Type::Arc)
+	;
+
+	// ============================================================================================
 	// slughorn.Layer
 	//
 	// key, color, transform, effectId, effectParam - all fields present.
@@ -659,6 +698,10 @@ PYBIND11_MODULE(slughorn, m) {
 		)
 		.def_readwrite("advance", &slughorn::CompositeShape::advance,
 			"Horizontal advance in em-space (used for text cursor / layout)."
+		)
+		.def_readwrite("mask", &slughorn::CompositeShape::mask,
+			"Optional Mask applied to the composited output of all layers. "
+			"Layers composite first; the mask gates the result as a whole."
 		)
 		.def("__len__", [](const slughorn::CompositeShape& g) { return g.layers.size(); })
 		.def("__repr__", [](const slughorn::CompositeShape& g) { return streamRepr(g); })

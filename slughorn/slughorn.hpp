@@ -344,6 +344,32 @@ enum class BlendMode: uint8_t {
 };
 
 // ================================================================================================
+// Mask
+//
+// Per-layer mask specification. Exactly one of two sources drives shape coverage:
+//   - type == MSDF           → frontend samples the MSDF tile baked for key
+//   - type != MSDF           → frontend evaluates a closed-form analytical SDF
+//
+// Like effectId/effectParam, slughorn stores intent and parameters; the frontend interprets them.
+// An optional gradient modulates coverage multiplicatively (future field; placeholder comment).
+// ================================================================================================
+struct Mask {
+	enum class Type : uint8_t {
+		MSDF = 0, // key must be set; frontend samples the baked MSDF tile
+		Circle,   // params: cx, cy, r
+		Rect,     // params: x, y, w, h
+		Capsule,  // params: ax, ay, bx, by, r
+		Arc,      // params: cx, cy, r, angle_start, angle_end
+		// Future: Scanline, Slug
+	};
+
+	std::optional<Key> key;
+	Type type = Type::MSDF;
+	slug_t params[6] = {};
+	bool invert = false;
+};
+
+// ================================================================================================
 // Layer
 //
 // Represents the "state" of a single `Shape` instance, and includes all of the information the
@@ -399,6 +425,10 @@ struct CompositeShape {
 	// Usage is obvious in text situations; in "pure shape" modes, can be used to help arrange
 	// groups of `Shape` instances horizontally.
 	slug_t advance = 0_cv;
+
+	// Optional mask applied to the composited output of all layers. Mirrors how SVG <mask> and
+	// CSS mask work: layers composite first, then the mask gates the result as a whole.
+	std::optional<Mask> mask;
 
 	// --------------------------------------------------------------------------------------------
 	// Layer access
@@ -1690,6 +1720,16 @@ inline std::ostream& operator<<(std::ostream& os, const GradientInfo& g) {
 
 inline std::ostream& operator<<(std::ostream& os, const KeyIterator& k) {
 	return os << "KeyIterator(prefix=\"" << k.prefix << "\" counter=" << k.counter << ")";
+}
+
+inline std::ostream& operator<<(std::ostream& os, const Mask& mk) {
+	os << "Mask(type=" << static_cast<int>(mk.type);
+	if(mk.key) os << " key=" << *mk.key;
+	os << " params=[";
+	for(size_t i = 0; i < 6; ++i) { if(i) os << ","; os << mk.params[i]; }
+	os << "]";
+	if(mk.invert) os << " invert";
+	return os << ")";
 }
 
 inline std::ostream& operator<<(std::ostream& os, const Layer& l) {

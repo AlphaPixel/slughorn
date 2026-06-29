@@ -1,5 +1,9 @@
 #pragma once
 
+#ifndef SLUGHORN_HAS_BLEND2D
+#  error "Blend2D support not enabled. Rebuild slughorn with -DSLUGHORN_BLEND2D=ON"
+#endif
+
 // ================================================================================================
 // Decomposes Blend2D path data into slughorn Atlas shapes. No OSG, VSG, or other graphics
 // library dependency.
