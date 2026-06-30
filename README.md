@@ -399,7 +399,6 @@ remove sections of a normal glyph fills!
 </td>
 </tr>
 
-
 <tr>
 <td align="center">
 
@@ -413,6 +412,23 @@ remove sections of a normal glyph fills!
 Individual glyphs can be easily positioned along existing `Path` instances. The
 `slughorn::canvas::Path` object can `sample` at **any position** within a
 supported `Shape` instance.
+
+</td>
+</tr>
+
+<tr>
+<td align="center">
+
+[![Compute Shaders](https://slughorn.io/github/compute.webp)](https://slughorn.io/github/compute.mp4)
+
+</td>
+<td>
+
+**Compute Shaders**
+
+Not only can compute shaders animate/manipulate `slughorn` state, they can also
+act as a `fill()` source for other content. This demonstrates two stacked,
+blended shapes each using different compute shader output.
 
 </td>
 </tr>
