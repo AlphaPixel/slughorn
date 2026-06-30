@@ -384,6 +384,25 @@ character `F` with a simple triangle, which fits seamlessly into the layout proc
 <tr>
 <td align="center">
 
+[![Text Effects](https://slughorn.io/github/text-effects.png)
+
+</td>
+<td>
+
+**Text Effects**
+
+Emphasizing that glyphs truly **are** "just another `Shape`", this example
+demonstrates using "inside" *and* "outside" coverage effects (using MSDF sidecar
+data), stroking instead of filling, as well a using procedural GLSL to actively
+remove sections of a normal glyph fills!
+
+</td>
+</tr>
+
+
+<tr>
+<td align="center">
+
 ![Text Along Path](https://slughorn.io/github/textpath.png)
 
 </td>

@@ -83,7 +83,7 @@ void main() {
 }
 )";
 
-// Fragment shader: Slug core only. No debug modes, no effect branches — just
+// Fragment shader: Slug core only. No debug modes, no effect branches -- just
 // the coverage solve and a single standard fill. Add effects / debug modes
 // from osgSlug's fragment shader when needed.
 static const char* k_FragSrc = R"(
@@ -179,7 +179,7 @@ float slug_Render(vec2 renderCoord, vec4 bandTransform, ivec2 glyphLoc, ivec2 ba
 	int bandY = int(texelFetch(u_bandTexture, ivec2(glyphLoc.x + qY, glyphLoc.y), 0).r);
 	int bandX = int(texelFetch(u_bandTexture, ivec2(glyphLoc.x + SLUG_INDIRECTION_SIZE + qX, glyphLoc.y), 0).r);
 
-	// Horizontal bands — headers at glyphLoc + 2*IS + bandY
+	// Horizontal bands -- headers at glyphLoc + 2*IS + bandY
 	float xcov = 0.0, xwgt = 0.0;
 	uvec2 hbandData = texelFetch(u_bandTexture, ivec2(glyphLoc.x + 2 * SLUG_INDIRECTION_SIZE + bandY, glyphLoc.y), 0).xy;
 	ivec2 hbandLoc = slug_CalcBandLoc(glyphLoc, hbandData.y);
@@ -199,7 +199,7 @@ float slug_Render(vec2 renderCoord, vec4 bandTransform, ivec2 glyphLoc, ivec2 ba
 		}
 	}
 
-	// Vertical bands — headers at glyphLoc + 2*IS + numHBands + bandX
+	// Vertical bands -- headers at glyphLoc + 2*IS + numHBands + bandX
 	float ycov = 0.0, ywgt = 0.0;
 	uvec2 vbandData = texelFetch(u_bandTexture, ivec2(glyphLoc.x + 2 * SLUG_INDIRECTION_SIZE + bandMax.y + 1 + bandX, glyphLoc.y), 0).xy;
 	ivec2 vbandLoc = slug_CalcBandLoc(glyphLoc, vbandData.y);
@@ -287,7 +287,7 @@ static GLuint uploadSlugTexture(const slughorn::Atlas::TextureData& td) {
 	glGenTextures(1, &tex);
 	glBindTexture(GL_TEXTURE_2D, tex);
 
-	// Slug textures are fetched with texelFetch — no filtering needed.
+	// Slug textures are fetched with texelFetch -- no filtering needed.
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -302,7 +302,7 @@ static GLuint uploadSlugTexture(const slughorn::Atlas::TextureData& td) {
 			td.bytes.data()
 		);
 	} else {
-		// RGBA16UI — band texture
+		// RGBA16UI -- band texture
 		glTexImage2D(
 			GL_TEXTURE_2D, 0,
 			GL_RGBA16UI,
@@ -687,7 +687,7 @@ int main(int argc, char** argv) {
 	atlas.build();
 
 	// ------------------------------------------------------------------------
-	// 2. Lay out "slughorn" — one Layer per visible glyph, advancing the cursor
+	// 2. Lay out "slughorn" -- one Layer per visible glyph, advancing the cursor
 	//    by each glyph's advance width. Layout follows the osgSlug Text convention:
 	//    transform is em-space offset (cursor / fontSize), scale is world em size.
 	// ------------------------------------------------------------------------
@@ -732,7 +732,7 @@ int main(int argc, char** argv) {
 	buildMesh(atlas, layers, verts, indices);
 
 	if(verts.empty()) {
-		std::fprintf(stderr, "No geometry produced — check Atlas build.\n");
+		std::fprintf(stderr, "No geometry produced -- check Atlas build.\n");
 		return 1;
 	}
 
