@@ -384,7 +384,7 @@ character `F` with a simple triangle, which fits seamlessly into the layout proc
 <tr>
 <td align="center">
 
-[![Text Effects](https://slughorn.io/github/text-effects.png)
+![Text Effects](https://slughorn.io/github/text-effects.png)
 
 </td>
 <td>
