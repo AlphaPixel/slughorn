@@ -528,19 +528,17 @@ Slug is solving a different problem that Skia deliberately doesn't address.
 
 # AI Disclosure Declaration
 
-AI tools such as ChatGPT and Claude have been used for research and some code
+AI tools such as Codex and Claude have been used for research and some code
 development. However, this is not a "fire and forget" AI project. It was
-carefully designed, planned, architected and implemented by Jeremy 'Cubicool'
-Moles (cubicool@gmail.com). AI tools were also used for producing documentation
-and ancillary data products to accelerate development.
+carefully designed, planned, architected and implemented by a live human
+(cubicool@gmail.com). AI tools were also used for producing documentation and
+ancillary data products to accelerate development.
 
 # Sponsorship
 
-This project was created and implemented by Jeremy 'Cubicool' Moles, author of
-the osgCairo and osgPango, as well as numerous SDF-rendering and other
-glyph-centric projects. Jeremy produced this work for AlphaPixel
+This project grew out of internal research and experimentation at AlphaPixel
 ([AlphaPixelDev.com](https://alphapixeldev.com/)) based on the 2026 release
-of the Slug algorithm ( https://terathon.com/blog/decade-slug.html) patent
+of the Slug algorithm (https://terathon.com/blog/decade-slug.html) patent
 by its author, Eric Lengyel, for whom the whole Slug-using community is
 extremely grateful.
 
