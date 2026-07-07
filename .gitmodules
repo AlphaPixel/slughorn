@@ -10,3 +10,6 @@
 [submodule "ext/msdfgen"]
 	path = ext/msdfgen
 	url = https://github.com/Chlumsky/msdfgen.git
+[submodule "ext/earcut"]
+	path = ext/earcut
+	url = https://github.com/mapbox/earcut.hpp

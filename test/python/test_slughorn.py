@@ -619,12 +619,19 @@ def test_get_shape_contours_nonempty(built_atlas):
 	contours = built_atlas.get_shape_contours(slughorn.Key("rect"))
 	assert len(contours) > 0
 
-def test_get_shape_contours_each_is_list(built_atlas):
-	for contour in built_atlas.get_shape_contours(slughorn.Key("rect")):
-		assert isinstance(contour, list)
+def test_get_shape_contours_is_shapecontours(built_atlas):
+	contours = built_atlas.get_shape_contours(slughorn.Key("rect"))
+	assert isinstance(contours, slughorn.ShapeContours)
+
+def test_get_shape_contours_offsets_span_curves(built_atlas):
+	contours = built_atlas.get_shape_contours(slughorn.Key("rect"))
+	assert contours.offsets[0] == 0
+	assert contours.offsets[-1] == contours.curves.shape[0]
+	assert contours.curves.shape[1] == 6
 
 def test_get_shape_contours_unknown(built_atlas):
-	assert built_atlas.get_shape_contours(slughorn.Key("no_such")) == []
+	contours = built_atlas.get_shape_contours(slughorn.Key("no_such"))
+	assert len(contours) == 0
 
 
 # ---------------------------------------------------------------------------

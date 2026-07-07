@@ -1,6 +1,7 @@
 doc/logo.pdf
 doc/UserGuide.pdf
 doc/WhatsNext.pdf
+test/python/__pycache__
 test/benchmark/slughorn-benchmark-cairo
 test/benchmark/slughorn-benchmark-skia
 

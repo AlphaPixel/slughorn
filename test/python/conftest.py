@@ -78,3 +78,9 @@ def requires_freetype():
 		not hasattr(slughorn, "freetype"),
 		reason="slughorn.freetype not compiled in (SLUGHORN_HAS_FREETYPE)",
 	)
+
+def requires_tessellate():
+	return pytest.mark.skipif(
+		not hasattr(slughorn, "tessellate"),
+		reason="slughorn.tessellate not compiled in (SLUGHORN_TESSELLATE)",
+	)

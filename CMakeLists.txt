@@ -45,6 +45,7 @@ option(SLUGHORN_SERIAL "Include serialization support (requires nlohmann)" OFF)
 option(SLUGHORN_NANOSVG "Include NanoSVG support (requires nanosvg)" OFF)
 option(SLUGHORN_FREETYPE "Include FreeType support (requires freetype2)" OFF)
 option(SLUGHORN_MSDF "Include MSDF support (requires msdfgen)" OFF)
+option(SLUGHORN_TESSELLATE "Include polygon triangulation/extrusion support (requires earcut.hpp)" OFF)
 option(SLUGHORN_BLEND2D "Include Blend2D backend (requires blend2d)" OFF)
 option(SLUGHORN_RENDER_PARALLEL "Enable std::execution parallel pixel rendering (requires TBB on Linux)" OFF)
 # option(SLUGHORN_GLFW "Include GLFW support (requires glfw3)" OFF)
@@ -143,6 +144,21 @@ if(SLUGHORN_MSDF)
 			$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/ext/msdfgen>
 	)
 	target_link_libraries(slughorn PUBLIC msdfgen-core)
+endif()
+
+if(SLUGHORN_TESSELLATE)
+	if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/ext/earcut")
+		message(FATAL_ERROR
+			"ext/earcut not found. Run:\n"
+			"  git submodule update --init --recursive"
+		)
+	endif()
+
+	target_compile_definitions(slughorn PUBLIC SLUGHORN_HAS_TESSELLATE)
+	target_include_directories(slughorn
+		SYSTEM PUBLIC
+			$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/ext/earcut/include>
+	)
 endif()
 
 if(SLUGHORN_BLEND2D)
@@ -249,6 +265,16 @@ if(SLUGHORN_BUILD_TESTS)
 		message(STATUS "slughorn tests: NanoSVG enabled, building slughorn-test-nanosvg")
 	else()
 		message(STATUS "slughorn tests: SLUGHORN_NANOSVG=OFF, skipping slughorn-test-nanosvg")
+	endif()
+
+	# Tessellate (optional - requires SLUGHORN_TESSELLATE=ON)
+	if(SLUGHORN_TESSELLATE)
+		add_executable(slughorn-test-tessellate "test/slughorn-test-tessellate.cpp")
+		target_link_libraries(slughorn-test-tessellate PRIVATE slughorn)
+		add_test(NAME tessellate COMMAND slughorn-test-tessellate)
+		message(STATUS "slughorn tests: Tessellate enabled, building slughorn-test-tessellate")
+	else()
+		message(STATUS "slughorn tests: SLUGHORN_TESSELLATE=OFF, skipping slughorn-test-tessellate")
 	endif()
 
 	if(SLUGHORN_SERIAL)

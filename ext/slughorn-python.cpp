@@ -14,11 +14,13 @@
 // slughorn.ShapeInfo (flat)
 // slughorn.Shape (flat, readonly)
 // slughorn.TextureData (flat, zero-copy memoryview)
+// slughorn.ShapeContours (CSR view - flat curves buffer + offsets buffer, zero-copy memoryviews)
 // slughorn.Atlas (add_shape, add_composite_shape, build, get_shape, get_composite_shape,
 // get_shape_contours, has_key, is_built property, curve_texture, band_texture)
 // slughorn.CurveDecomposer (owns its Curves internally - safe for Python GC)
 //
 // slughorn.emoji (submodule)
+// slughorn.tessellate (submodule; Mesh2D, Mesh3D, tessellate, extrude)
 //
 // SCOPING NOTE
 // ------------
@@ -63,6 +65,10 @@
 #include "slughorn/nanosvg.hpp"
 #endif
 
+#ifdef SLUGHORN_HAS_TESSELLATE
+#include "slughorn/tessellate.hpp"
+#endif
+
 #include <pybind11/pybind11.h>
 // #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
@@ -100,16 +106,28 @@ py::memoryview bytesView(const std::vector<uint8_t>& v) {
 	);
 }
 
+// pybind11's memoryview::from_buffer stores the raw `format` pointer directly in the Py_buffer
+// struct (view.format = format) and PyMemoryView_FromBuffer does not copy the string it points
+// to - it must stay valid for the memoryview object's entire lifetime, not just this call. A
+// stack-local std::string (even via format_descriptor<T>::format()) is destroyed on return,
+// leaving a dangling pointer that "works" until something else reuses that stack slot. Must be
+// a function-local static (one instance per T) so the backing storage lives forever.
+template<typename T>
+const std::string& formatOf() {
+	static const std::string fmt = py::format_descriptor<T>::format();
+
+	return fmt;
+}
+
 template<typename T>
 py::memoryview vectorView1D(const std::vector<T>& v) {
-	const auto fmt = py::format_descriptor<T>::format();
 	const std::vector<py::ssize_t> shape = {static_cast<py::ssize_t>(v.size())};
 	const std::vector<py::ssize_t> strides = {static_cast<py::ssize_t>(sizeof(T))};
 
 	return py::memoryview::from_buffer(
 		static_cast<const void*>(v.data()),
 		sizeof(T),
-		fmt.c_str(),
+		formatOf<T>().c_str(),
 		shape,
 		strides
 	);
@@ -117,33 +135,44 @@ py::memoryview vectorView1D(const std::vector<T>& v) {
 
 template<typename T, size_t N>
 py::memoryview arrayView1D(const std::array<T, N>& v) {
-	const auto fmt = py::format_descriptor<T>::format();
 	const std::vector<py::ssize_t> shape = {static_cast<py::ssize_t>(N)};
 	const std::vector<py::ssize_t> strides = {static_cast<py::ssize_t>(sizeof(T))};
 
 	return py::memoryview::from_buffer(
 		static_cast<const void*>(v.data()),
 		sizeof(T),
-		fmt.c_str(),
+		formatOf<T>().c_str(),
 		shape,
 		strides
 	);
 }
 
-py::memoryview curveView2D(const std::vector<slughorn::Atlas::Curve>& curves) {
-	static const std::string fmt = py::format_descriptor<slughorn::slug_t>::format();
-	const std::vector<py::ssize_t> shape = {static_cast<py::ssize_t>(curves.size()), 6};
+// Views `rows` rows of `cols` T-elements each, starting at `data`, as a strided 2-D buffer with
+// no copy. `rowStrideBytes` is separate from `cols * sizeof(T)` so callers whose row type has
+// padding (or is a struct, like Curve) can pass the real row size.
+template<typename T>
+py::memoryview flatView2D(const void* data, size_t rows, size_t cols, size_t rowStrideBytes) {
+	const std::vector<py::ssize_t> shape = {
+		static_cast<py::ssize_t>(rows), static_cast<py::ssize_t>(cols)
+	};
 	const std::vector<py::ssize_t> strides = {
-		static_cast<py::ssize_t>(sizeof(slughorn::Atlas::Curve)),
-		static_cast<py::ssize_t>(sizeof(slughorn::slug_t))
+		static_cast<py::ssize_t>(rowStrideBytes),
+		static_cast<py::ssize_t>(sizeof(T))
 	};
 
-	return py::memoryview::from_buffer(
-		static_cast<const void*>(curves.data()),
-		sizeof(slughorn::slug_t),
-		fmt.c_str(),
-		shape,
-		strides
+	return py::memoryview::from_buffer(data, sizeof(T), formatOf<T>().c_str(), shape, strides);
+}
+
+template<typename T>
+py::memoryview flatView2D(const std::vector<T>& v, size_t cols) {
+	return flatView2D<T>(
+		static_cast<const void*>(v.data()), v.size() / cols, cols, cols * sizeof(T)
+	);
+}
+
+py::memoryview curveView2D(const std::vector<slughorn::Atlas::Curve>& curves) {
+	return flatView2D<slughorn::slug_t>(
+		static_cast<const void*>(curves.data()), curves.size(), 6, sizeof(slughorn::Atlas::Curve)
 	);
 }
 
@@ -157,6 +186,31 @@ std::string streamRepr(const T& v, const std::string& prefix="") {
 	ss << v;
 
 	return ss.str();
+}
+
+// CSR view over Atlas::getShapeContours(): all curves concatenated into one flat buffer, plus
+// row offsets splitting it back into per-contour ranges (contour i = curves[offsets[i]:offsets[i+1]]).
+// Avoids building nested Python lists/tuples for what can be a large, jagged curve list (GIS
+// polygons especially); mirrors the offsets+indices CSR pattern Sampler already uses for bands.
+struct PyShapeContours {
+	slughorn::Atlas::Curves curves;
+	std::vector<uint32_t> offsets;
+};
+
+// Reconstructs Atlas::Contours (vector<Curves>) from the CSR form above - used by tessellate()/
+// extrude() bindings, which take the jagged C++ form.
+inline slughorn::Atlas::Contours contoursFromCSR(const PyShapeContours& sc) {
+	slughorn::Atlas::Contours result;
+
+	if(sc.offsets.empty()) return result;
+
+	result.reserve(sc.offsets.size() - 1);
+
+	for(size_t i = 0; i + 1 < sc.offsets.size(); i++) {
+		result.emplace_back(sc.curves.begin() + sc.offsets[i], sc.curves.begin() + sc.offsets[i + 1]);
+	}
+
+	return result;
 }
 
 // Python-friendly CurveDecomposer
@@ -256,9 +310,12 @@ using detail::bytesView;
 using detail::vectorView1D;
 using detail::arrayView1D;
 using detail::curveView2D;
+using detail::flatView2D;
 using detail::streamRepr;
 using detail::PyCurveDecomposer;
 using detail::CurveDecomposerRef;
+using detail::PyShapeContours;
+using detail::contoursFromCSR;
 
 using slughorn::render::Sample;
 using slughorn::render::Sampler;
@@ -1007,6 +1064,29 @@ PYBIND11_MODULE(slughorn, m) {
 	;
 
 	// ============================================================================================
+	// slughorn.ShapeContours (PyShapeContours - CSR view, returned by Atlas.get_shape_contours())
+	// ============================================================================================
+	py::class_<PyShapeContours>(m, "ShapeContours")
+		.def_property_readonly("curves", [](const PyShapeContours& c) {
+			return curveView2D(c.curves);
+		}, "Zero-copy (N, 6) float32 memoryview of every curve across every contour, in order.")
+		.def_property_readonly("offsets", [](const PyShapeContours& c) {
+			return vectorView1D(c.offsets);
+		}, "Zero-copy CSR row offsets into `curves`, length len(self) + 1.\n"
+			"Contour i is curves[offsets[i]:offsets[i + 1]]."
+		)
+		.def("__len__", [](const PyShapeContours& c) {
+			return c.offsets.empty() ? size_t(0) : c.offsets.size() - 1;
+		}, "Number of contours.")
+		.def("__repr__", [](const PyShapeContours& c) {
+			return "ShapeContours("
+				+ std::to_string(c.offsets.empty() ? size_t(0) : c.offsets.size() - 1)
+				+ " contours, " + std::to_string(c.curves.size()) + " curves)"
+			;
+		})
+	;
+
+	// ============================================================================================
 	// slughorn.PackingStats (Atlas::PackingStats in C++, flat in Python)
 	// ============================================================================================
 	py::class_<slughorn::Atlas::PackingStats>(m, "PackingStats")
@@ -1105,24 +1185,23 @@ PYBIND11_MODULE(slughorn, m) {
 
 		.def("get_shape_contours",
 			[](const slughorn::Atlas& a, slughorn::Key key) {
-				py::list result;
+				PyShapeContours result;
+
+				result.offsets.push_back(0);
 
 				for(const auto& contour : a.getShapeContours(key)) {
-					py::list cl;
-
-					for(const auto& c : contour)
-						cl.append(py::make_tuple(c.x1, c.y1, c.x2, c.y2, c.x3, c.y3));
-
-					result.append(cl);
+					result.curves.insert(result.curves.end(), contour.begin(), contour.end());
+					result.offsets.push_back(static_cast<uint32_t>(result.curves.size()));
 				}
 
 				return result;
 			},
 			"key"_a,
-			"Return list of contours; each contour is a list of (x1,y1,x2,y2,x3,y3) tuples.\n"
+			"Return a ShapeContours: a flat (N, 6) curve buffer plus CSR row offsets splitting\n"
+			"it into per-contour ranges (contour i = curves[offsets[i]:offsets[i + 1]]).\n"
 			"Contour breaks are detected where p3 of curve[i] != p1 of curve[i+1].\n"
-			"Returns an empty list if the key is not found. Use when building paths for\n"
-			"stroking or filling - each contour must be handled independently."
+			"Zero contours if the key is not found. Use when building paths for stroking,\n"
+			"filling, or triangulation - each contour must be handled independently."
 		)
 
 		.def("get_composite_shape",
@@ -2714,6 +2793,63 @@ PYBIND11_MODULE(slughorn, m) {
 			"(multiply by image width/height to recover authoring coords). When False, curves\n"
 			"are stored as-is in SVG canvas space and layer.transform is zero.\n"
 			"origin: global origin for all shapes (overridden per-shape by ShapeRule.origin)."
+		);
+	}
+#endif
+
+#ifdef SLUGHORN_HAS_TESSELLATE
+	{
+		py::module_ tessellate = m.def_submodule("tessellate",
+			"Polygon-with-holes triangulation and linear extrusion (earcut-backed).\n\n"
+			"tessellate() and extrude() both accept `contours` as a slughorn.ShapeContours\n"
+			"(the return value of Atlas.get_shape_contours())."
+		);
+
+		py::class_<slughorn::tessellate::Mesh2D>(tessellate, "Mesh2D")
+			.def_property_readonly("positions", [](const slughorn::tessellate::Mesh2D& mesh) {
+				return flatView2D(mesh.positions, 2);
+			}, "Zero-copy (N, 2) float32 memoryview of vertex positions (xy).")
+			.def_property_readonly("indices", [](const slughorn::tessellate::Mesh2D& mesh) {
+				return flatView2D(mesh.indices, 3);
+			}, "Zero-copy (N, 3) uint32 memoryview of triangle indices.")
+			.def("__repr__", [](const slughorn::tessellate::Mesh2D& mesh) {
+				return "Mesh2D(" + std::to_string(mesh.positions.size() / 2) + " vertices, "
+					+ std::to_string(mesh.indices.size() / 3) + " triangles)";
+			})
+		;
+
+		py::class_<slughorn::tessellate::Mesh3D>(tessellate, "Mesh3D")
+			.def_property_readonly("positions", [](const slughorn::tessellate::Mesh3D& mesh) {
+				return flatView2D(mesh.positions, 3);
+			}, "Zero-copy (N, 3) float32 memoryview of vertex positions (xyz).")
+			.def_property_readonly("indices", [](const slughorn::tessellate::Mesh3D& mesh) {
+				return flatView2D(mesh.indices, 3);
+			}, "Zero-copy (N, 3) uint32 memoryview of triangle indices.")
+			.def("__repr__", [](const slughorn::tessellate::Mesh3D& mesh) {
+				return "Mesh3D(" + std::to_string(mesh.positions.size() / 3) + " vertices, "
+					+ std::to_string(mesh.indices.size() / 3) + " triangles)";
+			})
+		;
+
+		tessellate.def("tessellate",
+			[](const PyShapeContours& contours, slug_t tolerance) {
+				return slughorn::tessellate::tessellate(contoursFromCSR(contours), tolerance);
+			},
+			"contours"_a, "tolerance"_a=slughorn::TOLERANCE_BALANCED,
+			"Flatten and triangulate `contours` (a ShapeContours, as returned by\n"
+			"Atlas.get_shape_contours()). Groups holes with the exterior ring that contains\n"
+			"them; a shape may have any number of disjoint exterior rings, each with zero or\n"
+			"more holes. Returns a Mesh2D."
+		);
+
+		tessellate.def("extrude",
+			[](const PyShapeContours& contours, slug_t depth, slug_t tolerance) {
+				return slughorn::tessellate::extrude(contoursFromCSR(contours), depth, tolerance);
+			},
+			"contours"_a, "depth"_a, "tolerance"_a=slughorn::TOLERANCE_BALANCED,
+			"Extrude `contours` (a ShapeContours) into a closed 3D solid: a top cap at\n"
+			"z=depth, a bottom cap at z=0, and a wall connecting every ring (exterior and\n"
+			"hole boundaries alike). Returns a Mesh3D."
 		);
 	}
 #endif
