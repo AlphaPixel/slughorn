@@ -1016,6 +1016,10 @@ PYBIND11_MODULE(slughorn, m) {
 		.def_readonly("band_texels_used", &slughorn::Atlas::PackingStats::bandTexelsUsed)
 		.def_readonly("band_texels_padding", &slughorn::Atlas::PackingStats::bandTexelsPadding)
 		.def_readonly("band_texels_total", &slughorn::Atlas::PackingStats::bandTexelsTotal)
+		.def_readonly("band_max_count", &slughorn::Atlas::PackingStats::bandMaxCount,
+			"Largest single band's curve-index list across all shapes (hard limit 65535).")
+		.def_readonly("band_max_offset", &slughorn::Atlas::PackingStats::bandMaxOffset,
+			"Largest per-shape cumulative band-data span (hard limit 65535).")
 		.def_readonly("gradient_count", &slughorn::Atlas::PackingStats::gradientCount,
 			"Number of registered gradients (0 when none).")
 		.def_readonly("gradient_texels_total", &slughorn::Atlas::PackingStats::gradientTexelsTotal,

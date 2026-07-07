@@ -110,7 +110,6 @@
 
 #include <cstdint>
 #include <fstream>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -257,6 +256,8 @@ json packingStatsToJson(const Atlas::PackingStats& p) {
 		{"band_texels_used", p.bandTexelsUsed},
 		{"band_texels_padding", p.bandTexelsPadding},
 		{"band_texels_total", p.bandTexelsTotal},
+		{"band_max_count", p.bandMaxCount},
+		{"band_max_offset", p.bandMaxOffset},
 		{"gradient_count", p.gradientCount},
 		{"gradient_texels_total", p.gradientTexelsTotal},
 		{"sdf_tile_count", p.sdfTileCount},
@@ -278,6 +279,8 @@ Atlas::PackingStats packingStatsFromJson(const json& j) {
 	p.bandTexelsUsed = j.at("band_texels_used").get<uint32_t>();
 	p.bandTexelsPadding = j.at("band_texels_padding").get<uint32_t>();
 	p.bandTexelsTotal = j.at("band_texels_total").get<uint32_t>();
+	p.bandMaxCount = j.value("band_max_count", 0u);
+	p.bandMaxOffset = j.value("band_max_offset", 0u);
 	p.gradientCount = j.value("gradient_count", 0u);
 	p.gradientTexelsTotal = j.value("gradient_texels_total", 0u);
 	p.sdfTileCount = j.value("sdf_tile_count", 0u);
@@ -461,8 +464,7 @@ json buildJson(
 	json shapes = json::array();
 
 	for(const auto& [key, shape] : atlas.getShapes()) {
-		std::ostringstream originType;
-		originType << shape.origin.type;
+		const std::string originType = detail::to_sstr(shape.origin.type);
 
 		json jshape = {
 			{"key", keyToJson(key)},
@@ -481,7 +483,7 @@ json buildJson(
 			{"advance", shape.advance},
 			{"origin_x", shape.originX},
 			{"origin_y", shape.originY},
-			{"origin", {{"type", originType.str()}, {"x", shape.origin.x}, {"y", shape.origin.y}}}
+			{"origin", {{"type", originType}, {"x", shape.origin.x}, {"y", shape.origin.y}}}
 		};
 
 		if(shape.msdfLayer >= 0) {

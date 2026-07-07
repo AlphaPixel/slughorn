@@ -1345,7 +1345,17 @@ void Atlas::packTextures() {
 		const uint32_t indirSize = numBandHeaders > 0 ? 2 * INDIRECTION_SIZE : 0;
 		const uint32_t blockSize = indirSize + numBandHeaders;
 
-		if(blockSize > _texWidth) continue;
+		// blockSize is bounded by 2*INDIRECTION_SIZE + numBandHeaders (currently at most
+		// 128), so this should never trigger for any sane _texWidth -- but silently
+		// `continue`-ing here used to drop the shape's entire band data with no signal
+		// at all. Fail loudly instead: a texture too narrow to hold one shape's fixed-size
+		// header block is a real configuration error, not something to paper over.
+		if(blockSize > _texWidth) {
+			throw std::runtime_error(detail::to_sstr(
+				"Atlas::build: ", key, "'s band header block (", blockSize,
+				" texels) does not fit in a texture row of width ", _texWidth
+			));
+		}
 
 		bandTexelOffset = alignBand(bandTexelOffset, blockSize);
 
@@ -1379,12 +1389,56 @@ void Atlas::packTextures() {
 				const auto& band = bands[b];
 				auto count = static_cast<uint32_t>(band.curveIndices.size());
 
-				// truncate oversized lists
-				if(count > _texWidth) count = 0;
+				// CORRECTION: count > _texWidth IS a real, hard limit, not an arbitrary one --
+				// a band's curve-index list must fit within a single texture row. The shader's
+				// read loop (slug_HFill/slug_VFill in Atlas.shaders.cpp) only wraps the list's
+				// STARTING offset via slug_CalcBandLoc(); it then does
+				// texelFetch(..., hbandLoc.x + curveIndex, hbandLoc.y, ...) with a FIXED row,
+				// so a list longer than one row reads garbage/wrong data past the row boundary.
+				// alignCursorForSpan() can only shift where a span STARTS, it cannot make a
+				// span wider than the row fit without straddling. An earlier version of this
+				// comment claimed the shader already handled multi-row lists and replaced this
+				// check with a uint16_t-only one -- that was wrong, and got caught when a real
+				// tile (738-curve band) still corrupted at texWidth=512 after that "fix".
+				if(count > _texWidth) {
+					throw std::runtime_error(detail::to_sstr(
+						"Atlas::build: ", key, "'s band has ", count, " curves, which "
+						"does not fit in a texture row of width ", _texWidth, ". Increase "
+						"the Atlas's texWidth (constructor parameter) to at least the next "
+						"power of two >= ", count
+					));
+				}
+
+				// Separate, independent limit: header.count is a uint16_t regardless of
+				// texWidth. Only reachable if _texWidth itself somehow exceeded 65535.
+				if(count > 0xffffu) {
+					throw std::runtime_error(detail::to_sstr(
+						"Atlas::build: ", key, "'s band has ", count,
+						" curves, exceeding the uint16_t band-header capacity (65535)"
+					));
+				}
+
+				_packingStats.bandMaxCount = std::max(_packingStats.bandMaxCount, count);
 
 				cursor = alignBand(cursor, count);
 
 				const uint32_t hi = headerBase + b;
+
+				// offset is relative to shapeStart and also a uint16_t. This is the more
+				// realistic overflow case in practice -- it accumulates across every band in
+				// the shape (up to 2*INDIRECTION_SIZE of them), so a shape with many
+				// moderately-sized bands can hit this even when no single band's count does.
+				if(cursor - shapeStart > 0xffffu) {
+					throw std::runtime_error(detail::to_sstr(
+						"Atlas::build: ", key, "'s band data spans ", cursor - shapeStart,
+						" texels, exceeding the uint16_t band-header offset capacity (65535)"
+					));
+				}
+
+				_packingStats.bandMaxOffset = std::max(
+					_packingStats.bandMaxOffset,
+					cursor - shapeStart
+				);
 
 				headers[hi].count = static_cast<uint16_t>(count);
 				headers[hi].offset = static_cast<uint16_t>(cursor - shapeStart);

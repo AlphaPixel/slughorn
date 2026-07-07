@@ -276,11 +276,7 @@ namespace nanosvg {
 template<typename... Args>
 static void warn(const LoadConfig& config, int level, const Args&... args) {
 	if(config.log) {
-		std::ostringstream oss;
-
-		((oss << args), ...);
-
-		config.log(level, oss.str());
+		config.log(level, slughorn::detail::to_sstr(args...));
 	}
 
 	else {

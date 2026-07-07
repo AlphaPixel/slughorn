@@ -237,7 +237,6 @@ bool loadEmojiFont(
 
 #include <cmath>
 #include <cstring>
-#include <sstream>
 
 namespace slughorn {
 namespace freetype {
@@ -245,11 +244,7 @@ namespace freetype {
 static void doLog(const LogCallback& log, int level, const auto&... args) {
 	if(!log) return;
 
-	std::ostringstream oss;
-
-	((oss << args), ...);
-
-	log(level, oss.str());
+	log(level, slughorn::detail::to_sstr(args...));
 }
 
 // =============================================================================

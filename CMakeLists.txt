@@ -123,15 +123,15 @@ if(SLUGHORN_MSDF)
 		)
 	endif()
 
-	set(MSDFGEN_CORE_ONLY      ON  CACHE BOOL "" FORCE)
+	set(MSDFGEN_CORE_ONLY ON CACHE BOOL "" FORCE)
 	set(MSDFGEN_BUILD_STANDALONE OFF CACHE BOOL "" FORCE)
-	set(MSDFGEN_USE_VCPKG      OFF CACHE BOOL "" FORCE)
-	set(MSDFGEN_USE_OPENMP     ${SLUGHORN_RENDER_PARALLEL} CACHE BOOL "" FORCE)
-	set(MSDFGEN_USE_SKIA       OFF CACHE BOOL "" FORCE)
-	set(MSDFGEN_DISABLE_SVG    OFF CACHE BOOL "" FORCE)
-	set(MSDFGEN_DISABLE_PNG    OFF CACHE BOOL "" FORCE)
+	set(MSDFGEN_USE_VCPKG OFF CACHE BOOL "" FORCE)
+	set(MSDFGEN_USE_OPENMP ${SLUGHORN_RENDER_PARALLEL} CACHE BOOL "" FORCE)
+	set(MSDFGEN_USE_SKIA OFF CACHE BOOL "" FORCE)
+	set(MSDFGEN_DISABLE_SVG OFF CACHE BOOL "" FORCE)
+	set(MSDFGEN_DISABLE_PNG OFF CACHE BOOL "" FORCE)
 	set(MSDFGEN_DYNAMIC_RUNTIME OFF CACHE BOOL "" FORCE)
-	set(MSDFGEN_INSTALL        OFF CACHE BOOL "" FORCE)
+	set(MSDFGEN_INSTALL OFF CACHE BOOL "" FORCE)
 
 	add_subdirectory("ext/msdfgen")
 	set_target_properties(msdfgen-core PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -311,6 +311,17 @@ if(SLUGHORN_BUILD_TESTS)
 	# target_link_libraries(slughorn-test-gdal PRIVATE slughorn gdal)
 	# target_compile_options(slughorn-test-gdal PRIVATE ${SLUGHORN_COMPILE_OPTIONS})
 	# target_include_directories(slughorn-test-gdal PRIVATE "/usr/include/gdal")
+
+	# find_package(SQLite3 REQUIRED)
+	# find_package(ZLIB REQUIRED)
+
+	# add_executable(slughorn-test-mapbox "test/slughorn-test-mapbox.cpp")
+	# target_link_libraries(slughorn-test-mapbox PRIVATE slughorn SQLite::SQLite3 ZLIB::ZLIB)
+	# target_compile_options(slughorn-test-mapbox PRIVATE ${SLUGHORN_COMPILE_OPTIONS})
+	# target_include_directories(slughorn-test-mapbox PRIVATE
+	# 	"${CMAKE_CURRENT_SOURCE_DIR}/../protozero/include"
+	# 	"${CMAKE_CURRENT_SOURCE_DIR}/../vtzero/include"
+	# )
 
 	add_executable(slughorn-test-bands "test/slughorn-test-bands.cpp")
 	target_link_libraries(slughorn-test-bands PRIVATE slughorn)

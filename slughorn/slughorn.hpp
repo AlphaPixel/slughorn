@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -20,6 +21,21 @@ inline constexpr uint8_t SLUGHORN_VERSION_MINOR = 0;
 inline constexpr uint8_t SLUGHORN_VERSION_PATCH = 2;
 
 namespace slughorn {
+
+namespace detail {
+
+// Streams each argument into an ostringstream via operator<<, in order, and returns the
+// resulting string. Replaces the repeated "declare oss; oss << a << b << c; oss.str()"
+// pattern used for one-off error/log messages throughout the codebase.
+inline std::string to_sstr(const auto&... args) {
+	std::ostringstream oss;
+
+	((oss << args), ...);
+
+	return oss.str();
+}
+
+} // namespace detail
 
 // Intended to be used like this: `auto [major, minor, patch] = slughorn::versionNumbers();`
 constexpr auto versionNumbers() {
@@ -830,6 +846,17 @@ public:
 		uint32_t bandTexelsPadding = 0;
 		uint32_t bandTexelsTotal = 0;
 
+		// Real headroom indicators against the hard uint16_t limits enforced in
+		// Atlas::build()'s band-packing loop (see the "Atlas band-truncation bug" writeup) --
+		// curveUtilization()/bandUtilization() below CANNOT reveal how close a build came to
+		// these, since curveTexelsTotal/bandTexelsTotal are sized to just barely fit whatever
+		// data exists at any texWidth, so they read ~100% almost regardless of headroom.
+		// bandMaxCount: largest single band's curve-index list across all shapes (limit 65535).
+		// bandMaxOffset: largest per-shape cumulative band-data span, i.e. cursor - shapeStart,
+		// across all shapes (limit 65535).
+		uint32_t bandMaxCount = 0;
+		uint32_t bandMaxOffset = 0;
+
 		// Gradient texture (RGBA8, 4 bytes/texel; one GRADIENT_STRIP_WIDTH-wide row per
 		// gradient; no padding)
 		uint32_t gradientCount = 0;
@@ -1192,6 +1219,12 @@ public:
 	};
 
 	void loadFromSerial(SerialData&& sd) {
+		// _texWidth must match whatever width the atlas was actually BUILT with, not
+		// whatever DEFAULT_TEXTURE_WIDTH happens to be at deserialization time -- every
+		// row/column texel calculation (including the shader's band-offset bit-shift math)
+		// depends on it. curveData/bandData both carry the real width from the file.
+		_texWidth = sd.curveData.width;
+
 		_curveData = std::move(sd.curveData);
 		_bandData = std::move(sd.bandData);
 		_gradientData = std::move(sd.gradientData);
@@ -1852,7 +1885,9 @@ inline std::ostream& operator<<(std::ostream& os, const Atlas::PackingStats& p) 
 		<< " + " << p.bandTexelsPadding << " padding"
 		<< " / " << p.bandTexelsTotal << " total"
 		<< " (" << int(p.bandUtilization() * 100.f) << "% util,"
-		<< " " << int(p.bandPaddingRatio() * 100.f) << "% pad)"
+		<< " " << int(p.bandPaddingRatio() * 100.f) << "% pad,"
+		<< " max band=" << p.bandMaxCount << "/65535,"
+		<< " max offset=" << p.bandMaxOffset << "/65535)"
 		<< " | gradient: " << p.gradientCount
 		<< " gradient" << (p.gradientCount != 1 ? "s" : "")
 		<< " (" << Atlas::GRADIENT_STRIP_WIDTH << "x" << p.gradientCount
