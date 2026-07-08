@@ -380,6 +380,9 @@ struct Mask {
 		Capsule, // params: ax, ay, bx, by, r
 		Arc, // params: cx, cy, r, angle_start, angle_end
 		ArcBand, // params: cx, cy, r, angle_start, angle_end, stroke_half_width
+		Hexagon, // params: cx, cy, r, rotation
+		Octagon, // params: cx, cy, r, rotation
+		Star, // params: cx, cy, r, points, inner_ratio, rotation
 		// Future: Scanline, Slug
 	};
 
@@ -432,6 +435,34 @@ struct Mask {
 		return {
 			.type = Type::ArcBand,
 			.params = { cx, cy, r, a0, a1, rb },
+			.invert = inv,
+		};
+	}
+
+	static Mask hexagon(slug_t cx, slug_t cy, slug_t r, slug_t rotation=0_cv, bool inv=false) {
+		return {
+			.type = Type::Hexagon,
+			.params = { cx, cy, r, rotation },
+			.invert = inv,
+		};
+	}
+
+	static Mask octagon(slug_t cx, slug_t cy, slug_t r, slug_t rotation=0_cv, bool inv=false) {
+		return {
+			.type = Type::Octagon,
+			.params = { cx, cy, r, rotation },
+			.invert = inv,
+		};
+	}
+
+	static Mask star(
+		slug_t cx, slug_t cy, slug_t r,
+		slug_t points, slug_t innerRatio, slug_t rotation=0_cv,
+		bool inv=false
+	) {
+		return {
+			.type = Type::Star,
+			.params = { cx, cy, r, points, innerRatio, rotation },
 			.invert = inv,
 		};
 	}
@@ -881,45 +912,45 @@ public:
 		uint32_t scanlineTexelsTotal = 0;
 
 		// Fraction of allocated texels actually containing live data [0, 1].
-		float curveUtilization() const {
+		slug_t curveUtilization() const {
 			return curveTexelsTotal
-				? float(curveTexelsUsed) / float(curveTexelsTotal)
+				? cv(curveTexelsUsed) / cv(curveTexelsTotal)
 				: 0.f
 			;
 		}
 
-		float bandUtilization() const {
+		slug_t bandUtilization() const {
 			return bandTexelsTotal
-				? float(bandTexelsUsed) / float(bandTexelsTotal)
+				? cv(bandTexelsUsed) / cv(bandTexelsTotal)
 				: 0.f
 			;
 		}
 
-		float sdfUtilization() const {
+		slug_t sdfUtilization() const {
 			return sdfTexelsTotal
-				? float(sdfTexelsUsed) / float(sdfTexelsTotal)
+				? cv(sdfTexelsUsed) / cv(sdfTexelsTotal)
 				: 0.f
 			;
 		}
 
 		// Fraction of live texels that are padding (not curve data) [0, 1]. High values suggest
 		// band count or shape ordering could be improved.
-		float curvePaddingRatio() const {
+		slug_t curvePaddingRatio() const {
 			const uint32_t live = curveTexelsUsed + curveTexelsPadding;
 
-			return live ? float(curveTexelsPadding) / float(live) : 0.f;
+			return live ? cv(curveTexelsPadding) / cv(live) : 0.f;
 		}
 
-		float bandPaddingRatio() const {
+		slug_t bandPaddingRatio() const {
 			const uint32_t live = bandTexelsUsed + bandTexelsPadding;
 
-			return live ? float(bandTexelsPadding) / float(live) : 0.f;
+			return live ? cv(bandTexelsPadding) / cv(live) : 0.f;
 		}
 
-		float sdfPaddingRatio() const {
+		slug_t sdfPaddingRatio() const {
 			const uint32_t live = sdfTexelsUsed + sdfTexelsPadding;
 
-			return live ? float(sdfTexelsPadding) / float(live) : 0.f;
+			return live ? cv(sdfTexelsPadding) / cv(live) : 0.f;
 		}
 
 		// GPU bytes allocated per channel, derived from each channel's fixed texture format.
@@ -1328,7 +1359,7 @@ private:
 
 #ifdef SLUGHORN_HAS_MSDF
 	std::unordered_map<Key, int, KeyHash> _msdfLayerMap;
-	std::vector<std::vector<float>> _msdfTileData; // raw RGB32F floats per registered tile
+	std::vector<std::vector<slug_t>> _msdfTileData; // raw RGB32F floats per registered tile
 	uint32_t _msdfTileSize = 0;
 	mutable TextureData _msdfData; // packed lazily by getMSDFTextureData()
 	mutable bool _msdfDirty = false; // set true once a tile is actually rendered, cleared on pack

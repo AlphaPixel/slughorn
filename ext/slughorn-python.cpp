@@ -636,7 +636,10 @@ PYBIND11_MODULE(slughorn, m) {
 			"  Rect: x, y, w, h\n"
 			"  Capsule: ax, ay, bx, by, r\n"
 			"  Arc: cx, cy, r, angle_start, angle_end\n"
-			"  ArcBand: cx, cy, r, angle_start, angle_end, stroke_half_width"
+			"  ArcBand: cx, cy, r, angle_start, angle_end, stroke_half_width\n"
+			"  Hexagon: cx, cy, r, rotation\n"
+			"  Octagon: cx, cy, r, rotation\n"
+			"  Star: cx, cy, r, points, inner_ratio, rotation"
 		)
 		.def_readwrite("invert", &slughorn::Mask::invert,
 			"If True, inverts coverage so the outside of the mask shape becomes the inside.")
@@ -658,6 +661,18 @@ PYBIND11_MODULE(slughorn, m) {
 		.def_static("arcBand", &slughorn::Mask::arcBand,
 			py::arg("cx"), py::arg("cy"), py::arg("r"), py::arg("a0"), py::arg("a1"), py::arg("rb"), py::arg("invert") = false,
 			"Analytical stroked-arc mask: center (cx,cy), arc radius r, angle range [a0,a1], stroke half-width rb.")
+		.def_static("hexagon", &slughorn::Mask::hexagon,
+			py::arg("cx"), py::arg("cy"), py::arg("r"), py::arg("rotation") = 0.0f, py::arg("invert") = false,
+			"Analytical regular-hexagon mask: center (cx,cy), radius r, rotation in radians.")
+		.def_static("octagon", &slughorn::Mask::octagon,
+			py::arg("cx"), py::arg("cy"), py::arg("r"), py::arg("rotation") = 0.0f, py::arg("invert") = false,
+			"Analytical regular-octagon mask: center (cx,cy), radius r, rotation in radians.")
+		.def_static("star", &slughorn::Mask::star,
+			py::arg("cx"), py::arg("cy"), py::arg("r"),
+			py::arg("points"), py::arg("inner_ratio"), py::arg("rotation") = 0.0f,
+			py::arg("invert") = false,
+			"Analytical n-pointed star mask: center (cx,cy), outer radius r, point count, "
+			"inner_ratio in [0,1] (0=sharpest spikes, 1=regular polygon), rotation in radians.")
 		.def("__repr__", [](const slughorn::Mask& mk) { return streamRepr(mk); })
 	;
 
@@ -668,6 +683,9 @@ PYBIND11_MODULE(slughorn, m) {
 		.value("Capsule", slughorn::Mask::Type::Capsule)
 		.value("Arc", slughorn::Mask::Type::Arc)
 		.value("ArcBand", slughorn::Mask::Type::ArcBand)
+		.value("Hexagon", slughorn::Mask::Type::Hexagon)
+		.value("Octagon", slughorn::Mask::Type::Octagon)
+		.value("Star", slughorn::Mask::Type::Star)
 	;
 
 	// ============================================================================================
