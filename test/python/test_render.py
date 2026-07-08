@@ -408,50 +408,50 @@ def test_msdf_tile_size_set_then_get():
 def test_msdf_tile_size_set_then_register():
 	atlas = _make_built_atlas()
 	atlas.msdf_tile_size = 64
-	layer = atlas.register_msdf("rect")
+	layer = atlas.request_msdf("rect")
 	assert layer == 0
 
 @pytest.mark.skipif(not HAS_MSDF, reason="built without SLUGHORN_MSDF=ON")
 def test_msdf_tile_size_set_after_register_raises():
 	atlas = _make_built_atlas()
-	atlas.register_msdf("rect")
+	atlas.request_msdf("rect")
 	with pytest.raises(RuntimeError):
 		atlas.msdf_tile_size = 64
 
 
 # ---------------------------------------------------------------------------
-# Atlas.register_msdf — new signature (no tile_size, coloring added)
+# Atlas.request_msdf — new signature (no tile_size, coloring added)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.skipif(not HAS_MSDF, reason="built without SLUGHORN_MSDF=ON")
-def test_register_msdf_default_args():
+def test_request_msdf_default_args():
 	atlas = _make_built_atlas()
-	layer = atlas.register_msdf("rect")
+	layer = atlas.request_msdf("rect")
 	assert layer == 0
 
 @pytest.mark.skipif(not HAS_MSDF, reason="built without SLUGHORN_MSDF=ON")
-def test_register_msdf_custom_range():
+def test_request_msdf_custom_range():
 	atlas = _make_built_atlas()
-	layer = atlas.register_msdf("rect", range=0.05)
+	layer = atlas.request_msdf("rect", range=0.05)
 	assert layer >= 0
 
 @pytest.mark.skipif(not HAS_MSDF, reason="built without SLUGHORN_MSDF=ON")
-def test_register_msdf_coloring_simple():
+def test_request_msdf_coloring_simple():
 	atlas = _make_built_atlas()
-	layer = atlas.register_msdf("rect", coloring=slughorn.Atlas.MSDFEdgeColoring.Simple)
+	layer = atlas.request_msdf("rect", coloring=slughorn.Atlas.MSDFEdgeColoring.Simple)
 	assert layer >= 0
 
 @pytest.mark.skipif(not HAS_MSDF, reason="built without SLUGHORN_MSDF=ON")
-def test_register_msdf_coloring_by_distance():
+def test_request_msdf_coloring_by_distance():
 	atlas = _make_built_atlas()
-	layer = atlas.register_msdf("rect", coloring=slughorn.Atlas.MSDFEdgeColoring.ByDistance)
+	layer = atlas.request_msdf("rect", coloring=slughorn.Atlas.MSDFEdgeColoring.ByDistance)
 	assert layer >= 0
 
 @pytest.mark.skipif(not HAS_MSDF, reason="built without SLUGHORN_MSDF=ON")
-def test_register_msdf_is_idempotent():
+def test_request_msdf_is_idempotent():
 	atlas = _make_built_atlas()
-	layer1 = atlas.register_msdf("rect")
-	layer2 = atlas.register_msdf("rect")
+	layer1 = atlas.request_msdf("rect")
+	layer2 = atlas.request_msdf("rect")
 	assert layer1 == layer2
 
 
@@ -469,7 +469,7 @@ def test_shape_msdf_layer_unregistered():
 @pytest.mark.skipif(not HAS_MSDF, reason="built without SLUGHORN_MSDF=ON")
 def test_shape_msdf_layer_after_register():
 	atlas = _make_built_atlas()
-	atlas.register_msdf("rect")
+	atlas.request_msdf("rect")
 	shape = atlas.get_shape("rect")
 	assert shape is not None
 	assert shape.msdf_layer == 0
@@ -484,7 +484,7 @@ def test_shape_msdf_range_unregistered():
 @pytest.mark.skipif(not HAS_MSDF, reason="built without SLUGHORN_MSDF=ON")
 def test_shape_msdf_range_after_register():
 	atlas = _make_built_atlas()
-	atlas.register_msdf("rect", range=0.15)
+	atlas.request_msdf("rect", range=0.15)
 	shape = atlas.get_shape("rect")
 	assert shape is not None
 	assert shape.msdf_range == pytest.approx(0.15, abs=1e-5)
@@ -499,7 +499,7 @@ def test_shape_msdf_layer_increments():
 		atlas.add_shape(slughorn.Key(name), info)
 	atlas.build()
 	for i, name in enumerate(("a", "b", "c")):
-		atlas.register_msdf(name)
+		atlas.request_msdf(name)
 		assert atlas.get_shape(name).msdf_layer == i
 
 

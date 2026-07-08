@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstring>
+#include <map>
 
 using namespace slughorn::literals;
 
@@ -443,6 +444,23 @@ void Atlas::build() {
 	rasterizeGradients();
 	rasterizeSDFAtlas();
 
+#ifdef SLUGHORN_HAS_MSDF
+	// Drain requestMSDF() calls queued during authoring (pre-build). Grouped by (range, coloring)
+	// so same-parameter requests reuse _commitMSDF's parallel batch path, same as an explicit
+	// requestMSDF(vector<Key>, ...) call would get. Must run after packTextures() (tiles need
+	// each shape's final position in the packed atlas texture) and before _built = true (so the
+	// immediate-path branch in requestMSDF() doesn't fire re-entrantly from within _commitMSDF).
+	if(!_pendingMSDF.empty()) {
+		std::map<std::pair<slug_t, MSDFEdgeColoring>, std::vector<Key>> grouped;
+
+		for(const auto& p : _pendingMSDF) grouped[{p.range, p.coloring}].push_back(p.key);
+
+		for(const auto& [params, keys] : grouped) _commitMSDF(keys, params.first, params.second);
+
+		_pendingMSDF.clear();
+	}
+#endif
+
 	_built = true;
 }
 
@@ -671,11 +689,12 @@ void Atlas::rasterizeSDFAtlas() {
 }
 
 // ================================================================================================
-// Atlas::setMSDFTileSize / registerMSDF / getMSDFTextureData
+// Atlas::setMSDFTileSize / requestMSDF / getMSDFTextureData
 //
 // Per-shape opt-in MSDF generation. setMSDFTileSize() locks in the tile dimensions for the
 // atlas; all layers in a sampler2DArray must be identical (hard GPU constraint).
-// registerMSDF() must be called after build() but before packTextures().
+// requestMSDF() may be called any time -- pre-build calls are queued and rendered inside
+// build() itself (see Atlas::build()'s _pendingMSDF drain); post-build calls render immediately.
 //
 // getMSDFTextureData() packs all registered tiles into a single RGB32F TextureData on first
 // call (lazy). depth == number of layers; width == height == tileSize.
@@ -684,7 +703,7 @@ void Atlas::rasterizeSDFAtlas() {
 #ifdef SLUGHORN_HAS_MSDF
 void Atlas::setMSDFTileSize(uint32_t tileSize) {
 	if(!_msdfTileData.empty()) throw std::runtime_error(
-		"Atlas::setMSDFTileSize: cannot change tile size after registerMSDF() has been called"
+		"Atlas::setMSDFTileSize: cannot change tile size after MSDF tiles have been rendered"
 	);
 
 	_msdfTileSize = tileSize;
@@ -694,54 +713,18 @@ uint32_t Atlas::getMSDFTileSize() const {
 	return _msdfTileSize != 0 ? _msdfTileSize : 128u;
 }
 
-int Atlas::registerMSDF(Key key, slug_t range, MSDFEdgeColoring coloring) {
-	if(!_built) throw std::runtime_error("Atlas::registerMSDF: call after build()");
-
-	auto sit = _shapes.find(key);
-
-	if(sit == _shapes.end()) throw std::out_of_range("Atlas::registerMSDF: key not found in atlas");
-
-	auto existing = _msdfLayerMap.find(key);
-
-	if(existing != _msdfLayerMap.end()) return existing->second;
-
-	const uint32_t tileSize = _msdfTileSize != 0 ? _msdfTileSize : 128u;
-
-	_msdfTileSize = tileSize;
-
-	const int layer = static_cast<int>(_msdfTileData.size());
-	auto grid = render::renderMSDFTile(*this, key, tileSize, range, coloring);
-
-	_msdfTileData.push_back(std::move(grid.data));
-
-	_msdfLayerMap[key] = layer;
-	_msdfDirty = true;
-
-	sit->second.msdfLayer = layer;
-	sit->second.msdfRange = range;
-
-	_packingStats.msdfTileSize = tileSize;
-	_packingStats.msdfLayerCount = static_cast<uint32_t>(_msdfTileData.size());
-	_packingStats.msdfTexelsTotal = tileSize * tileSize * _packingStats.msdfLayerCount;
-
-	return layer;
-}
-
-void Atlas::registerMSDF(const std::vector<Key>& keys, slug_t range, MSDFEdgeColoring coloring) {
-	if(!_built) throw std::runtime_error("Atlas::registerMSDF: call after build()");
-
-	// Filter to new keys only; validate all exist before touching any state.
+// Shared core: filters already-registered keys, renders remaining tiles (parallel when
+// SLUGHORN_HAS_PARALLEL, since each tile is fully independent -- no atlas writes inside the
+// parallel region), commits serially for deterministic layer ordering. Callers (requestMSDF's
+// two overloads, both the immediate-post-build path and build()'s pre-build drain) are
+// responsible for validating key existence before calling -- that check differs by whether the
+// atlas has been built yet (_shapes vs _build), so it can't live here.
+void Atlas::_commitMSDF(const std::vector<Key>& keys, slug_t range, MSDFEdgeColoring coloring) {
 	std::vector<Key> newKeys;
 	newKeys.reserve(keys.size());
 
 	for(const Key& key : keys) {
-		if(_msdfLayerMap.count(key)) continue;
-
-		if(_shapes.find(key) == _shapes.end()) throw std::out_of_range(
-			"Atlas::registerMSDF: key not found in atlas"
-		);
-
-		newKeys.push_back(key);
+		if(!_msdfLayerMap.count(key)) newKeys.push_back(key);
 	}
 
 	if(newKeys.empty()) return;
@@ -750,7 +733,6 @@ void Atlas::registerMSDF(const std::vector<Key>& keys, slug_t range, MSDFEdgeCol
 
 	_msdfTileSize = tileSize;
 
-	// Render all tiles - each is fully independent, no atlas writes inside the parallel region.
 	std::vector<render::MSDFGrid> grids(newKeys.size());
 
 #ifdef SLUGHORN_HAS_PARALLEL
@@ -786,6 +768,48 @@ void Atlas::registerMSDF(const std::vector<Key>& keys, slug_t range, MSDFEdgeCol
 	_packingStats.msdfTileSize = tileSize;
 	_packingStats.msdfLayerCount = static_cast<uint32_t>(_msdfTileData.size());
 	_packingStats.msdfTexelsTotal = tileSize * tileSize * _packingStats.msdfLayerCount;
+}
+
+int Atlas::requestMSDF(Key key, slug_t range, MSDFEdgeColoring coloring) {
+	if(_built) {
+		if(_shapes.find(key) == _shapes.end())
+			throw std::out_of_range("Atlas::requestMSDF: key not found in atlas");
+
+		_commitMSDF({key}, range, coloring);
+
+		const auto it = _msdfLayerMap.find(key);
+
+		return it != _msdfLayerMap.end() ? it->second : -1;
+	}
+
+	// Pre-build: _shapes doesn't exist yet (populated by packTextures()) -- validate against the
+	// pre-build working map instead, then queue for build() to render once positions are known.
+	if(_build.find(key) == _build.end())
+		throw std::out_of_range("Atlas::requestMSDF: key not found in atlas");
+
+	_pendingMSDF.push_back({key, range, coloring});
+
+	return -1;
+}
+
+void Atlas::requestMSDF(const std::vector<Key>& keys, slug_t range, MSDFEdgeColoring coloring) {
+	if(_built) {
+		for(const Key& key : keys) {
+			if(_shapes.find(key) == _shapes.end())
+				throw std::out_of_range("Atlas::requestMSDF: key not found in atlas");
+		}
+
+		_commitMSDF(keys, range, coloring);
+
+		return;
+	}
+
+	for(const Key& key : keys) {
+		if(_build.find(key) == _build.end())
+			throw std::out_of_range("Atlas::requestMSDF: key not found in atlas");
+
+		_pendingMSDF.push_back({key, range, coloring});
+	}
 }
 
 const Atlas::TextureData& Atlas::getMSDFTextureData() const {

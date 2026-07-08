@@ -30,7 +30,7 @@ import slughorn
 # ---------------------------------------------------------------------------
 
 HAS_SERIAL = hasattr(slughorn, "read")
-HAS_MSDF   = hasattr(slughorn.Atlas, "register_msdf")
+HAS_MSDF   = hasattr(slughorn.Atlas, "request_msdf")
 
 skip_serial = pytest.mark.skipif(not HAS_SERIAL, reason="built without SLUGHORN_SERIAL=ON")
 skip_msdf   = pytest.mark.skipif(not HAS_MSDF,   reason="built without SLUGHORN_MSDF=ON")
@@ -222,7 +222,7 @@ def _msdf_atlas(tile_size=64, range_=0.1):
     """Built atlas with one MSDF-registered shape."""
     atlas = _unit_square_atlas()
     atlas.msdf_tile_size = tile_size
-    atlas.register_msdf(slughorn.Key("rect"), range_)
+    atlas.request_msdf(slughorn.Key("rect"), range_)
     return atlas
 
 
@@ -365,7 +365,7 @@ def test_msdf_shapes_without_msdf_have_negative_layer(tmp_path):
     atlas = _atlas_with_composite()
     # Register MSDF only for "A", not "B"
     atlas.msdf_tile_size = 32
-    atlas.register_msdf(slughorn.Key("A"), 0.1)
+    atlas.request_msdf(slughorn.Key("A"), 0.1)
     path = str(tmp_path / "partial.slug")
     slughorn.write(atlas, path)
     back = slughorn.read(path)

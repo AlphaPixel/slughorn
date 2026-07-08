@@ -68,7 +68,7 @@
 //         "band_offset_x": 0.0, "band_offset_y": 0.0,
 //         "bearing_x": 0.0, "bearing_y": 0.7,
 //         "width": 1.0, "height": 0.7, "advance": 1.0,
-//         "msdf_layer": 0, "msdf_range": 0.1  // optional; only when registerMSDF() was called
+//         "msdf_layer": 0, "msdf_range": 0.1  // optional; only when requestMSDF() was called
 //       }
 //     ],
 //     "composites": [

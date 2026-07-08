@@ -1,21 +1,24 @@
 #!/usr/bin/env python3
-# slughorn-msdf -- visualize MSDF tiles from a slughorn atlas.
+# slughorn-msdf - visualize MSDF tiles from a slughorn atlas.
 #
-# Uses register_msdf() + getMSDFTextureData() — the exact GPU pipeline that
-# osgSlug uploads to sampler2DArray. What you see is exactly what the fragment
-# shader reads; there is no separate "visualization" path.
+# Uses request_msdf() + getMSDFTextureData() - the exact GPU pipeline that osgSlug uploads to
+# sampler2DArray. What you see is exactly what the fragment shader reads; there is no separate
+# "visualization" path.
 #
 # Each shape is rendered as two side-by-side panels:
-#   Left  — RGB false-color (raw MSDF channels; mirrors DEBUG_RAW_MSDF in FRAG_EXT_GLOW)
-#   Right — median reconstruction: max(min(r,g), min(max(r,g),b))
-#            (what osgSlug_SampleMSDF() returns as the scalar coverage value)
+#
+# Left - RGB false-color (raw MSDF channels; mirrors DEBUG_RAW_MSDF in FRAG_EXT_GLOW)
+# Right - median reconstruction: max(min(r,g), min(max(r,g),b)) (what osgSlug_SampleMSDF() returns
+# as the scalar coverage value)
 #
 # Usage:
-#   python3 slughorn-msdf                  # demo: circle + triangle
-#   python3 slughorn-msdf atlas.slug       # .slug or .slugb; tiles registered if absent
+#
+# python3 slughorn-msdf # demo: circle + triangle
+# python3 slughorn-msdf atlas.slug # .slug or .slugb; tiles registered if absent
 #
 # Output:
-#   slughorn_msdf.png   -- one labeled row per shape
+#
+# slughorn_msdf.png - one labeled row per shape
 
 import sys
 import numpy as np
@@ -27,144 +30,146 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "BUILD"))
 import slughorn
 import slughorn.canvas
 
-TILE_SIZE  = 128   # tile size when registering fresh; ignored for pre-registered atlases
-MSDF_RANGE = 0.1   # em-space SDF spread (must match registerMSDF range for correct coverage)
-PANEL_GAP  = 4     # pixel gap between RGB and median panels
-OUT_PNG    = "slughorn_msdf.png"
-OUT_JSON   = "slughorn_msdf.json"
+TILE_SIZE = 128 # tile size when registering fresh; ignored for pre-registered atlases
+MSDF_RANGE = 0.1 # em-space SDF spread (must match requestMSDF range for correct coverage)
+PANEL_GAP = 4 # pixel gap between RGB and median panels
+OUT_PNG = "slughorn_msdf.png"
+OUT_JSON = "slughorn_msdf.json"
 
 _flags = {a for a in sys.argv[1:] if a.startswith("--")}
-_args  = [a for a in sys.argv[1:] if not a.startswith("--")]
+_args = [a for a in sys.argv[1:] if not a.startswith("--")]
 
 WRITE_SIDECAR = "--sidecar" in _flags
 
-
 def build_demo_atlas():
-    atlas = slughorn.Atlas()
-    canvas = slughorn.canvas.Canvas(atlas)
+	atlas = slughorn.Atlas()
+	canvas = slughorn.canvas.Canvas(atlas)
 
-    canvas.circle(0.5, 0.5, 0.45)
-    canvas.fill(slughorn.Color(1, 1, 1, 1), 1.0, "circle")
-    canvas.finalize("circle_comp")
+	canvas.circle(0.5, 0.5, 0.45)
+	canvas.fill(slughorn.Color(1, 1, 1, 1), 1.0, "circle")
+	canvas.finalize("circle_comp")
 
-    canvas.begin_path()
-    canvas.move_to(0.5, 0.05)
-    canvas.line_to(0.95, 0.95)
-    canvas.line_to(0.05, 0.95)
-    canvas.close_path()
-    canvas.fill(slughorn.Color(1, 1, 1, 1), 1.0, "triangle")
-    canvas.finalize("triangle_comp")
+	canvas.begin_path()
+	canvas.move_to(0.5, 0.05)
+	canvas.line_to(0.95, 0.95)
+	canvas.line_to(0.05, 0.95)
+	canvas.close_path()
+	canvas.fill(slughorn.Color(1, 1, 1, 1), 1.0, "triangle")
+	canvas.finalize("triangle_comp")
 
-    atlas.build()
-    return atlas
+	atlas.build()
 
+	return atlas
 
 def ensure_msdf_registered(atlas):
-    """Register MSDF tiles for any shapes that don't have one yet."""
-    to_register = [k for k, s in atlas.get_shapes().items() if s.msdf_layer < 0]
+	"""Register MSDF tiles for any shapes that don't have one yet."""
+	to_register = [k for k, s in atlas.get_shapes().items() if s.msdf_layer < 0]
 
-    if not to_register:
-        return
+	if not to_register:
+		return
 
-    # tile_size is locked after the first register_msdf() call; only set it
-    # when starting fresh (no layers registered yet).
-    if atlas.packing_stats.msdf_layer_count == 0:
-        atlas.msdf_tile_size = TILE_SIZE
+	# tile_size is locked after the first request_msdf() call; only set it
+	# when starting fresh (no layers registered yet).
+	if atlas.packing_stats.msdf_layer_count == 0:
+		atlas.msdf_tile_size = TILE_SIZE
 
-    atlas.register_msdf(to_register, MSDF_RANGE)
-
+	atlas.request_msdf(to_register, MSDF_RANGE)
 
 def median3(arr):
-    """Per-pixel median of RGB channels — matches osgSlug_SampleMSDF(). arr: (H,W,3) float32."""
-    r, g, b = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]
-    return np.maximum(np.minimum(r, g), np.minimum(np.maximum(r, g), b))
+	"""Per-pixel median of RGB channels - matches osgSlug_SampleMSDF(). arr: (H,W,3) float32."""
+	r, g, b = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]
 
+	return np.maximum(np.minimum(r, g), np.minimum(np.maximum(r, g), b))
 
 def make_row(tile_f32):
-    """(H,W,3) float32 → (H, W*2+gap, 3) uint8: [RGB false-color | median grayscale]."""
-    H, W = tile_f32.shape[:2]
-    clipped = np.clip(tile_f32, 0.0, 1.0)
+	"""(H,W,3) float32 -> (H, W*2+gap, 3) uint8: [RGB false-color | median grayscale]."""
+	H, W = tile_f32.shape[:2]
+	clipped = np.clip(tile_f32, 0.0, 1.0)
+	rgb_u8 = (clipped * 255).astype(np.uint8)
+	med = median3(clipped)
+	med_u8 = (med * 255).astype(np.uint8)
+	med_rgb = np.stack([med_u8, med_u8, med_u8], axis=-1)
+	gap = np.zeros((H, PANEL_GAP, 3), dtype=np.uint8)
 
-    rgb_u8  = (clipped * 255).astype(np.uint8)
-
-    med     = median3(clipped)
-    med_u8  = (med * 255).astype(np.uint8)
-    med_rgb = np.stack([med_u8, med_u8, med_u8], axis=-1)
-
-    gap = np.zeros((H, PANEL_GAP, 3), dtype=np.uint8)
-
-    return np.concatenate([rgb_u8, gap, med_rgb], axis=1)
-
+	return np.concatenate([rgb_u8, gap, med_rgb], axis=1)
 
 def main():
-    if _args:
-        atlas = slughorn.read(_args[0])
-        print(f"Loaded: {_args[0]}")
-    else:
-        atlas = build_demo_atlas()
-        print("Demo atlas: circle + triangle")
+	if _args:
+		atlas = slughorn.read(_args[0])
 
-    ensure_msdf_registered(atlas)
+		print(f"Loaded: {_args[0]}")
 
-    td = atlas.get_msdf_texture_data()
+	else:
+		atlas = build_demo_atlas()
 
-    if td is None:
-        print("No MSDF tiles registered — is slughorn built with SLUGHORN_MSDF=ON?")
-        sys.exit(1)
+		print("Demo atlas: circle + triangle")
 
-    stats   = atlas.packing_stats
-    T       = stats.msdf_tile_size
-    n       = stats.msdf_layer_count
-    shapes  = {k: s for k, s in atlas.get_shapes().items() if s.msdf_layer >= 0}
+	ensure_msdf_registered(atlas)
 
-    print(f"{n} tile(s)  tile_size={T}  range={MSDF_RANGE}\n")
+	td = atlas.get_msdf_texture_data()
 
-    raw = np.frombuffer(bytes(td), dtype=np.float32).reshape(n, T, T, 3)
+	if td is None:
+		print("No MSDF tiles registered - is slughorn built with SLUGHORN_MSDF=ON?")
 
-    rows = []
+		sys.exit(1)
 
-    for key, shape in sorted(shapes.items(), key=lambda x: x[1].msdf_layer):
-        row_img = Image.fromarray(make_row(raw[shape.msdf_layer]))
+	stats = atlas.packing_stats
+	T = stats.msdf_tile_size
+	n = stats.msdf_layer_count
+	shapes = {k: s for k, s in atlas.get_shapes().items() if s.msdf_layer >= 0}
 
-        draw = ImageDraw.Draw(row_img)
-        draw.text((T + PANEL_GAP + 4, 2), str(key), fill=(255, 220, 0))
+	print(f"{n} tile(s) tile_size={T} range={MSDF_RANGE}\n")
 
-        rows.append(row_img)
+	raw = np.frombuffer(bytes(td), dtype=np.float32).reshape(n, T, T, 3)
+	rows = []
 
-        print(f"  {str(key):<28}  layer={shape.msdf_layer}  range={shape.msdf_range:.3f}")
+	for key, shape in sorted(shapes.items(), key=lambda x: x[1].msdf_layer):
+		row_img = Image.fromarray(make_row(raw[shape.msdf_layer]))
+		draw = ImageDraw.Draw(row_img)
 
-    row_w, row_h = rows[0].size
-    out = Image.new("RGB", (row_w, row_h * len(rows)), (18, 18, 18))
+		draw.text((T + PANEL_GAP + 4, 2), str(key), fill=(255, 220, 0))
 
-    for i, row in enumerate(rows):
-        out.paste(row, (0, i * row_h))
+		rows.append(row_img)
 
-    atlas_h = row_h * len(rows)
-    out.save(OUT_PNG)
+		print(f" {str(key):<28} layer={shape.msdf_layer} range={shape.msdf_range:.3f}")
 
-    print(f"\n-> {OUT_PNG}  ({row_w}x{atlas_h})")
-    print(f"   left={T}x{T} RGB false-color  |  right={T}x{T} median reconstruction")
+	row_w, row_h = rows[0].size
 
-    if WRITE_SIDECAR:
-        import json as _json
-        sidecar = {
-            "image":    OUT_PNG,
-            "atlas_w":  row_w,
-            "atlas_h":  atlas_h,
-            "tile_size": T,
-            "panel_gap": PANEL_GAP,
-            "shapes":   {},
-        }
-        for key, shape in sorted(shapes.items(), key=lambda x: x[1].msdf_layer):
-            i = shape.msdf_layer
-            sidecar["shapes"][str(key)] = {
-                "layer":  i,
-                "rgb":    {"x": 0,             "y": i * T, "w": T, "h": T},
-                "median": {"x": T + PANEL_GAP, "y": i * T, "w": T, "h": T},
-            }
-        Path(OUT_JSON).write_text(_json.dumps(sidecar, indent=2))
-        print(f"-> {OUT_JSON}")
+	out = Image.new("RGB", (row_w, row_h * len(rows)), (18, 18, 18))
 
+	for i, row in enumerate(rows):
+		out.paste(row, (0, i * row_h))
+
+	atlas_h = row_h * len(rows)
+
+	out.save(OUT_PNG)
+
+	print(f"\n-> {OUT_PNG} ({row_w}x{atlas_h})")
+	print(f" left={T}x{T} RGB false-color | right={T}x{T} median reconstruction")
+
+	if WRITE_SIDECAR:
+		import json as _json
+
+		sidecar = {
+			"image": OUT_PNG,
+			"atlas_w": row_w,
+			"atlas_h": atlas_h,
+			"tile_size": T,
+			"panel_gap": PANEL_GAP,
+			"shapes": {},
+		}
+
+		for key, shape in sorted(shapes.items(), key=lambda x: x[1].msdf_layer):
+			i = shape.msdf_layer
+			sidecar["shapes"][str(key)] = {
+				"layer": i,
+				"rgb": {"x": 0, "y": i * T, "w": T, "h": T},
+				"median": {"x": T + PANEL_GAP, "y": i * T, "w": T, "h": T},
+			}
+
+		Path(OUT_JSON).write_text(_json.dumps(sidecar, indent=2))
+
+		print(f"-> {OUT_JSON}")
 
 if __name__ == "__main__":
-    main()
+	main()

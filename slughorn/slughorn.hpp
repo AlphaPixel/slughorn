@@ -725,8 +725,9 @@ public:
 		uint32_t scanlineCurveStart = 0;
 		uint32_t scanlineCurveCount = 0;
 
-		// Layer index in the MSDF Texture2DArray; -1 = no MSDF registered for this shape.
-		// Set by Atlas::registerMSDF() after build().
+		// Layer index in the MSDF Texture2DArray; -1 = no MSDF tile rendered for this shape yet
+		// (either never requested, or requested pre-build and still queued -- see
+		// Atlas::requestMSDF()). Set once Atlas::requestMSDF() actually renders the tile.
 		int msdfLayer = -1;
 
 		// Em-space SDF range used when this shape's tile was generated.
@@ -870,7 +871,7 @@ public:
 		uint32_t sdfTexelsTotal = 0; // atlas width * height (allocated)
 
 		// Per-shape MSDF Texture2DArray (RGB32F, 12 bytes/texel) - updated incrementally by
-		// registerMSDF() as shapes opt in. All fields stay 0 if never called.
+		// requestMSDF() as shapes opt in. All fields stay 0 if never called.
 		uint32_t msdfLayerCount = 0; // number of registered layers
 		uint32_t msdfTileSize = 0; // width == height of each layer
 		uint32_t msdfTexelsTotal = 0; // tileSize * tileSize * msdfLayerCount
@@ -1132,11 +1133,18 @@ public:
 	// --------------------------------------------------------------------------------------------
 	// Per-shape MSDF opt-in (requires SLUGHORN_MSDF=ON)
 	//
-	// Call setMSDFTileSize() once before the registerMSDF() loop to set the tile dimensions
+	// Call setMSDFTileSize() once before the first requestMSDF() call to set the tile dimensions
 	// for the entire atlas. All layers in a sampler2DArray must be identical - mixing sizes
 	// is a hard GPU constraint. Defaults to 128 if never called.
 	//
-	// Call registerMSDF() for each shape after build() and before packTextures().
+	// Call requestMSDF() for each shape whenever it's convenient -- authoring time (before
+	// build(), the common case: right after addShape()/Canvas::fill()/Canvas::mask() commits the
+	// shape) or after build(), same as the old registerMSDF() name required. Pre-build calls are
+	// queued and actually rendered inside build() itself (tile rendering needs each shape's final
+	// position in the packed atlas texture, which build() computes); post-build calls render
+	// immediately, same as before. Either way there is no second "remember to come back after
+	// build()" step -- requestMSDF() is safe to call exactly once, wherever it's naturally reached
+	// in authoring order.
 	// range controls the em-space spread of the distance gradient (default 0.1).
 	// coloring selects the msdfgen edge-coloring algorithm: ByDistance eliminates corner
 	// spike artifacts at the cost of slightly more CPU work; Simple is faster but prone
@@ -1145,8 +1153,10 @@ public:
 	// getMSDFTextureData() packs registered tiles into a single RGB32F TextureData on first
 	// call (lazy). depth == number of layers; width == height == tileSize.
 	//
-	// Shape::msdfLayer is updated in-place by registerMSDF() so callers can read it from
-	// getShape() without a separate lookup.
+	// Shape::msdfLayer is updated in-place once a tile is actually rendered, so callers can read
+	// it from getShape() without a separate lookup -- but note that for a pre-build requestMSDF()
+	// call, that update doesn't happen until build() drains the queue, not at the requestMSDF()
+	// call site itself.
 	// --------------------------------------------------------------------------------------------
 
 #ifdef SLUGHORN_HAS_MSDF
@@ -1155,13 +1165,16 @@ public:
 	void setMSDFTileSize(uint32_t tileSize);
 	uint32_t getMSDFTileSize() const;
 
-	int registerMSDF(
+	// Returns the assigned layer index once rendered, or -1 if the call was queued (pre-build)
+	// rather than rendered immediately -- read Shape::msdfLayer via getShape() after build() to
+	// recover it in that case.
+	int requestMSDF(
 		Key key,
 		slug_t range=0.1_cv,
 		MSDFEdgeColoring coloring=MSDFEdgeColoring::ByDistance
 	);
 
-	void registerMSDF(
+	void requestMSDF(
 		const std::vector<Key>& keys,
 		slug_t range=0.1_cv,
 		MSDFEdgeColoring coloring=MSDFEdgeColoring::ByDistance
@@ -1288,6 +1301,14 @@ private:
 	void rasterizeGradients();
 	void rasterizeSDFAtlas();
 
+#ifdef SLUGHORN_HAS_MSDF
+	// Shared core of requestMSDF()'s immediate path and build()'s drain of _pendingMSDF: filters
+	// already-registered keys, renders remaining tiles (parallel when SLUGHORN_HAS_PARALLEL),
+	// commits serially for deterministic layer ordering. Assumes every key already exists in
+	// _shapes -- callers are responsible for that check (differs by pre/post-build call site).
+	void _commitMSDF(const std::vector<Key>& keys, slug_t range, MSDFEdgeColoring coloring);
+#endif
+
 	// --------------------------------------------------------------------------------------------
 	// Data
 	// --------------------------------------------------------------------------------------------
@@ -1310,7 +1331,12 @@ private:
 	std::vector<std::vector<float>> _msdfTileData; // raw RGB32F floats per registered tile
 	uint32_t _msdfTileSize = 0;
 	mutable TextureData _msdfData; // packed lazily by getMSDFTextureData()
-	mutable bool _msdfDirty = false; // set true by registerMSDF(), cleared on pack
+	mutable bool _msdfDirty = false; // set true once a tile is actually rendered, cleared on pack
+
+	// requestMSDF() calls made before build() -- rendered has no valid atlas-texture position for
+	// a shape until build()'s packTextures() runs, so these wait and get drained there instead.
+	struct PendingMSDF { Key key; slug_t range; MSDFEdgeColoring coloring; };
+	std::vector<PendingMSDF> _pendingMSDF;
 #endif
 
 	PackingStats _packingStats; // populated by packTextures()

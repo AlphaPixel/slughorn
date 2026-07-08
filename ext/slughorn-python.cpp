@@ -642,7 +642,7 @@ PYBIND11_MODULE(slughorn, m) {
 			"If True, inverts coverage so the outside of the mask shape becomes the inside.")
 		.def_static("msdf", &slughorn::Mask::msdf,
 			py::arg("key"), py::arg("invert") = false,
-			"Construct a baked-MSDF mask. key must be registered with atlas.registerMSDF().")
+			"Construct a baked-MSDF mask. key must be requested with atlas.request_msdf().")
 		.def_static("circle", &slughorn::Mask::circle,
 			py::arg("cx"), py::arg("cy"), py::arg("r"), py::arg("invert") = false,
 			"Analytical circle mask: center (cx, cy), radius r.")
@@ -989,11 +989,12 @@ PYBIND11_MODULE(slughorn, m) {
 #ifdef SLUGHORN_HAS_MSDF
 		.def_readonly("msdf_layer", &slughorn::Atlas::Shape::msdfLayer,
 			"Texture2DArray layer index for this shape's MSDF tile. "
-			"-1 if register_msdf() has not been called for this key."
+			"-1 if request_msdf() has not been called for this key, or was called pre-build and "
+			"is still queued (check after build())."
 		)
 		.def_readonly("msdf_range", &slughorn::Atlas::Shape::msdfRange,
 			"Em-space SDF range used when the MSDF tile was generated. "
-			"0.0 if register_msdf() has not been called for this key."
+			"0.0 if request_msdf() has not rendered a tile for this key yet."
 		)
 #endif
 
@@ -1110,7 +1111,7 @@ PYBIND11_MODULE(slughorn, m) {
 		.def_readonly("sdf_texels_padding", &slughorn::Atlas::PackingStats::sdfTexelsPadding)
 		.def_readonly("sdf_texels_total", &slughorn::Atlas::PackingStats::sdfTexelsTotal)
 		.def_readonly("msdf_layer_count", &slughorn::Atlas::PackingStats::msdfLayerCount,
-			"Number of layers registered via register_msdf() (0 unless used).")
+			"Number of layers registered via request_msdf() (0 unless used).")
 		.def_readonly("msdf_tile_size", &slughorn::Atlas::PackingStats::msdfTileSize)
 		.def_readonly("msdf_texels_total", &slughorn::Atlas::PackingStats::msdfTexelsTotal)
 		.def("curve_utilization", &slughorn::Atlas::PackingStats::curveUtilization)
@@ -1366,42 +1367,47 @@ PYBIND11_MODULE(slughorn, m) {
 			&slughorn::Atlas::getMSDFTileSize,
 			&slughorn::Atlas::setMSDFTileSize,
 			"Tile size for MSDF tiles (default 128). All layers in a sampler2DArray must be\n"
-			"identical - hard GPU constraint. Read any time; write only before register_msdf().\n"
-			"Setting after register_msdf() has been called raises RuntimeError."
+			"identical - hard GPU constraint. Read any time; write only before the first MSDF\n"
+			"tile is actually rendered (see request_msdf()). Setting afterward raises RuntimeError."
 		)
 
-		.def("register_msdf",
+		.def("request_msdf",
 			[](
 				slughorn::Atlas& a,
 				slughorn::Key key,
 				slug_t range,
 				slughorn::Atlas::MSDFEdgeColoring coloring
 			) {
-				return a.registerMSDF(key, range, coloring);
+				return a.requestMSDF(key, range, coloring);
 			},
 			"key"_a, "range"_a=0.1, "coloring"_a=slughorn::Atlas::MSDFEdgeColoring::ByDistance,
-			"Opt this shape in to MSDF tile generation.\n"
-			"Must be called after build() and before the graphics adapter packs textures.\n"
+			"Opt this shape in to MSDF tile generation. May be called any time -- before build()\n"
+			"(the common case, right after the shape itself is authored: queued, and actually\n"
+			"rendered inside build() once each shape's packed-atlas position is known) or after\n"
+			"build() (rendered immediately, returning the layer index right away).\n"
 			"range: em-space SDF spread; controls gradient depth and tile bbox margin.\n"
 			"coloring: MSDFEdgeColoring.ByDistance (default, fewer artifacts) or .Simple (faster).\n"
-			"Returns the layer index in the resulting Texture2DArray.\n"
-			"Shape.msdf_layer and .msdf_range are updated in-place. Idempotent for repeated keys."
+			"Returns the layer index in the resulting Texture2DArray, or -1 if the call was queued\n"
+			"(read Shape.msdf_layer after build() to recover it in that case).\n"
+			"Shape.msdf_layer and .msdf_range are updated in-place once rendered. Idempotent for\n"
+			"repeated keys."
 		)
 
-		.def("register_msdf",
+		.def("request_msdf",
 			[](
 				slughorn::Atlas& a,
 				const std::vector<slughorn::Key>& keys,
 				slug_t range,
 				slughorn::Atlas::MSDFEdgeColoring coloring
 			) {
-				a.registerMSDF(keys, range, coloring);
+				a.requestMSDF(keys, range, coloring);
 			},
 			"keys"_a, "range"_a=0.1, "coloring"_a=slughorn::Atlas::MSDFEdgeColoring::ByDistance,
-			"Batch overload: register MSDF tiles for a list of keys.\n"
-			"Tiles are rendered in parallel (when built with SLUGHORN_RENDER_PARALLEL=ON),\n"
-			"then committed in deterministic order. Idempotent for already-registered keys.\n"
-			"Must be called after build() and before the graphics adapter packs textures."
+			"Batch overload: request MSDF tiles for a list of keys. May be called any time, same\n"
+			"as the single-key overload. Once rendered (either immediately, if already built, or\n"
+			"inside build() if requested earlier), tiles are rendered in parallel (when built with\n"
+			"SLUGHORN_RENDER_PARALLEL=ON), then committed in deterministic order. Idempotent for\n"
+			"already-registered keys."
 		)
 
 		.def("get_msdf_layer",
@@ -2371,6 +2377,42 @@ PYBIND11_MODULE(slughorn, m) {
 				"advance"_a,
 				"Set the horizontal advance of the composite being built."
 			)
+
+			// MSDF opt-in + mask authoring -------------------------------------
+
+#ifdef SLUGHORN_HAS_MSDF
+			.def("set_msdf",
+				&slughorn::canvas::Canvas::setMSDF,
+				"enabled"_a, "range"_a=0.1, "coloring"_a=slughorn::Atlas::MSDFEdgeColoring::ByDistance,
+				"Toggle: when enabled, every subsequent fill()/stroke()/text()/text_on_path()\n"
+				"commit also requests an MSDF tile for the shape it just registered (see\n"
+				"Atlas.request_msdf()) -- no separate post-build registration loop needed.\n"
+				"Persists like fill style, same convention as auto_metrics: applies until\n"
+				"set_msdf(False) or a new set_msdf() call."
+			)
+			.def_property_readonly("msdf", &slughorn::canvas::Canvas::getMSDF,
+				"Current set_msdf() enabled state."
+			)
+#endif
+
+			// mask() - MSDF form: commits the current path as a baked mask shape.
+			.def("mask",
+				py::overload_cast<slug_t, bool>(&slughorn::canvas::Canvas::mask),
+				"range"_a=0.1, "invert"_a=false,
+				"Commit the current path as an MSDF-baked mask and stage it onto the composite\n"
+				"being built (defineShape() semantics -- no Layer pushed). Auto-generates a key,\n"
+				"derives cx/cy/r from the path's own canvas-space bbox, and requests its MSDF\n"
+				"tile itself -- no separate atlas.request_msdf() call needed afterward.\n"
+				"Returns the constructed Mask (an empty Mask if the path was empty)."
+			)
+			// mask() - procedural/explicit form: stage an already-built Mask.
+			.def("mask",
+				py::overload_cast<const slughorn::Mask&>(&slughorn::canvas::Canvas::mask),
+				"mask"_a,
+				"Stage an already-constructed Mask (e.g. slughorn.Mask.circle(...)) onto the\n"
+				"composite being built. Procedural types need no atlas registration at all."
+			)
+
 			.def("finalize",
 				py::overload_cast<>(&slughorn::canvas::Canvas::finalize),
 				"Return the completed CompositeShape and reset internal state."

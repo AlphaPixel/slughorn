@@ -704,7 +704,7 @@ inline MSDFGrid renderMSDFTile(
 	for(float& v : buf) v = std::clamp(v, 0.0f, 1.0f);
 
 	// No Y-flip. This function has exactly one purpose: feeding the GPU sampler2DArray
-	// via Atlas::registerMSDF() -> packTextures(). For that path all three conventions
+	// via Atlas::requestMSDF() -> packTextures(). For that path all three conventions
 	// agree without a flip, and a flip would break all of them simultaneously:
 	//
 	// msdfgen native : row 0 = bottom of shape (Y-up coordinate space)
