@@ -612,7 +612,7 @@ static void onCursorPos(GLFWwindow* win, double x, double y) {
 
 	if(view->leftDragging) {
 		view->yaw -= dx * 0.01f;
-		view->pitch -= dy * 0.01f;
+		view->pitch += dy * 0.01f;
 
 		const float limit = 1.45f;
 		if(view->pitch > limit) view->pitch = limit;
