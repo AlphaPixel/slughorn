@@ -35,7 +35,7 @@ inline std::string to_sstr(const auto&... args) {
 	return oss.str();
 }
 
-} // namespace detail
+}
 
 // Intended to be used like this: `auto [major, minor, patch] = slughorn::versionNumbers();`
 constexpr auto versionNumbers() {
@@ -1750,7 +1750,7 @@ inline slug_t quadExtrema(const Atlas::Curve& c, bool useY) {
 	return (t > 0_cv && t < 1_cv) ? t : -1.0_cv;
 }
 
-} // namespace detail
+}
 
 // Decomposes one quadratic Bezier into monotonic-in-both-axes sub-curves (at most 4).
 // Appends results to `out`. Horizontal linear segments are dropped.

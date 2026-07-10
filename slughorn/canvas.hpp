@@ -80,7 +80,7 @@ inline void flattenCurve(
 	flattenCurve(mx, my, m12x, m12y, p2x, p2y, tol, depth + 1, pts);
 }
 
-} // namespace detail
+}
 
 // ================================================================================================
 // Path

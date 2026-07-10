@@ -177,7 +177,7 @@ inline std::vector<Group> groupContours(const std::vector<Ring>& rings) {
 	return groups;
 }
 
-} // namespace detail
+}
 
 // Flattens `contours` (as returned by Atlas::getShapeContours()) and triangulates them via
 // earcut. See the file banner above for the exterior/hole grouping rules.
@@ -309,5 +309,5 @@ inline Mesh3D extrude(
 	return mesh;
 }
 
-} // namespace tessellate
-} // namespace slughorn
+}
+}
