@@ -245,6 +245,23 @@ the GPU during rendering (though their "color stop" values are static).
 <tr>
 <td align="center">
 
+![Masking](https://slughorn.io/github/masking.png)
+
+</td>
+<td>
+
+**Masking**
+
+Every `CompositeShape` supports its own `slughorn::Mask`, which can be either a
+procedurally generated shape or any arbitrary `slughorn::Shape`. Mask
+"inversion" is also supported.
+
+</td>
+</tr>
+
+<tr>
+<td align="center">
+
 ![HUD](https://slughorn.io/github/hud.png)
 
 </td>
