@@ -28,6 +28,12 @@ https://github.com/user-attachments/assets/5ca6563e-a7d3-44df-9800-beb8716efcad
 
 </div>
 
+## Related Projects
+
+- [osgSlug](https://github.com/AlphaPixel/osgSlug)
+- [osgGLTF](https://github.com/XenonofArcticus/osgGLTF)
+- [OpenSceneGraph.py](https://github.com/AlphaPixel/OpenSceneGraph.py/tree/cubicool-wip)
+
 ---
 
 <div align="center">
