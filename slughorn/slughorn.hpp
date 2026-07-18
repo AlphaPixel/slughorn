@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <concepts>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -71,6 +72,11 @@ namespace literals {
 }
 
 using namespace literals;
+
+// Any type cv() can sensibly convert from - lets Scene (and future call sites) accept int
+// literals, double, slug_t, etc. as query parameters without callers having to think about it.
+template<typename T>
+concept Numeric = std::integral<T> || std::floating_point<T>;
 
 inline constexpr slug_t PI_CV = cv(std::numbers::pi_v<slug_t>);
 inline constexpr slug_t PI_2_CV = cv(std::numbers::pi_v<slug_t> / 2_cv);
@@ -210,6 +216,63 @@ struct GradientInfo {
 	// Sweep only: arc range in turns [0, 1]. Default = full circle.
 	slug_t startAngle = 0_cv;
 	slug_t endAngle = 1_cv;
+};
+
+// ================================================================================================
+// Scene
+//
+// Pixel <-> em-space measurement math. slughorn deals entirely in em-space (the normalized
+// coordinate system shared by Atlas/Shape/Layer), but callers usually think in pixels: "make
+// this stroke 1px wide", "size this shape to fill a 100x100 box", "give me a 2px margin". Scene
+// is the single conversion factor (pixelsPerEm) plus the small set of arithmetic built on it.
+//
+// Scene is measurement math ONLY - it is not a scene graph. It does not know about cameras,
+// transforms, or entity hierarchies; a consumer (e.g. osgSlug::scene()) derives
+// pixelsPerEmX/Y from its own viewport + projection convention and hands back a calibrated Scene.
+// ================================================================================================
+enum class Fit { Contain, Cover }; // CSS object-fit semantics
+
+struct Scene {
+	slug_t pixelsPerEmX = 1_cv;
+	slug_t pixelsPerEmY = 1_cv;
+
+	// Conservative axis - safe for isotropic measurements like stroke width.
+	slug_t pixelsPerEm() const { return std::min(pixelsPerEmX, pixelsPerEmY); }
+
+	// Em-space value equivalent to n pixels (isotropic).
+	template<Numeric T = slug_t>
+	slug_t pixels(T n = T{1}) const { return cv(n) / pixelsPerEm(); }
+
+	// Em-space halfWidth for a stroke of widthPx pixels total.
+	template<Numeric T = slug_t>
+	slug_t halfWidth(T widthPx = T{1}) const { return cv(widthPx) * 0.5_cv / pixelsPerEm(); }
+
+	// Em-space halfWidth per axis - for oriented stamps or elliptical brushes.
+	template<Numeric T = slug_t>
+	slug_t halfWidthX(T widthPx = T{1}) const { return cv(widthPx) * 0.5_cv / pixelsPerEmX; }
+
+	template<Numeric T = slug_t>
+	slug_t halfWidthY(T widthPx = T{1}) const { return cv(widthPx) * 0.5_cv / pixelsPerEmY; }
+
+	// Layer::scale that makes an em-space extent occupy targetPx pixels (single axis).
+	template<Numeric T>
+	slug_t scaleFor(slug_t emExtent, T targetPx) const {
+		return cv(targetPx) / (emExtent * pixelsPerEm());
+	}
+
+	// Layer::scale fitting an em-space (emW x emH) box into (targetWpx x targetHpx), preserving
+	// the shape's natural aspect ratio.
+	template<Numeric TW, Numeric TH>
+	slug_t scaleToFit(
+		slug_t emW, slug_t emH,
+		TW targetWpx, TH targetHpx,
+		Fit mode = Fit::Contain
+	) const {
+		const slug_t sx = scaleFor(emW, targetWpx);
+		const slug_t sy = scaleFor(emH, targetHpx);
+
+		return mode == Fit::Contain ? std::min(sx, sy) : std::max(sx, sy);
+	}
 };
 
 // ================================================================================================
