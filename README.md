@@ -18,10 +18,11 @@ https://github.com/user-attachments/assets/5ca6563e-a7d3-44df-9800-beb8716efcad
 
 <div align="center">
 
-**🔨 What We're Working On** &nbsp;&nbsp;<sub>*Last updated: July 10th, 2026*</sub>
+**🔨 What We're Working On** &nbsp;&nbsp;<sub>*Last updated: July 17th, 2026*</sub>
 
 | | Feature | Status |
 |:---:|---------|:------:|
+| 🎨 | **Remove** the `expand` parameter as CPU-side "hack" | ![In Progress](https://img.shields.io/badge/In_Progress-f59e0b?style=flat-square) |
 | 🎨 | Full Porter-Duff compositing and blend mode support | ![In Progress](https://img.shields.io/badge/In_Progress-f59e0b?style=flat-square) |
 | 🎭 | MSDF and procedurally-based `CompositeShape` masking | ![Complete](https://img.shields.io/badge/Complete-16a34a?style=flat-square) |
 | 🔧 | Improved Blend2D and NanoSVG feature support | ![Planned](https://img.shields.io/badge/Planned-6366f1?style=flat-square) |
