@@ -680,7 +680,8 @@ inline MSDFGrid renderMSDFTile(
 
 	// Expand bounds by range on all sides so the tile edge is deeply exterior (SDF << 0.5).
 	// Without this, curves touching the tight bbox boundary leave edge texels at SDF ~= 0.5, which
-	// CLAMP_TO_EDGE propagates into the expand-padded quad region as ghost fringes. The shader's
+	// CLAMP_TO_EDGE propagates into the quad's margin band (AA margin + layer bleed) as ghost
+	// fringes. The shader's
 	// tileUV accounts for this margin: (emCoord - emOrigin + range) / (emSize + 2*range).
 	const auto bounds = msdfShape.getBounds(range);
 	std::vector<float> buf(tileSize * tileSize * 3);
@@ -693,7 +694,7 @@ inline MSDFGrid renderMSDFTile(
 	msdfgen::generateMSDF(bmp, msdfShape, msdfTransform(bounds, tileSize, tileSize, range));
 
 	// msdfgen's DistanceMapping linearly maps [-range, range] -> [0, 1] with NO clamp; any point
-	// whose true distance exceeds range (always true somewhere in the expand-padded margin
+	// whose true distance exceeds range (always true somewhere in the padded margin
 	// renderMSDFTile's own bounds computation above creates) comes out <0 or >1. The GL_RGB32F
 	// texture this feeds is real floats with no automatic clamping (unlike a normalized 8-bit
 	// format), so that overshoot reaches the shader verbatim, and a legitimately-very-exterior

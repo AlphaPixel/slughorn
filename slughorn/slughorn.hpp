@@ -273,6 +273,18 @@ struct Scene {
 
 		return mode == Fit::Contain ? std::min(sx, sy) : std::max(sx, sy);
 	}
+
+	// Em-size so cap-height glyphs render capHeightPx screen pixels tall at the current
+	// pixelsPerEm rate. capHeightRatio comes from FontMetrics.
+	template<Numeric T = slug_t>
+	slug_t fromCapHeight(T capHeightPx, slug_t capHeightRatio) const {
+		return pixels(capHeightPx) / capHeightRatio;
+	}
+
+	// Reverse: cap-height in screen pixels at the given em-space fontSize.
+	slug_t toCapHeight(slug_t emSize, slug_t capHeightRatio) const {
+		return emSize * capHeightRatio * pixelsPerEm();
+	}
 };
 
 // ================================================================================================
@@ -562,10 +574,14 @@ struct Layer {
 	// layer.color.a acts as a global opacity multiplier.
 	uint32_t gradientId = 0;
 
-	// Extra em-space margin added to the quad on each side (and subtracted/added to em-coords).
-	// The default (0.01) prevents gap artifacts at quad boundaries. Set to 0 for shapes that
-	// use setAutoMetrics(false) so that em-coords stay exactly in [0,1] for GPU tiling.
-	slug_t expand = 0.01_cv;
+	// Extra em-space CONTENT margin on each side of the quad, for effects that intentionally
+	// draw outside the shape's true bounds (outer glow, drop shadow, MSDF spread). Named after
+	// print's bleed: ink that extends past the trim line. This is NOT an antialiasing margin -
+	// the rasterization/AA margin is the renderer's responsibility, computed live in the vertex
+	// stage at pixel scale, never a CPU-side value. The authored quad is ground truth; a
+	// renderer may only fudge rasterization space (outward, at the last moment), never the
+	// content or the alignment/positioning the user authored.
+	slug_t bleed = 0_cv;
 
 	// TODO: Explain this more, once it settles.
 	DrawMode drawMode = DrawMode::Visible;
@@ -838,20 +854,23 @@ public:
 		// transform.dx/dy places the shape in world space. scale converts the
 		// shape's em-space metrics into world units.
 		//
-		// expand is a small extra em-space margin used to enlarge the quad for
-		// AA fringes or rotated content; callers should not derive it from scale.
+		// The returned quad is the TRUE authored quad - no padding, no margin, ever. This is
+		// an API promise: the quad the user asks for IS the quad they get, so anchoring a
+		// shape against another coordinate can never drift. Renderers needing extra
+		// rasterization room (AA fringes) or content room (Layer::bleed) must add it
+		// downstream, at render time, without disturbing these coordinates.
 		//
 		// The returned quad is relative to (0,0) - scene placement is the
 		// caller's responsibility (e.g. osg::MatrixTransform).
-		Quad computeQuad(const Transform& transform, slug_t scale=1_cv, slug_t expand=0_cv) const {
+		Quad computeQuad(const Transform& transform, slug_t scale=1_cv) const {
 			const slug_t ox = (transform.x - originX) * scale;
 			const slug_t oy = (transform.y - originY) * scale;
 
 			return {
-				ox + (bearingX - expand) * scale,
-				oy + (bearingY - height - expand) * scale,
-				ox + (bearingX + width + expand) * scale,
-				oy + (bearingY + expand) * scale
+				ox + bearingX * scale,
+				oy + (bearingY - height) * scale,
+				ox + (bearingX + width) * scale,
+				oy + bearingY * scale
 			};
 		}
 	};
@@ -1939,7 +1958,7 @@ inline std::ostream& operator<<(std::ostream& os, const Layer& l) {
 		<< " scale=" << l.scale
 		<< " effectId=" << l.effectId
 		<< " gradientId=" << l.gradientId
-		<< " expand=" << l.expand
+		<< " bleed=" << l.bleed
 		<< " drawMode=" << static_cast<int>(l.drawMode)
 		<< " blendMode=" << static_cast<int>(l.blendMode) << ")"
 	;
@@ -2063,12 +2082,15 @@ inline std::optional<Quad> CompositeShape::boundingBox(const Atlas& atlas) const
 
 		if(!shape) continue;
 
-		const auto q = shape->computeQuad(l.transform, l.scale, l.expand);
+		const auto q = shape->computeQuad(l.transform, l.scale);
 
-		minX = std::min(minX, q.x0);
-		minY = std::min(minY, q.y0);
-		maxX = std::max(maxX, q.x1);
-		maxY = std::max(maxY, q.y1);
+		// bleed is rendered content (glow/shadow spread), so it belongs in the bounds.
+		const slug_t b = l.bleed * l.scale;
+
+		minX = std::min(minX, q.x0 - b);
+		minY = std::min(minY, q.y0 - b);
+		maxX = std::max(maxX, q.x1 + b);
+		maxY = std::max(maxY, q.y1 + b);
 
 		any = true;
 	}

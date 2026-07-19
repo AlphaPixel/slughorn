@@ -328,9 +328,9 @@ def test_layer_fields():
 	assert l.effectId == 0
 	assert l.gradientId == 0
 
-def test_layer_expand_default():
+def test_layer_bleed_default():
 	l = slughorn.Layer(slughorn.Key("k"), slughorn.Color())
-	assert l.expand == pytest.approx(0.01)
+	assert l.bleed == pytest.approx(0.0)
 
 def test_layer_str_key():
 	l = slughorn.Layer("my_shape")

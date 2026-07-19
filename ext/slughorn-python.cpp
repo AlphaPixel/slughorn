@@ -705,7 +705,7 @@ PYBIND11_MODULE(slughorn, m) {
 				uint32_t effectId,
 				slug_t effectParam,
 				uint32_t gradientId,
-				slug_t expand,
+				slug_t bleed,
 				slughorn::DrawMode drawMode,
 				slughorn::BlendMode blendMode
 			) {
@@ -724,7 +724,7 @@ PYBIND11_MODULE(slughorn, m) {
 				layer.effectId = effectId;
 				layer.effectParam = effectParam;
 				layer.gradientId = gradientId;
-				layer.expand = expand;
+				layer.bleed = bleed;
 				layer.drawMode = drawMode;
 				layer.blendMode = blendMode;
 
@@ -737,7 +737,7 @@ PYBIND11_MODULE(slughorn, m) {
 			"effectId"_a=0,
 			"effectParam"_a=0_cv,
 			"gradientId"_a=0,
-			"expand"_a=0.01_cv,
+			"bleed"_a=0_cv,
 			"drawMode"_a=slughorn::DrawMode::Visible,
 			"blendMode"_a=slughorn::BlendMode::SrcOver
 		)
@@ -768,10 +768,11 @@ PYBIND11_MODULE(slughorn, m) {
 			"Non-zero = 1-based index into the atlas gradient list "
 			"(registered via Atlas.add_gradient()). "
 			"When non-zero, layer.color.rgb is ignored; layer.color.a is a global opacity multiplier.")
-		.def_readwrite("expand", &slughorn::Layer::expand,
-			"Extra em-space margin added to the quad on each side (default 0.01). "
-			"Set to 0 for shapes authored with canvas.set_auto_metrics(False) so that "
-			"em-coords stay exactly in [0,1] for GPU tiling.")
+		.def_readwrite("bleed", &slughorn::Layer::bleed,
+			"Extra em-space CONTENT margin on each side of the quad (default 0), for effects "
+			"that intentionally draw outside the shape's true bounds (outer glow, drop shadow, "
+			"MSDF spread) - print's 'bleed'. NOT an antialiasing margin: the AA margin is the "
+			"renderer's responsibility, computed live at pixel scale in the vertex stage.")
 		.def_readwrite("drawMode", &slughorn::Layer::drawMode,
 			"Controls whether/how this layer is rendered. "
 			"Visible=normal draw; Hidden=temporarily suppressed; Geometry=path-source only (no quad).")
@@ -1047,8 +1048,10 @@ PYBIND11_MODULE(slughorn, m) {
 			"Python port of the GLSL slug_EmToUV() helper. "
 			"(0,0) = bottom-left of bounding box, (1,1) = top-right.")
 		.def("compute_quad", &slughorn::Atlas::Shape::computeQuad,
-			"transform"_a, "scale"_a=1_cv, "expand"_a=0_cv,
-			"Compute the world-space bounding quad for this shape."
+			"transform"_a, "scale"_a=1_cv,
+			"Compute the world-space bounding quad for this shape. The returned quad is the "
+			"TRUE authored quad - no padding, no margin, ever. Renderers add any AA/bleed "
+			"room downstream without disturbing these coordinates."
 		)
 		.def_property_readonly("curves",
 			[](const slughorn::Atlas::Shape& s) { return curveView2D(s.curves); },
@@ -2504,7 +2507,7 @@ PYBIND11_MODULE(slughorn, m) {
 				"When True (default), shapes use tight curve bbox for quad sizing and band "
 				"calibration. Set to False to keep curves in [0,1] canvas space with the full "
 				"unit square as both the layout extent and band spatial range - required for "
-				"artifact-free GPU tiling via fract(). Pair with layer.expand = 0."
+				"artifact-free GPU tiling via fract()."
 			)
 			.def_property_readonly("layer_count", &slughorn::canvas::Canvas::layerCount,
 				"Number of Layers accumulated in the current composite."

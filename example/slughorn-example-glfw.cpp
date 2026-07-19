@@ -494,6 +494,10 @@ static void buildMesh(
 	std::vector<Vertex>& outVerts,
 	std::vector<unsigned short>& outIndices
 ) {
+	// This minimal example pads the quad locally at bake time for AA fringe room. That is a
+	// simplification: computeQuad() itself always returns the TRUE authored quad (no padding,
+	// ever), and a full renderer (see osgSlug's SHADER_VERT) computes this margin live in the
+	// vertex stage at pixel scale instead of baking an em-space constant.
 	static constexpr float SLUG_EXPAND = 0.01f;
 
 	unsigned short base = 0;
@@ -503,10 +507,11 @@ static void buildMesh(
 
 		if(!shape) continue;
 
-		const slughorn::Quad q = shape->computeQuad(layer.transform, layer.scale, cv(SLUG_EXPAND));
+		const slughorn::Quad q = shape->computeQuad(layer.transform, layer.scale);
 
-		const float x0 = (float)q.x0, y0 = (float)q.y0;
-		const float x1 = (float)q.x1, y1 = (float)q.y1;
+		const float e = SLUG_EXPAND * (float)layer.scale;
+		const float x0 = (float)q.x0 - e, y0 = (float)q.y0 - e;
+		const float x1 = (float)q.x1 + e, y1 = (float)q.y1 + e;
 
 		// em-space corners (same expand as quad, same pattern as ShapeDrawable)
 		const float emX0 = (float)shape->bearingX - SLUG_EXPAND;

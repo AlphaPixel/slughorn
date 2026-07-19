@@ -1646,10 +1646,6 @@ private:
 
 		placement.apply(transform.dx, transform.dy, layer.transform.x, layer.transform.y);
 
-		// When the caller declared manual [0,1] metrics, expand would push geometry
-		// outside the declared bounds and cause seam artifacts on wrapped UV surfaces.
-		if(!_autoMetrics) layer.expand = 0_cv;
-
 		_composite.layers.push_back(layer);
 
 		return layer;
