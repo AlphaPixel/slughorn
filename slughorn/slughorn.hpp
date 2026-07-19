@@ -1606,11 +1606,15 @@ struct CurveDecomposer {
 	CurveDecomposer(Atlas::Curves& c): curves(c) {}
 
 	void moveTo(slug_t x, slug_t y) {
+		_requireFinite({x, y});
+
 		_x = _sx = x;
 		_y = _sy = y;
 	}
 
 	void lineTo(slug_t x3, slug_t y3) {
+		_requireFinite({x3, y3});
+
 		curves.push_back({
 			_x, _y,
 			(_x + x3) * 0.5_cv,
@@ -1623,6 +1627,8 @@ struct CurveDecomposer {
 	}
 
 	void quadTo(slug_t cx, slug_t cy, slug_t x3, slug_t y3) {
+		_requireFinite({cx, cy, x3, y3});
+
 		curves.push_back({_x, _y, cx, cy, x3, y3});
 
 		_x = x3;
@@ -1640,6 +1646,8 @@ struct CurveDecomposer {
 		slug_t c2x, slug_t c2y,
 		slug_t x3, slug_t y3
 	) {
+		_requireFinite({c1x, c1y, c2x, c2y, x3, y3});
+
 		_cubicAdaptive(_x, _y, c1x, c1y, c2x, c2y, x3, y3, 0);
 
 		_x = x3;
@@ -1678,6 +1686,17 @@ struct CurveDecomposer {
 	void reverseFrom(size_t pos) { reverseCurves(curves, pos, curves.size()); }
 
 private:
+	// Rejects non-finite (NaN/Inf) coordinates at the ingestion boundary. A NaN reaching
+	// buildShapeBands' band-sort comparator violates strict weak ordering (all comparisons
+	// against NaN are false), which is undefined behavior for std::sort.
+	static void _requireFinite(std::initializer_list<slug_t> coords) {
+		for(slug_t v : coords) {
+			if(!std::isfinite(v)) {
+				throw std::runtime_error("CurveDecomposer: non-finite coordinate in path data");
+			}
+		}
+	}
+
 	// Maximum recursion depth. Prevents infinite loops on degenerate/malformed
 	// input. At depth 8 the maximum chord error is already <0.4% of the original
 	// cubic's bounding box, which is well below any practical rendering threshold.

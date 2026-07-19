@@ -938,6 +938,26 @@ void Atlas::buildShapeBands(
 	);
 
 	// --------------------------------------------------------------------------------------------
+	// Band indices are packed into the indirY/indirX tables as uint8_t (see below), so at most
+	// 256 bands per axis are addressable. Reject instead of silently wrapping the index.
+	// --------------------------------------------------------------------------------------------
+	constexpr uint32_t MAX_BANDS_PER_AXIS = 256;
+
+	if(numBandsY > MAX_BANDS_PER_AXIS) {
+		throw std::runtime_error(detail::to_sstr(
+			"Atlas::buildShapeBands: ", key, "'s splitsY produced ", numBandsY,
+			" bands, exceeding the ", MAX_BANDS_PER_AXIS, "-band-per-axis limit"
+		));
+	}
+
+	if(numBandsX > MAX_BANDS_PER_AXIS) {
+		throw std::runtime_error(detail::to_sstr(
+			"Atlas::buildShapeBands: ", key, "'s splitsX produced ", numBandsX,
+			" bands, exceeding the ", MAX_BANDS_PER_AXIS, "-band-per-axis limit"
+		));
+	}
+
+	// --------------------------------------------------------------------------------------------
 	// Bounding box
 	// --------------------------------------------------------------------------------------------
 	slug_t minX = 1e9_cv, minY = 1e9_cv;
@@ -1053,16 +1073,22 @@ void Atlas::buildShapeBands(
 				if(curveIntersectsBandY(build.curves[ci], lo, hi)) band.curveIndices.push_back(ci);
 			}
 
+			// TODO: std::stable_sort is also an option here, investigate!
 			std::sort(band.curveIndices.begin(), band.curveIndices.end(), [&](size_t l, size_t r) {
-				return std::max({
+				const slug_t xl = std::max({
 					build.curves[l].x1,
 					build.curves[l].x2,
 					build.curves[l].x3
-				}) > std::max({
+				});
+				const slug_t xr = std::max({
 					build.curves[r].x1,
 					build.curves[r].x2,
 					build.curves[r].x3
 				});
+
+				if(xl != xr) return xl > xr;
+
+				return l < r;
 			});
 
 			band.curveCount = static_cast<uint16_t>(band.curveIndices.size());
@@ -1123,16 +1149,22 @@ void Atlas::buildShapeBands(
 				if(curveIntersectsBandX(build.curves[ci], lo, hi)) band.curveIndices.push_back(ci);
 			}
 
+			// TODO: See `stable_sort` above!
 			std::sort(band.curveIndices.begin(), band.curveIndices.end(), [&](size_t l, size_t r) {
-				return std::max({
+				const slug_t yl = std::max({
 					build.curves[l].y1,
 					build.curves[l].y2,
 					build.curves[l].y3
-				}) > std::max({
+				});
+				const slug_t yr = std::max({
 					build.curves[r].y1,
 					build.curves[r].y2,
 					build.curves[r].y3
 				});
+
+				if(yl != yr) return yl > yr;
+
+				return l < r;
 			});
 
 			band.curveCount = static_cast<uint16_t>(band.curveIndices.size());
