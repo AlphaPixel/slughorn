@@ -67,7 +67,9 @@ def _mesh_area(mesh):
 	pos = np.asarray(mesh.positions)
 	idx = np.asarray(mesh.indices)
 	tris = pos[idx]
-	cross = np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0])
+	e0 = tris[:, 1] - tris[:, 0]
+	e1 = tris[:, 2] - tris[:, 0]
+	cross = e0[:, 0] * e1[:, 1] - e0[:, 1] * e1[:, 0]
 	return float(np.abs(cross).sum() * 0.5)
 
 
