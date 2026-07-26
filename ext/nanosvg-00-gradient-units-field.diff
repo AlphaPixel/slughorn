@@ -16,3 +16,5 @@ diff --git a/src/nanosvg.h b/src/nanosvg.h
 +	grad->units = data->units;
  	memcpy(grad->stops, stops, nstops*sizeof(NSVGgradientStop));
  	grad->nstops = nstops;
+
+

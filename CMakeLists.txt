@@ -7,34 +7,27 @@ project(SlugHorn LANGUAGES C CXX)
 # =============================================================================
 
 if(WIN32)
-	set(SLUGHORN_COMPILE_OPTIONS
-		"/W4"
-		"/WX"
-		"/wd4100"
-		"/analyze"
+	set(OSGDEBUG_WARNING_OPTIONS
+		/W4
+		/WX
+		/wd4100
+		/analyze
 	)
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-	set(SLUGHORN_COMPILE_OPTIONS
-		"-W"
-		"-Wall"
-		"-Wshadow"
-		"-Wconversion"
-		"-Wpedantic"
-		"-Wextra"
-		"-Werror"
-		"-Wno-unused-parameter"
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+	set(OSGDEBUG_WARNING_OPTIONS
+		-W
+		-Wall
+		-Wshadow
+		-Wconversion
+		-Wsign-conversion
+		-Wfloat-conversion
+		-Wpedantic
+		-Wextra
+		-Werror
+		-Wno-unused-parameter
 	)
 else()
-	set(SLUGHORN_COMPILE_OPTIONS
-		"-W"
-		"-Wall"
-		"-Wshadow"
-		"-Wconversion"
-		"-Wpedantic"
-		"-Wextra"
-		"-Werror"
-		"-Wno-unused-parameter"
-	)
+	set(OSGDEBUG_WARNING_OPTIONS)
 endif()
 
 # =============================================================================
@@ -85,6 +78,43 @@ if(SLUGHORN_NANOSVG)
 			"  git submodule update --init --recursive"
 		)
 	endif()
+
+	find_package(Git REQUIRED)
+
+	# NanoSVG upstream is missing a few fixes we depend on (NSVGgradient::units,
+	# nsvg__pushAttr id inheritance, OBB linear gradient coordinate handling).
+	# Apply them here so a fresh submodule checkout builds without manual steps.
+	# --reverse --check detects an already-patched tree so reconfiguring never
+	# double-applies or errors out.
+	set(SLUGHORN_NANOSVG_PATCHES
+		"${CMAKE_CURRENT_SOURCE_DIR}/ext/nanosvg-00-gradient-units-field.diff"
+		"${CMAKE_CURRENT_SOURCE_DIR}/ext/nanosvg-01-push-attr-id-inherit.diff"
+		"${CMAKE_CURRENT_SOURCE_DIR}/ext/nanosvg-02-obb-linear-gradient-coords.diff"
+	)
+
+	foreach(_slughorn_nanosvg_patch ${SLUGHORN_NANOSVG_PATCHES})
+		execute_process(
+			COMMAND "${GIT_EXECUTABLE}" apply --reverse --check "${_slughorn_nanosvg_patch}"
+			WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/ext/nanosvg"
+			RESULT_VARIABLE _slughorn_nanosvg_patch_applied
+			OUTPUT_QUIET
+			ERROR_QUIET
+		)
+
+		if(NOT _slughorn_nanosvg_patch_applied EQUAL 0)
+			message(STATUS "Applying nanosvg patch: ${_slughorn_nanosvg_patch}")
+
+			execute_process(
+				COMMAND "${GIT_EXECUTABLE}" apply "${_slughorn_nanosvg_patch}"
+				WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/ext/nanosvg"
+				RESULT_VARIABLE _slughorn_nanosvg_patch_result
+			)
+
+			if(NOT _slughorn_nanosvg_patch_result EQUAL 0)
+				message(FATAL_ERROR "Failed to apply nanosvg patch: ${_slughorn_nanosvg_patch}")
+			endif()
+		endif()
+	endforeach()
 
 	target_compile_definitions(slughorn PRIVATE SLUGHORN_NANOSVG_IMPLEMENTATION)
 	target_compile_definitions(slughorn PUBLIC SLUGHORN_HAS_NANOSVG)
