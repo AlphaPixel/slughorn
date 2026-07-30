@@ -11,6 +11,12 @@
 # and slughorn.cpp (e.g. add_library(slughorn ...) or just add slughorn.cpp to
 # the executable's sources directly).
 
+if(NOT SLUGHORN_FREETYPE)
+	message(WARNING "SLUGHORN_BUILD_EXAMPLES=ON but SLUGHORN_FREETYPE=OFF; slughorn-example-glfw requires FreeType (it loads glyphs via slughorn::freetype::loadFontGlyphs), skipping")
+
+	return()
+endif()
+
 include(FetchContent)
 
 # ----------------------------------------------------------------------------

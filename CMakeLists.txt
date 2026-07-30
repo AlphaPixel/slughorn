@@ -92,9 +92,11 @@ if(SLUGHORN_NANOSVG)
 		"${CMAKE_CURRENT_SOURCE_DIR}/ext/nanosvg-02-obb-linear-gradient-coords.diff"
 	)
 
+	# --ignore-whitespace guards against CRLF-checked-out submodules (e.g. Windows
+	# with core.autocrlf=true) not matching these LF patch files context-for-context.
 	foreach(_slughorn_nanosvg_patch ${SLUGHORN_NANOSVG_PATCHES})
 		execute_process(
-			COMMAND "${GIT_EXECUTABLE}" apply --reverse --check "${_slughorn_nanosvg_patch}"
+			COMMAND "${GIT_EXECUTABLE}" apply --reverse --check --ignore-whitespace "${_slughorn_nanosvg_patch}"
 			WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/ext/nanosvg"
 			RESULT_VARIABLE _slughorn_nanosvg_patch_applied
 			OUTPUT_QUIET
@@ -105,7 +107,7 @@ if(SLUGHORN_NANOSVG)
 			message(STATUS "Applying nanosvg patch: ${_slughorn_nanosvg_patch}")
 
 			execute_process(
-				COMMAND "${GIT_EXECUTABLE}" apply "${_slughorn_nanosvg_patch}"
+				COMMAND "${GIT_EXECUTABLE}" apply --ignore-whitespace "${_slughorn_nanosvg_patch}"
 				WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/ext/nanosvg"
 				RESULT_VARIABLE _slughorn_nanosvg_patch_result
 			)
@@ -236,8 +238,11 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
 	target_link_libraries(slughorn_python PRIVATE
 		slughorn
 		pybind11::module
-		nlohmann_json::nlohmann_json
 	)
+
+	if(SLUGHORN_SERIAL)
+		target_link_libraries(slughorn_python PRIVATE nlohmann_json::nlohmann_json)
+	endif()
 	target_compile_features(slughorn_python PUBLIC cxx_std_20)
 	target_compile_options(slughorn_python PRIVATE ${SLUGHORN_COMPILE_OPTIONS})
 	set_target_properties(slughorn_python PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -363,10 +368,19 @@ if(SLUGHORN_BUILD_TESTS)
 	# 	"${CMAKE_CURRENT_SOURCE_DIR}/../vtzero/include"
 	# )
 
-	add_executable(slughorn-test-gdal "test/slughorn-test-gdal.cpp")
-	target_link_libraries(slughorn-test-gdal PRIVATE slughorn gdal)
-	target_compile_options(slughorn-test-gdal PRIVATE ${SLUGHORN_COMPILE_OPTIONS})
-	target_include_directories(slughorn-test-gdal PRIVATE "/usr/include/gdal")
+	# GDAL (optional)
+	# pkg_check_modules(GDAL IMPORTED_TARGET gdal)
+	#
+	# if(GDAL_FOUND AND SLUGHORN_SERIAL)
+	# 	add_executable(slughorn-test-gdal "test/slughorn-test-gdal.cpp")
+	# 	target_link_libraries(slughorn-test-gdal PRIVATE slughorn PkgConfig::GDAL)
+	# 	target_compile_options(slughorn-test-gdal PRIVATE ${SLUGHORN_COMPILE_OPTIONS})
+	# 	message(STATUS "slughorn tests: GDAL found, building slughorn-test-gdal")
+	# elseif(NOT GDAL_FOUND)
+	# 	message(STATUS "slughorn tests: GDAL not found, skipping slughorn-test-gdal")
+	# else()
+	# 	message(STATUS "slughorn tests: SLUGHORN_SERIAL=OFF, skipping slughorn-test-gdal")
+	# endif()
 
 	# find_package(SQLite3 REQUIRED)
 	# find_package(ZLIB REQUIRED)
@@ -379,9 +393,14 @@ if(SLUGHORN_BUILD_TESTS)
 	# 	"${CMAKE_CURRENT_SOURCE_DIR}/../vtzero/include"
 	# )
 
-	add_executable(slughorn-test-bands "test/slughorn-test-bands.cpp")
-	target_link_libraries(slughorn-test-bands PRIVATE slughorn)
-	target_compile_options(slughorn-test-bands PRIVATE ${SLUGHORN_COMPILE_OPTIONS})
+	if(SLUGHORN_SERIAL)
+		add_executable(slughorn-test-bands "test/slughorn-test-bands.cpp")
+		target_link_libraries(slughorn-test-bands PRIVATE slughorn)
+		target_compile_options(slughorn-test-bands PRIVATE ${SLUGHORN_COMPILE_OPTIONS})
+		message(STATUS "slughorn tests: serial found, building slughorn-test-bands")
+	else()
+		message(STATUS "slughorn tests: SLUGHORN_SERIAL=OFF, skipping slughorn-test-bands")
+	endif()
 
 	add_executable(slughorn-test-scanlinesweep "test/slughorn-test-scanlinesweep.cpp")
 	target_link_libraries(slughorn-test-scanlinesweep PRIVATE slughorn)

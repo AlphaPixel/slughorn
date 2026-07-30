@@ -287,6 +287,7 @@ inline slughorn::freetype::LoadConfig makeLoadConfig(
 }
 #endif
 
+#ifdef SLUGHORN_HAS_NANOSVG
 inline slughorn::nanosvg::LoadConfig makeNanosvgLoadConfig(
 	std::optional<slughorn::nanosvg::LogCallback> log,
 	bool autoMetrics = true,
@@ -301,6 +302,7 @@ inline slughorn::nanosvg::LoadConfig makeNanosvgLoadConfig(
 
 	return config;
 }
+#endif
 
 } // namespace detail
 
