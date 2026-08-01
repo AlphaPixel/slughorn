@@ -231,21 +231,58 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
 
 	add_subdirectory(ext/pybind11)
 
-	pybind11_add_module(slughorn_python "ext/slughorn-python.cpp")
+	# The bindings are split across ext/python/slughorn-*.cpp -- one translation unit per
+	# slughorn:: submodule (see ext/python/slughorn-python.hpp for the bind_*() declarations) --
+	# instead of one ~2900-line monolithic ext/slughorn-python.cpp. slughorn_python_bindings is a
+	# plain STATIC lib, not itself a Python module: touching one submodule's bindings only
+	# recompiles that one file plus a relink, a from-scratch build parallelizes across `make -j#`,
+	# and pybind11_add_module below only ever has to compile the thin ext/python/slughorn.cpp
+	# PYBIND11_MODULE entry point.
+	add_library(slughorn_python_bindings STATIC
+		"ext/python/slughorn-core.cpp"
+		"ext/python/slughorn-render.cpp"
+		"ext/python/slughorn-canvas.cpp"
+		"ext/python/slughorn-emoji.cpp"
+	)
 
-	set_target_properties(slughorn_python PROPERTIES OUTPUT_NAME "slughorn")
-
-	target_link_libraries(slughorn_python PRIVATE
+	# PUBLIC, not PRIVATE: ext/python/slughorn.cpp (compiled into the separate slughorn_python
+	# target below, which links this one) also includes slughorn-python.hpp and therefore needs
+	# every one of these same requirements -- PRIVATE here would resolve fine for this target's
+	# own sources but leave slughorn.cpp's own #ifdef SLUGHORN_HAS_FREETYPE/etc. guards (and
+	# #include "slughorn-python.hpp") unable to see the same defines/link libraries.
+	target_link_libraries(slughorn_python_bindings PUBLIC
 		slughorn
 		pybind11::module
 	)
+	target_compile_features(slughorn_python_bindings PUBLIC cxx_std_20)
+	target_compile_options(slughorn_python_bindings PRIVATE ${SLUGHORN_COMPILE_OPTIONS})
+	set_target_properties(slughorn_python_bindings PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 	if(SLUGHORN_SERIAL)
-		target_link_libraries(slughorn_python PRIVATE nlohmann_json::nlohmann_json)
+		target_link_libraries(slughorn_python_bindings PRIVATE nlohmann_json::nlohmann_json)
 	endif()
+
+	if(SLUGHORN_FREETYPE)
+		target_sources(slughorn_python_bindings PRIVATE "ext/python/slughorn-freetype.cpp")
+	endif()
+
+	if(SLUGHORN_NANOSVG)
+		target_sources(slughorn_python_bindings PRIVATE "ext/python/slughorn-nanosvg.cpp")
+	endif()
+
+	if(SLUGHORN_TESSELLATE)
+		target_sources(slughorn_python_bindings PRIVATE "ext/python/slughorn-tessellate.cpp")
+	endif()
+
+	pybind11_add_module(slughorn_python "ext/python/slughorn.cpp")
+
+	set_target_properties(slughorn_python PROPERTIES
+		OUTPUT_NAME "slughorn"
+		POSITION_INDEPENDENT_CODE ON
+	)
+	target_link_libraries(slughorn_python PRIVATE slughorn_python_bindings)
 	target_compile_features(slughorn_python PUBLIC cxx_std_20)
 	target_compile_options(slughorn_python PRIVATE ${SLUGHORN_COMPILE_OPTIONS})
-	set_target_properties(slughorn_python PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 	add_custom_target(pytest
 		COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}
