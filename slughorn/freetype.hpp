@@ -35,6 +35,7 @@
 #include <cstdint>
 #include <iostream>
 #include <optional>
+#include <stdexcept>
 #include <utility>
 
 // FreeType headers are needed wherever you pass FT_Face / FT_Color* directly.
@@ -68,6 +69,11 @@ struct LoadConfig {
 	LogCallback log = {};
 
 	bool uniform = false;
+
+	// Set internally by withFace()'s callers that want a bad font path to raise instead of
+	// returning a failure sentinel (e.g. loadFontGlyphs/loadAllFontGlyphs) -- not intended to be
+	// set by callers of the public load*() API.
+	bool throwOnOpenFailure = false;
 
 	// Output fields (conditionally set, when possible)...
 	FontMetrics metrics = {};
@@ -305,7 +311,13 @@ static Result withFace(
 
 	FaceHandle face;
 
-	if(!face.open(library.value, fontPath, caller, cfg.log)) return failureValue;
+	if(!face.open(library.value, fontPath, caller, cfg.log)) {
+		if(cfg.throwOnOpenFailure) {
+			throw std::runtime_error(std::string(caller) + ": failed to open font: " + fontPath);
+		}
+
+		return failureValue;
+	}
 
 	if(config) {
 		config->metrics = readFontMetrics(face.value);
@@ -1447,8 +1459,13 @@ size_t loadFontGlyphs(
 	Atlas& atlas,
 	LoadConfig* config
 ) {
-	return detail::withFace(fontPath, "loadFontGlyphs", size_t(0), config, [&](FT_Face face) {
-		return loadGlyphs(face, codepoints, atlas, config);
+	LoadConfig fallback;
+	LoadConfig* cfg = config ? config : &fallback;
+
+	cfg->throwOnOpenFailure = true;
+
+	return detail::withFace(fontPath, "loadFontGlyphs", size_t(0), cfg, [&](FT_Face face) {
+		return loadGlyphs(face, codepoints, atlas, cfg);
 	});
 }
 
@@ -1457,8 +1474,13 @@ size_t loadAllFontGlyphs(
 	Atlas& atlas,
 	LoadConfig* config
 ) {
-	return detail::withFace(fontPath, "loadAllFontGlyphs", size_t(0), config, [&](FT_Face face) {
-		return loadAllGlyphs(face, atlas, config);
+	LoadConfig fallback;
+	LoadConfig* cfg = config ? config : &fallback;
+
+	cfg->throwOnOpenFailure = true;
+
+	return detail::withFace(fontPath, "loadAllFontGlyphs", size_t(0), cfg, [&](FT_Face face) {
+		return loadAllGlyphs(face, atlas, cfg);
 	});
 }
 

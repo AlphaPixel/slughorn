@@ -670,13 +670,10 @@ def test_atlas_band_texture(built_atlas):
 	assert len(bytes(td.bytes)) > 0
 
 def test_atlas_gradient_texture_empty_without_gradients(built_atlas):
-	# When no gradients are registered the gradient texture slot is unpopulated.
-	# BUG: format returns "RGBA32F" instead of "RGBA8" in this case — the
-	# TextureData falls back to the default-constructed Format enum value rather
-	# than the gradient slot's declared RGBA8.  Fix: initialise gradient
-	# TextureData.format = RGBA8 unconditionally in Atlas::build().
+	# When no gradients are registered the gradient texture slot is unpopulated,
+	# but its format is still declared as RGBA8.
 	td = built_atlas.gradient_texture
-	assert td.format == "RGBA32F"  # current (wrong) behavior — should be "RGBA8"
+	assert td.format == "RGBA8"
 
 def test_atlas_gradient_texture_nonempty_with_gradient(atlas, rect_curves, gradient_stops):
 	info = slughorn.ShapeInfo()

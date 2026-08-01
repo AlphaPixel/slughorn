@@ -104,12 +104,8 @@ def test_load_glyphs_shapes_nonzero(atlas):
 		assert s.width > 0.0 and s.height > 0.0, f"glyph {cp} has zero size"
 
 def test_load_glyphs_bad_path(atlas):
-	# BUG: load_font_glyphs silently returns 0 on a bad font path instead of
-	# raising, unlike load_ascii_font (returns False) and load_font_metrics
-	# (returns None).  All three should signal failure consistently.
-	# Update this test when the inconsistency is fixed.
-	n = slughorn.freetype.load_font_glyphs("/nonexistent/font.ttf", DIGIT_CODEPOINTS, atlas)
-	assert n == 0  # current (inconsistent) behavior
+	with pytest.raises(RuntimeError):
+		slughorn.freetype.load_font_glyphs("/nonexistent/font.ttf", DIGIT_CODEPOINTS, atlas)
 
 def test_load_glyphs_empty_codepoints(atlas):
 	_skip_if_no_font(_MONO_PATH)
@@ -157,6 +153,10 @@ def test_load_all_font_glyphs_returns_nonzero(atlas):
 	_skip_if_no_font(_MONO_PATH)
 	n = slughorn.freetype.load_all_font_glyphs(MONO_FONT, atlas)
 	assert n > 0
+
+def test_load_all_font_glyphs_bad_path(atlas):
+	with pytest.raises(RuntimeError):
+		slughorn.freetype.load_all_font_glyphs("/nonexistent/font.ttf", atlas)
 
 def test_load_all_font_glyphs_includes_digits(atlas):
 	_skip_if_no_font(_MONO_PATH)

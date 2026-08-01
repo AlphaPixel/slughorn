@@ -473,13 +473,14 @@ void Atlas::build() {
 // ================================================================================================
 
 void Atlas::rasterizeGradients() {
+	_gradientData.format = TextureData::Format::RGBA8;
+
 	if(_gradients.empty()) return;
 
 	const uint32_t numGradients = static_cast<uint32_t>(_gradients.size());
 
 	_gradientData.width = GRADIENT_STRIP_WIDTH;
 	_gradientData.height = numGradients;
-	_gradientData.format = TextureData::Format::RGBA8;
 
 	_gradientData.bytes.assign(size_t{GRADIENT_STRIP_WIDTH} * numGradients * 4, 0);
 
