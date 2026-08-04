@@ -5,6 +5,7 @@
 #include <concepts>
 #include <cstdint>
 #include <functional>
+#include <numbers>
 #include <optional>
 #include <sstream>
 #include <string>
