@@ -1682,14 +1682,31 @@ private:
 			infoOrigin.y = origin.y * scale;
 		}
 
-		Atlas::Curves local = _toLocalOrigin(scaled).first;
+		Atlas::Curves local;
+
+		if(_autoMetrics) local = _toLocalOrigin(scaled).first;
+
+		else {
+			// Keep curves in canvas space so the padding the author left around
+			// the shape is symmetric on all sides (required for correct tiling).
+			local = std::move(scaled);
+		}
 
 		if(local.empty()) return false;
 
 		Atlas::ShapeInfo info;
 
 		info.curves = std::move(local);
-		info.origin = infoOrigin;
+
+		if(_autoMetrics) info.origin = infoOrigin;
+
+		else {
+			info.autoMetrics = false;
+			info.bearingX = 0_cv;
+			info.bearingY = 1_cv;
+			info.width = 1_cv;
+			info.height = 1_cv;
+		}
 
 		_applySplits(info);
 		_atlas.addShape(key, info);
