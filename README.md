@@ -33,7 +33,7 @@ https://github.com/user-attachments/assets/5ca6563e-a7d3-44df-9800-beb8716efcad
 ## Related Projects
 
 - [osgSlug](https://github.com/AlphaPixel/osgSlug)
-- [osgGLTF](https://github.com/XenonofArcticus/osgGLTF)
+- [osgx](https://github.com/cubicool/osgx)
 - [OpenSceneGraph.py](https://github.com/AlphaPixel/OpenSceneGraph.py/tree/cubicool-wip)
 
 ---
