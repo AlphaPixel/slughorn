@@ -61,7 +61,7 @@ struct Grid {
 	uint32_t width = 0;
 	uint32_t height = 0;
 
-	std::vector<slug_t> data;
+	std::vector<slug_t> data = {};
 
 	slug_t at(uint32_t row, uint32_t col) const { return data[row * width + col]; }
 };
@@ -551,7 +551,7 @@ struct MSDFGrid {
 	uint32_t width = 0;
 	uint32_t height = 0;
 
-	std::vector<float> data; // row-major, 3 floats per pixel
+	std::vector<float> data = {}; // row-major, 3 floats per pixel
 
 	float at(uint32_t row, uint32_t col, uint32_t ch) const {
 		return data[(row * width + col) * 3 + ch];

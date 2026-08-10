@@ -950,7 +950,7 @@ public:
 
 		slug_t x0 = 0_cv, y0 = 0_cv, x1 = 1_cv, y1 = 0_cv;
 
-		std::vector<GradientStop> stops;
+		std::vector<GradientStop> stops = {};
 	};
 
 	GradientHandle createLinearGradient(

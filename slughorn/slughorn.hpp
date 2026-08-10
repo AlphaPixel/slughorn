@@ -198,7 +198,7 @@ struct GradientStop {
 	// position along gradient axis [0, 1]
 	slug_t t = 0_cv;
 
-	Color color;
+	Color color = {};
 };
 
 struct GradientInfo {
@@ -206,7 +206,7 @@ struct GradientInfo {
 
 	Type type = Type::Linear;
 
-	std::vector<GradientStop> stops;
+	std::vector<GradientStop> stops = {};
 
 	Matrix transform = {};
 
@@ -598,7 +598,7 @@ struct Layer {
 // ================================================================================================
 struct CompositeShape {
 	// TODO: Should there be an alias for this; something like `slughorn::Layers`?
-	std::vector<Layer> layers;
+	std::vector<Layer> layers = {};
 
 	// Usage is obvious in text situations; in "pure shape" modes, can be used to help arrange
 	// groups of `Shape` instances horizontally.
@@ -606,7 +606,7 @@ struct CompositeShape {
 
 	// Optional mask applied to the composited output of all layers. Mirrors how SVG <mask> and
 	// CSS mask work: layers composite first, then the mask gates the result as a whole.
-	std::optional<Mask> mask;
+	std::optional<Mask> mask = std::nullopt;
 
 	// --------------------------------------------------------------------------------------------
 	// Layer access
@@ -743,7 +743,7 @@ public:
 	// 0 means "pick automatically" for that axis. Negative values are invalid.
 	// Set both to the same value to get a square grid (equivalent to the old numBands scalar).
 	struct ShapeInfo {
-		Curves curves;
+		Curves curves = {};
 
 		bool autoMetrics = true;
 
@@ -757,11 +757,11 @@ public:
 
 		// Interior X split positions as normalized [0,1] fractions of the shape's X range (sorted
 		// ascending). If non-empty, overrides numBandsX; resulting numBands = splitsX.size() + 1.
-		std::vector<slug_t> splitsX;
+		std::vector<slug_t> splitsX = {};
 
 		// Interior Y split positions as normalized [0,1] fractions of the shape's Y range (sorted
 		// ascending). If non-empty, overrides numBandsY; resulting numBands = splitsY.size() + 1.
-		std::vector<slug_t> splitsY;
+		std::vector<slug_t> splitsY = {};
 
 		// Controls where the transform origin (Layer::transform.dx/dy) is placed relative to the
 		// shape geometry.
@@ -798,7 +798,7 @@ public:
 			bool operator!=(const Origin& o) const { return !(*this == o); }
 		};
 
-		Origin origin;
+		Origin origin = {};
 	};
 
 	// Everything the renderer needs to draw one shape. Populated by build() and returned by

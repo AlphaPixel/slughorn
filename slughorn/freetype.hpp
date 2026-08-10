@@ -78,8 +78,8 @@ struct LoadConfig {
 	// Output fields (conditionally set, when possible)...
 	FontMetrics metrics = {};
 
-	std::string familyName;
-	std::string styleName;
+	std::string familyName = {};
+	std::string styleName = {};
 };
 
 // =============================================================================

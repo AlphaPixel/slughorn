@@ -119,7 +119,7 @@ struct LoadConfig {
 	// Input fields.
 	LogCallback log = {};
 
-	std::vector<ShapeRule> rules;
+	std::vector<ShapeRule> rules = {};
 
 	// If true (default), build() derives width/height/bearing from the actual curve bounding box.
 	// If false, the caller must pre-populate ShapeInfo metrics before addShape().
