@@ -35,6 +35,23 @@ void bind_canvas(py::module_& canvas) {
 		)
 	;
 
+	py::enum_<slughorn::canvas::LineJoin>(canvas, "LineJoin",
+		"Stroke corner style, matching SVG/Canvas2D stroke-linejoin. MITER falls back to BEVEL "
+		"per-corner past miter_limit (SVG default 4.0); BEVEL/ROUND ignore miter_limit."
+	)
+		.value("MITER", slughorn::canvas::LineJoin::Miter, "Sharp corner point (default); bevels past miter_limit.")
+		.value("BEVEL", slughorn::canvas::LineJoin::Bevel, "Flat cut corner, unconditional.")
+		.value("ROUND", slughorn::canvas::LineJoin::Round, "Rounded corner, unconditional.")
+	;
+
+	py::enum_<slughorn::canvas::LineCap>(canvas, "LineCap",
+		"Open-subpath endpoint style, matching SVG/Canvas2D stroke-linecap."
+	)
+		.value("BUTT", slughorn::canvas::LineCap::Butt, "Flat cap at the exact endpoint (default).")
+		.value("ROUND", slughorn::canvas::LineCap::Round, "Semicircle cap.")
+		.value("SQUARE", slughorn::canvas::LineCap::Square, "Flat cap extended by half the stroke width.")
+	;
+
 	py::class_<slughorn::canvas::Canvas::GradientHandle>(canvas, "GradientHandle",
 		"Lightweight gradient descriptor returned by Canvas.create_linear_gradient().\n"
 		"Pass it to Canvas.fill_gradient() to commit the current path with a gradient fill.\n"
@@ -169,6 +186,9 @@ void bind_canvas(py::module_& canvas) {
 			// Stroke expansion
 			.def("stroke_path", &Path::strokePath,
 				"width"_a, "cw"_a=false,
+				"join"_a=slughorn::canvas::LineJoin::Miter,
+				"cap"_a=slughorn::canvas::LineCap::Butt,
+				"miter_limit"_a=4.0f,
 				"Expand from centerline to constant-width stroke outline in place.\n"
 				"cw=True reverses the winding (CW, for punch-out effects with nonzero rule).\n"
 				"Returns False if the path was empty.")
@@ -330,10 +350,16 @@ void bind_canvas(py::module_& canvas) {
 		)
 		// stroke_path() / in-place expand, then commit separately
 		.def("stroke_path",
-			[](slughorn::canvas::Canvas& c, slug_t width, bool cw) {
-				return c.strokePath(width, cw);
+			[](
+				slughorn::canvas::Canvas& c, slug_t width, bool cw,
+				slughorn::canvas::LineJoin join, slughorn::canvas::LineCap cap, slug_t miterLimit
+			) {
+				return c.strokePath(width, cw, join, cap, miterLimit);
 			},
 			"width"_a, "cw"_a=false,
+			"join"_a=slughorn::canvas::LineJoin::Miter,
+			"cap"_a=slughorn::canvas::LineCap::Butt,
+			"miter_limit"_a=4.0f,
 			"Expand the current path from a centerline into a stroke outline in place.\n"
 			"cw=True reverses the winding (CW, for punch-out effects).\n"
 			"Call fill() or stroke() afterwards to commit."
@@ -345,14 +371,20 @@ void bind_canvas(py::module_& canvas) {
 				slug_t width,
 				slughorn::Color color,
 				slug_t scale,
-				slughorn::Atlas::ShapeInfo::Origin origin
+				slughorn::Atlas::ShapeInfo::Origin origin,
+				slughorn::canvas::LineJoin join,
+				slughorn::canvas::LineCap cap,
+				slug_t miterLimit
 			) {
-				return c.stroke(width, color, scale, origin);
+				return c.stroke(width, color, scale, origin, join, cap, miterLimit);
 			},
 			"width"_a,
 			"color"_a,
 			"scale"_a=1_cv,
 			"origin"_a=slughorn::Atlas::ShapeInfo::Origin{},
+			"join"_a=slughorn::canvas::LineJoin::Miter,
+			"cap"_a=slughorn::canvas::LineCap::Butt,
+			"miter_limit"_a=4.0f,
 			"Expand the current path as a stroke outline and commit as a colored Layer."
 		)
 		// stroke() - named-key
@@ -363,15 +395,21 @@ void bind_canvas(py::module_& canvas) {
 				slughorn::Color color,
 				slug_t scale,
 				slughorn::Key key,
-				slughorn::Atlas::ShapeInfo::Origin origin
+				slughorn::Atlas::ShapeInfo::Origin origin,
+				slughorn::canvas::LineJoin join,
+				slughorn::canvas::LineCap cap,
+				slug_t miterLimit
 			) {
-				return c.stroke(width, color, scale, key, origin);
+				return c.stroke(width, color, scale, key, origin, join, cap, miterLimit);
 			},
 			"width"_a,
 			"color"_a,
 			"scale"_a,
 			"key"_a,
 			"origin"_a=slughorn::Atlas::ShapeInfo::Origin{},
+			"join"_a=slughorn::canvas::LineJoin::Miter,
+			"cap"_a=slughorn::canvas::LineCap::Butt,
+			"miter_limit"_a=4.0f,
 			"Expand the current path as a stroke outline, registering under key."
 		)
 
@@ -434,15 +472,21 @@ void bind_canvas(py::module_& canvas) {
 				slug_t width,
 				slughorn::Color color,
 				slug_t scale,
-				slughorn::Atlas::ShapeInfo::Origin origin
+				slughorn::Atlas::ShapeInfo::Origin origin,
+				slughorn::canvas::LineJoin join,
+				slughorn::canvas::LineCap cap,
+				slug_t miterLimit
 			) {
-				return c.stroke(p, width, color, scale, origin);
+				return c.stroke(p, width, color, scale, origin, join, cap, miterLimit);
 			},
 			"path"_a,
 			"width"_a,
 			"color"_a,
 			"scale"_a=1_cv,
 			"origin"_a=slughorn::Atlas::ShapeInfo::Origin{},
+			"join"_a=slughorn::canvas::LineJoin::Miter,
+			"cap"_a=slughorn::canvas::LineCap::Butt,
+			"miter_limit"_a=4.0f,
 			"Stroke a standalone Path. path is not consumed or modified."
 		)
 		// stroke(path, ...) - named-key
@@ -454,9 +498,12 @@ void bind_canvas(py::module_& canvas) {
 				slughorn::Color color,
 				slug_t scale,
 				slughorn::Key key,
-				slughorn::Atlas::ShapeInfo::Origin origin
+				slughorn::Atlas::ShapeInfo::Origin origin,
+				slughorn::canvas::LineJoin join,
+				slughorn::canvas::LineCap cap,
+				slug_t miterLimit
 			) {
-				return c.stroke(p, width, color, scale, key, origin);
+				return c.stroke(p, width, color, scale, key, origin, join, cap, miterLimit);
 			},
 			"path"_a,
 			"width"_a,
@@ -464,6 +511,9 @@ void bind_canvas(py::module_& canvas) {
 			"scale"_a,
 			"key"_a,
 			"origin"_a=slughorn::Atlas::ShapeInfo::Origin{},
+			"join"_a=slughorn::canvas::LineJoin::Miter,
+			"cap"_a=slughorn::canvas::LineCap::Butt,
+			"miter_limit"_a=4.0f,
 			"Stroke a standalone Path, registering under key."
 		)
 		.def("fill_gradient",
@@ -558,14 +608,20 @@ void bind_canvas(py::module_& canvas) {
 				slug_t width,
 				const slughorn::canvas::Canvas::GradientHandle& handle,
 				slug_t scale,
-				slughorn::Atlas::ShapeInfo::Origin origin
+				slughorn::Atlas::ShapeInfo::Origin origin,
+				slughorn::canvas::LineJoin join,
+				slughorn::canvas::LineCap cap,
+				slug_t miterLimit
 			) {
-				return c.strokeGradient(width, handle, scale, origin);
+				return c.strokeGradient(width, handle, scale, origin, join, cap, miterLimit);
 			},
 			"width"_a,
 			"handle"_a,
 			"scale"_a=1_cv,
 			"origin"_a=slughorn::Atlas::ShapeInfo::Origin{},
+			"join"_a=slughorn::canvas::LineJoin::Miter,
+			"cap"_a=slughorn::canvas::LineCap::Butt,
+			"miter_limit"_a=4.0f,
 			"Expand the current path as a stroke outline and commit with a gradient fill."
 		)
 		// stroke_gradient() - named-key
@@ -576,15 +632,21 @@ void bind_canvas(py::module_& canvas) {
 				const slughorn::canvas::Canvas::GradientHandle& handle,
 				slug_t scale,
 				slughorn::Key key,
-				slughorn::Atlas::ShapeInfo::Origin origin
+				slughorn::Atlas::ShapeInfo::Origin origin,
+				slughorn::canvas::LineJoin join,
+				slughorn::canvas::LineCap cap,
+				slug_t miterLimit
 			) {
-				return c.strokeGradient(width, handle, scale, key, origin);
+				return c.strokeGradient(width, handle, scale, key, origin, join, cap, miterLimit);
 			},
 			"width"_a,
 			"handle"_a,
 			"scale"_a,
 			"key"_a,
 			"origin"_a=slughorn::Atlas::ShapeInfo::Origin{},
+			"join"_a=slughorn::canvas::LineJoin::Miter,
+			"cap"_a=slughorn::canvas::LineCap::Butt,
+			"miter_limit"_a=4.0f,
 			"Expand the current path as a stroke outline with a gradient, registering under key."
 		)
 

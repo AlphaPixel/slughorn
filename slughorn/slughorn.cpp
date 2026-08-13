@@ -270,6 +270,7 @@ void Atlas::addShape(Key key, const ShapeInfo& desc) {
 	ShapeBuild build;
 
 	build.curves = desc.curves;
+	build.metrics.contourStarts = desc.contourStarts;
 
 	if(!desc.autoMetrics) {
 		build.metrics.bearingX = desc.bearingX;
@@ -869,6 +870,31 @@ Atlas::Contours Atlas::getShapeContours(Key key) const {
 	if(!flat || flat->empty()) return {};
 
 	Contours result;
+
+	// Explicit metadata path: only populated by Canvas's commit verbs (canvas.hpp), which know
+	// their own subpath boundaries exactly -- no coordinate comparison, no ambiguity. Everything
+	// else (freetype.hpp/nanosvg.hpp/cairo.hpp/blend2d.hpp/skia.hpp glyph/path backends, and any
+	// atlas loaded via serial::read()) leaves this empty and falls through to the heuristic below,
+	// exactly as before this metadata existed.
+	if(!info->contourStarts.empty()) {
+		const auto& starts = info->contourStarts;
+
+		for(size_t i = 0; i < starts.size(); i++) {
+			const size_t begin = starts[i];
+			const size_t end = (i + 1 < starts.size()) ? starts[i + 1] : flat->size();
+
+			if(begin >= end || begin >= flat->size()) continue;
+
+			result.emplace_back(flat->begin() + begin, flat->begin() + std::min(end, flat->size()));
+		}
+
+		return result;
+	}
+
+	// Heuristic fallback: infer a subpath boundary from a coordinate gap between consecutive
+	// curves. Epsilon-hardened (matching canvas::Path::strokePath()'s own 1e-6 tolerance) rather
+	// than the previous exact `!=` comparison -- strictly more permissive, so this can only
+	// MERGE fewer false boundaries than before, never split a previously-correct one apart.
 	Curves current;
 
 	for(size_t i = 0; i < flat->size(); ++i) {
@@ -878,8 +904,8 @@ Atlas::Contours Atlas::getShapeContours(Key key) const {
 
 		const bool last = (i + 1 == flat->size());
 		const bool brk = !last && (
-			cur.x3 != (*flat)[i + 1].x1 ||
-			cur.y3 != (*flat)[i + 1].y1
+			std::abs(cur.x3 - (*flat)[i + 1].x1) > 1e-6_cv ||
+			std::abs(cur.y3 - (*flat)[i + 1].y1) > 1e-6_cv
 		);
 
 		if(last || brk) {

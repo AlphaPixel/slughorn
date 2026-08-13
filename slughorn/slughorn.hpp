@@ -746,6 +746,14 @@ public:
 	struct ShapeInfo {
 		Curves curves = {};
 
+		// Subpath-start indices into `curves` (index 0 always explicit, unlike canvas::Path's
+		// internal storage convention -- see canvas::Path::pendingContourStarts()). Populated by
+		// Canvas's commit verbs, which know their own boundaries exactly; empty means "unknown,"
+		// in which case getShapeContours() falls back to inferring boundaries from a coordinate
+		// gap (the only option for callers that build ShapeInfo::curves directly, e.g.
+		// freetype.hpp/nanosvg.hpp/cairo.hpp/blend2d.hpp/skia.hpp).
+		std::vector<size_t> contourStarts = {};
+
 		bool autoMetrics = true;
 
 		slug_t bearingX = 0, bearingY = 0;
@@ -849,6 +857,14 @@ public:
 		// Enables canvas::glyphOutline() and strokeText() without re-running font backends.
 		// Populated by Atlas::build() and by serial::read() via render::decode().
 		Curves curves;
+
+		// Same convention as ShapeInfo::contourStarts (index 0 explicit, empty = unknown).
+		// Populated by Atlas::addShape() from ShapeInfo::contourStarts -- NEVER by serial::read():
+		// render::decode() reconstructs `curves` from packed band/curve texture data on load,
+		// which does not preserve original authoring order, so any persisted contourStarts would
+		// silently split the WRONG boundaries. getShapeContours() falls back to its coordinate-gap
+		// heuristic for any atlas loaded from disk, same as before this field existed.
+		std::vector<size_t> contourStarts;
 
 		// Compute the world-space bounding quad for this shape.
 		//
