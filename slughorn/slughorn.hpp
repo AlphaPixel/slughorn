@@ -383,7 +383,13 @@ struct KeyHash {
 };
 
 struct KeyIterator {
-	KeyIterator(uint32_t _counter=0): counter(_counter) {}
+	// Default start is well above the valid Unicode codepoint range (max U+10FFFF = 1,114,111) so
+	// an unprefixed counter can never collide with a real font glyph's Key(codepoint) -- see
+	// AUTO_KEY_START's own comment. Passing an explicit _counter opts out of that protection (e.g.
+	// deliberately reconstructing a specific sequence) -- on the caller's head at that point.
+	static constexpr uint32_t AUTO_KEY_START = 0x20000000;
+
+	KeyIterator(uint32_t _counter=AUTO_KEY_START): counter(_counter) {}
 	KeyIterator(const char* _prefix, bool _force=false): prefix(_prefix), force(_force) {}
 	KeyIterator(std::string _prefix, bool _force=false): prefix(std::move(_prefix)), force(_force) {}
 
@@ -395,7 +401,16 @@ struct KeyIterator {
 
 	std::string prefix;
 
-	uint32_t counter = 0;
+	// freetype.hpp's loadGlyphRange() registers codepoints as low as 32 (space) by default via
+	// Key(uint32_t) -- the SAME type/constructor an unprefixed counter starting at 0 would use, so
+	// it WILL eventually reach and silently overwrite a loaded glyph's atlas entry in any scene
+	// with enough auto-keyed commits (mask()/textGlyph()/fill()/stroke()). AUTO_KEY_START gives
+	// ~4000x headroom past U+10FFFF, still ~3.9 billion keys of runway. Deliberately NOT switched
+	// to Type::Name (which can't collide with ANY numeric key by construction, codepoint or
+	// otherwise): Name keys pay for std::string construction + std::hash<std::string> on every
+	// single auto-keyed commit, real cost in a scene with many of them, for a collision class this
+	// offset already fully closes.
+	uint32_t counter = AUTO_KEY_START;
 
 	// When true, backends should use next() even when a source element provides its own id.
 	bool force = false;

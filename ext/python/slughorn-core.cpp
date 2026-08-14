@@ -777,6 +777,36 @@ void bind_core(py::module_& m) {
 		.def("__len__", [](const PyShapeContours& c) {
 			return c.offsets.empty() ? size_t(0) : c.offsets.size() - 1;
 		}, "Number of contours.")
+		.def("__getitem__", [](const PyShapeContours& c, py::ssize_t i) {
+			const auto n = static_cast<py::ssize_t>(c.offsets.empty() ? 0 : c.offsets.size() - 1);
+
+			if(i < 0) i += n;
+			if(i < 0 || i >= n) throw py::index_error("ShapeContours index out of range");
+
+			const auto start = c.offsets[static_cast<size_t>(i)];
+			const auto count = c.offsets[static_cast<size_t>(i) + 1] - start;
+
+			// A FRESH sub-view built directly from a C++ pointer (same helper .curves itself
+			// uses), not a Python-level slice of an existing memoryview -- CPython's built-in
+			// memoryview does not support slicing a multi-dimensional buffer
+			// ("NotImplementedError: multi-dimensional sub-views are not implemented"), so
+			// contours.curves[offsets[i]:offsets[i + 1]] can never work no matter how callers
+			// write it. This sidesteps that entirely: no slicing happens, ever.
+			//
+			// TODO: Investigate wrapping in a custom pybind11 type (e.g. ContourCurves) with its
+			// own __getitem__/__len__ instead of returning a raw memoryview -- would let callers
+			// do `for row in contour: x1, y1, ... = row` directly (memoryview's OWN __getitem__
+			// still can't do this for ndim>1, see the comment above; a type we control could).
+			// Not worth it yet for bin/slughorn's one debug-tool call site (see
+			// [[feedback-pybind11-buffer]] for the memoryview.cast() workaround in use there) --
+			// revisit if this same need shows up on a hot path.
+			return flatView2D<slughorn::slug_t>(
+				static_cast<const void*>(c.curves.data() + start), count, 6, sizeof(slughorn::Atlas::Curve)
+			);
+		}, "Zero-copy (K, 6) float32 memoryview of contour i's own curves. Supports negative "
+			"indices. Combined with __len__, this also makes ShapeContours directly iterable "
+			"(`for contour in shape_contours:`) via Python's sequence protocol."
+		)
 		.def("__repr__", [](const PyShapeContours& c) {
 			return "ShapeContours("
 				+ std::to_string(c.offsets.empty() ? size_t(0) : c.offsets.size() - 1)

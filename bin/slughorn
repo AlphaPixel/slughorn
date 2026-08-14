@@ -338,7 +338,21 @@ def build_curves_svg_string(
 		# One closed SVG path per contour (outer outline, counter, etc.)
 		parts = []
 
-		for i, (x1e, y1e, x2e, y2e, x3e, y3e) in enumerate(contour):
+		# Flattens the (K, 6) buffer to 1D, zero-copy, still stdlib memoryview -- no numpy needed.
+		# Plain `for row in contour` fails: CPython's built-in memoryview cannot produce row
+		# sub-views for any ndim>1 buffer at all, not via slicing, not via single-index (the same
+		# limitation ShapeContours.__getitem__ had to work around by constructing a fresh view
+		# directly from a C++ pointer instead of slicing). Two-step cast through a byte format is
+		# required: memoryview.cast() only allows a format change when at least one side is a
+		# byte format ('B'/'b'/'c') -- 'f' directly to 'f' with a new shape is NOT allowed, even
+		# though the element format isn't really changing. Only works because our buffer is
+		# C-contiguous (row stride == 6 * itemsize, guaranteed by flatView2D/curveView2D) --
+		# cast() requires that.
+		flat = contour.cast("B").cast("f")
+
+		for i in range(len(contour)):
+			base = i * 6
+			x1e, y1e, x2e, y2e, x3e, y3e = flat[base:base + 6]
 			px1, py1 = em_to_px(x1e, y1e)
 			px2, py2 = em_to_px(x2e, y2e)
 			px3, py3 = em_to_px(x3e, y3e)
