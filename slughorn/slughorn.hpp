@@ -423,8 +423,8 @@ struct KeyIterator {
 	// in a type tag; operator== checks _type first) -- so unlike the unprefixed constructor above,
 	// there's no reason to inherit AUTO_KEY_START's offset here. Starts at 0 for readable names
 	// ("prefix_0", "prefix_1", ...).
-	KeyIterator(const char* _prefix, bool _force=false): prefix(_prefix), force(_force), counter(0) {}
-	KeyIterator(std::string _prefix, bool _force=false): prefix(std::move(_prefix)), force(_force), counter(0) {}
+	KeyIterator(const char* _prefix, bool _force=false): prefix(_prefix), counter(0), force(_force) {}
+	KeyIterator(std::string _prefix, bool _force=false): prefix(std::move(_prefix)), counter(0), force(_force) {}
 
 	Key next() {
 		if(prefix.empty()) return Key(counter++);
