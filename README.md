@@ -23,6 +23,7 @@ https://github.com/user-attachments/assets/5ca6563e-a7d3-44df-9800-beb8716efcad
 | | Feature | Status |
 |:---:|---------|:------:|
 | 🎨 | Add support for improved "decal" style rendering | ![In Progress](https://img.shields.io/badge/In_Progress-f59e0b?style=flat-square) |
+| 🧰 | `Key` mask/namespace support | ![Complete](https://img.shields.io/badge/Complete-16a34a?style=flat-square) |
 | 🧰 | Add support for simple Miters/Caps | ![Complete](https://img.shields.io/badge/Complete-16a34a?style=flat-square) |
 | 🧰 | **Remove** the `expand` parameter as CPU-side "hack" | ![Complete](https://img.shields.io/badge/Complete-16a34a?style=flat-square) |
 | 🧰 | MSDF and procedurally-based `CompositeShape` masking | ![Complete](https://img.shields.io/badge/Complete-16a34a?style=flat-square) |

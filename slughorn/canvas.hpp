@@ -1655,7 +1655,11 @@ public:
 		Color color,
 		const FontMetrics& metrics,
 		TextAnchorY anchorY=TextAnchorY::Baseline,
-		TextAlignX alignX=TextAlignX::Left
+		TextAlignX alignX=TextAlignX::Left,
+		// Opt-in namespace matching the mask a font's glyphs were loaded under
+		// (freetype.hpp's LoadConfig::mask) -- see slughorn::Key's bit-layout comment.
+		// Lets multiple fonts share one Atlas/Canvas instead of needing one per font.
+		uint8_t mask=0
 	) {
 		if(str.empty() || fontSize == 0_cv) return *this;
 
@@ -1681,7 +1685,7 @@ public:
 			slug_t totalAdvance = 0_cv;
 
 			for(char c : str) {
-				const auto shape = _atlas.getShape(Key(static_cast<uint32_t>(static_cast<unsigned char>(c))));
+				const auto shape = _atlas.getShape(Key(static_cast<uint32_t>(static_cast<unsigned char>(c)), mask));
 
 				totalAdvance += shape ? shape->advance : 0.6_cv;
 			}
@@ -1693,10 +1697,10 @@ public:
 
 		for(char c : str) {
 			const uint32_t cp = static_cast<uint32_t>(static_cast<unsigned char>(c));
-			const auto info = _atlas.getShape(Key(cp));
+			const auto info = _atlas.getShape(Key(cp, mask));
 
 			Layer layer{
-				.key = cp,
+				.key = Key(cp, mask),
 				.color = color,
 				.transform = {.x = dx, .y = dy},
 				.scale = fontSize
@@ -1709,7 +1713,7 @@ public:
 			// shapes are pre-registered by the Font loader at codepoint keys, so there's no
 			// addShape() call here for _applyMSDF() to piggyback on the way
 			// _commitFill()/_commitGradient() do. Call it directly per glyph instead.
-			_applyMSDF(Key(cp));
+			_applyMSDF(Key(cp, mask));
 #endif
 
 			dx += info ? info->advance : 0.6_cv;
@@ -1727,7 +1731,8 @@ public:
 		Color color,
 		const FontMetrics& metrics,
 		TextAnchorY anchorY=TextAnchorY::Baseline,
-		TextAlignX alignX=TextAlignX::Left
+		TextAlignX alignX=TextAlignX::Left,
+		uint8_t mask=0 // see text()'s mask doc comment
 	) {
 		if(str.empty() || fontSize == 0_cv) return *this;
 
@@ -1750,7 +1755,7 @@ public:
 			slug_t totalAdvance = 0_cv;
 
 			for(char c : str) {
-				const auto shape = _atlas.getShape(Key(static_cast<uint32_t>(static_cast<unsigned char>(c))));
+				const auto shape = _atlas.getShape(Key(static_cast<uint32_t>(static_cast<unsigned char>(c)), mask));
 
 				totalAdvance += shape ? shape->advance : 0.6_cv;
 			}
@@ -1762,9 +1767,9 @@ public:
 
 		for(char c : str) {
 			const uint32_t cp = static_cast<uint32_t>(static_cast<unsigned char>(c));
-			const auto info = _atlas.getShape(Key(cp));
+			const auto info = _atlas.getShape(Key(cp, mask));
 
-			for(const auto& contour : _atlas.getShapeContours(Key(cp))) {
+			for(const auto& contour : _atlas.getShapeContours(Key(cp, mask))) {
 				Path gp;
 
 				for(const auto& curve : contour) {
@@ -1796,7 +1801,8 @@ public:
 		slug_t angle,
 		Color color,
 		const FontMetrics& metrics,
-		TextAnchorY anchorY=TextAnchorY::Baseline
+		TextAnchorY anchorY=TextAnchorY::Baseline,
+		uint8_t mask=0 // see text()'s mask doc comment
 	) {
 		if(fontSize == 0_cv) return Layer{};
 
@@ -1804,7 +1810,7 @@ public:
 
 		_ctm.apply(x, y, tx, ty);
 
-		return _textGlyphWorld(cp, fontSize, tx, ty, angle, color, metrics, anchorY);
+		return _textGlyphWorld(cp, fontSize, tx, ty, angle, color, metrics, anchorY, mask);
 	}
 
 	// textOnPath - places filled glyphs from str along path, each rotated to follow
@@ -1817,7 +1823,8 @@ public:
 		slug_t startFrac,
 		Color color,
 		const FontMetrics& metrics,
-		TextAnchorY anchorY=TextAnchorY::Baseline
+		TextAnchorY anchorY=TextAnchorY::Baseline,
+		uint8_t mask=0 // see text()'s mask doc comment
 	) {
 		if(str.empty() || fontSize == 0_cv) return *this;
 
@@ -1831,13 +1838,13 @@ public:
 			if(cursor > totalLen) break;
 
 			const uint32_t cp = static_cast<uint32_t>(static_cast<unsigned char>(c));
-			const auto info = _atlas.getShape(Key(cp));
+			const auto info = _atlas.getShape(Key(cp, mask));
 			const slug_t advance = (info && info->advance > 0_cv ? info->advance : 0.6_cv) * fontSize;
 
 			const slug_t t = cursor / totalLen;
 			const auto s = path.sample(t);
 
-			_textGlyphWorld(cp, fontSize, s.x, s.y, s.angle, color, metrics, anchorY);
+			_textGlyphWorld(cp, fontSize, s.x, s.y, s.angle, color, metrics, anchorY, mask);
 
 			cursor += advance;
 		}
@@ -1984,9 +1991,10 @@ private:
 		slug_t angle,
 		Color color,
 		const FontMetrics& metrics,
-		TextAnchorY anchorY
+		TextAnchorY anchorY,
+		uint8_t mask=0 // see text()'s mask doc comment
 	) {
-		const auto info = _atlas.getShape(Key(cp));
+		const auto info = _atlas.getShape(Key(cp, mask));
 
 		if(!info || info->curves.empty()) return Layer{};
 

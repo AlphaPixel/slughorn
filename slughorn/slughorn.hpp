@@ -321,10 +321,30 @@ class Atlas;
 struct Key {
 	enum class Type { Codepoint, Name };
 
+	// Bit layout for Type::Codepoint keys -- packed into the same _codepoint field, no new struct
+	// member: [0..20] real Unicode codepoint (max valid U+10FFFF fits in 21 bits), [21..28] an
+	// opt-in caller-defined "mask" (namespace) that defaults to 0, [29..31] reserved for
+	// KeyIterator::AUTO_KEY_START's auto-key range. Key(48) is bit-identical to Key(48, 0).
+	static constexpr uint32_t CODEPOINT_BITS = 21;
+	static constexpr uint32_t CODEPOINT_MASK = (1u << CODEPOINT_BITS) - 1; // 0x1FFFFF
+	static constexpr uint32_t MASK_SHIFT = CODEPOINT_BITS;
+	static constexpr uint32_t MASK_BITS = 8;
+	static constexpr uint32_t MASK_MASK = ((1u << MASK_BITS) - 1) << MASK_SHIFT; // 0x1FE00000
+
 	// With this in the public section:
 	Key(): _type(Type::Codepoint), _codepoint(0), _hash(_hashCp(0)) {}
 
 	Key(uint32_t cp): _type(Type::Codepoint), _codepoint(cp), _hash(_hashCp(cp)) {}
+
+	// Opt-in namespacing: packs a caller-defined mask (0-255) alongside the real codepoint so two
+	// unrelated sources (e.g. two fonts) can register the same raw codepoint without silently
+	// aliasing one atlas entry onto the other's -- see NEXT_SESSION.md's "Key mask" design note.
+	Key(uint32_t cp, uint8_t mask):
+		_type(Type::Codepoint),
+		_codepoint((cp & CODEPOINT_MASK) | (uint32_t(mask) << MASK_SHIFT)),
+		_hash(_hashCp((cp & CODEPOINT_MASK) | (uint32_t(mask) << MASK_SHIFT)))
+	{}
+
 	Key(const std::string& name): _type(Type::Name), _name(name), _hash(_hashStr(name)) {}
 	Key(const char* name): _type(Type::Name), _name(name), _hash(_hashStr(name)) {}
 
@@ -332,8 +352,15 @@ struct Key {
 
 	Type type() const { return _type; }
 
-	// Only valid when type() == Codepoint.
+	// Only valid when type() == Codepoint. Returns the full raw packed value (mask bits included,
+	// if any) -- Key(k.codepoint()) reconstructs an identical Key.
 	uint32_t codepoint() const { return _codepoint; }
+
+	// Only valid when type() == Codepoint. Real Unicode codepoint with any mask bits stripped.
+	uint32_t realCodepoint() const { return _codepoint & CODEPOINT_MASK; }
+
+	// Only valid when type() == Codepoint. Caller-defined namespace; 0 if unset.
+	uint8_t mask() const { return uint8_t((_codepoint & MASK_MASK) >> MASK_SHIFT); }
 
 	// Only valid when type() == Name.
 	const std::string& name() const { return _name; }

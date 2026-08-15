@@ -70,6 +70,12 @@ struct LoadConfig {
 
 	bool uniform = false;
 
+	// Opt-in namespace packed into every loaded glyph's Key (see slughorn::Key's bit-layout
+	// comment). Lets two fonts register the same raw codepoint (e.g. both defining Key for '0')
+	// without one silently overwriting the other's atlas entry. Caller-assigned, e.g. a
+	// FontStyle::Bold value; defaults to 0, bit-identical to the unmasked codepoint.
+	uint8_t mask = 0;
+
 	// Set internally by withFace()'s callers that want a bad font path to raise instead of
 	// returning a failure sentinel (e.g. loadFontGlyphs/loadAllFontGlyphs) -- not intended to be
 	// set by callers of the public load*() API.
@@ -1112,7 +1118,7 @@ bool loadGlyph(
 	static const LoadConfig dflt{};
 	const LoadConfig& cfg = config ? *config : dflt;
 
-	if(atlas.hasKey(codepoint)) return true; // already present - not an error
+	if(atlas.hasKey(Key(codepoint, cfg.mask))) return true; // already present - not an error
 
 	const FT_UInt glyphIndex = FT_Get_Char_Index(face, codepoint);
 
@@ -1139,7 +1145,7 @@ bool loadGlyph(
 		data.splitsY = std::move(sy);
 	}
 
-	atlas.addShape(codepoint, data);
+	atlas.addShape(Key(codepoint, cfg.mask), data);
 
 	return true;
 }
@@ -1293,7 +1299,7 @@ size_t loadGlyphs(
 	size_t count = 0;
 
 	for(const auto& m : meta) {
-		if(!m.valid || atlas.hasKey(m.codepoint)) continue;
+		if(!m.valid || atlas.hasKey(Key(m.codepoint, cfg.mask))) continue;
 
 		const FT_UInt gi = FT_Get_Char_Index(face, m.codepoint);
 
@@ -1328,7 +1334,7 @@ size_t loadGlyphs(
 			data.splitsY = std::move(sy);
 		}
 
-		atlas.addShape(m.codepoint, data);
+		atlas.addShape(Key(m.codepoint, cfg.mask), data);
 
 		count++;
 	}
