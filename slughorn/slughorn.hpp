@@ -417,8 +417,14 @@ struct KeyIterator {
 	static constexpr uint32_t AUTO_KEY_START = 0x20000000;
 
 	KeyIterator(uint32_t _counter=AUTO_KEY_START): counter(_counter) {}
-	KeyIterator(const char* _prefix, bool _force=false): prefix(_prefix), force(_force) {}
-	KeyIterator(std::string _prefix, bool _force=false): prefix(std::move(_prefix)), force(_force) {}
+
+	// Prefixed iterators always produce Type::Name keys (Key(prefix + "_" + to_string(counter++))),
+	// which can never collide with a Type::Codepoint key regardless of the number (Key's hash mixes
+	// in a type tag; operator== checks _type first) -- so unlike the unprefixed constructor above,
+	// there's no reason to inherit AUTO_KEY_START's offset here. Starts at 0 for readable names
+	// ("prefix_0", "prefix_1", ...).
+	KeyIterator(const char* _prefix, bool _force=false): prefix(_prefix), force(_force), counter(0) {}
+	KeyIterator(std::string _prefix, bool _force=false): prefix(std::move(_prefix)), force(_force), counter(0) {}
 
 	Key next() {
 		if(prefix.empty()) return Key(counter++);

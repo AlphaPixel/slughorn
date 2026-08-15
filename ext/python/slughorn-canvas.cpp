@@ -714,12 +714,14 @@ void bind_canvas(py::module_& canvas) {
 			"metrics"_a,
 			"anchor_y"_a=slughorn::canvas::TextAnchorY::Baseline,
 			"align_x"_a=slughorn::canvas::TextAlignX::Left,
+			"mask"_a=0,
 			"Place glyphs from s into the current composite.\n\n"
 			"The atlas must already contain the requested codepoints (loaded via a\n"
 			"freetype function before atlas.build()). Handles em-space conversion,\n"
 			"vertical anchoring, and optional horizontal alignment internally.\n\n"
 			"anchor_y controls what y refers to (baseline, cap center, cap top, x-center).\n"
-			"align_x LEFT is single-pass; CENTER and RIGHT do a measure pass first."
+			"align_x LEFT is single-pass; CENTER and RIGHT do a measure pass first.\n"
+			"mask is the opt-in Key namespace to look glyphs up under (see slughorn.Key)."
 		)
 
 		.def("stroke_text",
@@ -733,13 +735,14 @@ void bind_canvas(py::module_& canvas) {
 			"metrics"_a,
 			"anchor_y"_a=slughorn::canvas::TextAnchorY::Baseline,
 			"align_x"_a=slughorn::canvas::TextAlignX::Left,
+			"mask"_a=0,
 			"Stroke glyph outlines from s into the current composite.\n\n"
 			"Unlike text(), this tessellates each glyph's contours as stroked paths.\n"
 			"Must be called before atlas.build() - stroke shapes are registered via\n"
 			"addShape() which is disabled post-build.\n\n"
 			"For fill+stroke in one CompositeShape, call stroke_text() first (outline\n"
 			"underneath), then text() (fill on top), then finalize().\n\n"
-			"anchor_y and align_x work identically to text()."
+			"anchor_y and align_x work identically to text(); mask likewise."
 		)
 
 		.def("text_on_path",
@@ -751,13 +754,15 @@ void bind_canvas(py::module_& canvas) {
 			"color"_a,
 			"metrics"_a,
 			"anchor_y"_a=slughorn::canvas::TextAnchorY::Baseline,
+			"mask"_a=0,
 			"Place filled glyphs from s along path, each rotated to follow the tangent.\n\n"
 			"path is a slughorn.canvas.Path built with arc/move_to/etc.\n"
 			"start_frac in [0,1] is the normalized arc-length start position;\n"
 			"use 0.0 for left-aligned or compute (arc_len - text_width) / (2*arc_len)\n"
 			"for centered. Glyphs that extend past the path end are dropped.\n\n"
 			"The atlas must already contain the requested codepoints (loaded via\n"
-			"slughorn.freetype.load_font_glyphs before atlas.build())."
+			"slughorn.freetype.load_font_glyphs before atlas.build()).\n"
+			"mask is the opt-in Key namespace to look glyphs up under (see slughorn.Key)."
 		)
 
 		// Accessors -------------------------------------------------------

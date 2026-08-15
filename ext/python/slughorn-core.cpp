@@ -29,6 +29,13 @@ void bind_core(py::module_& m) {
 		.def(py::init<uint32_t>(), "codepoint"_a,
 			"Construct a Codepoint key from a uint32_t (e.g. ord('A'))."
 		)
+		.def(py::init<uint32_t, uint8_t>(), "codepoint"_a, "mask"_a,
+			"Construct a Codepoint key with an opt-in namespace/mask (0-255) packed\n"
+			"into otherwise-unused bits [21..28] of the codepoint -- lets two\n"
+			"unrelated sources (e.g. two fonts) register the same raw codepoint\n"
+			"without one silently overwriting the other's atlas entry.\n"
+			"Key(48, 0) is bit-identical to Key(48)."
+		)
 		.def(py::init<const std::string&>(), "name"_a,
 			"Construct a named key from a string (e.g. Key('logo'))."
 		)
@@ -38,7 +45,17 @@ void bind_core(py::module_& m) {
 			"KeyType.Codepoint or KeyType.Name."
 		)
 		.def_property_readonly("codepoint", &slughorn::Key::codepoint,
-			"The uint32_t codepoint. Only valid when type == KeyType.Codepoint."
+			"The full raw uint32_t codepoint, mask bits included if any -- "
+			"Key(k.codepoint) reconstructs an identical Key. "
+			"Only valid when type == KeyType.Codepoint."
+		)
+		.def_property_readonly("real_codepoint", &slughorn::Key::realCodepoint,
+			"The real Unicode codepoint with any mask bits stripped. "
+			"Only valid when type == KeyType.Codepoint."
+		)
+		.def_property_readonly("mask", &slughorn::Key::mask,
+			"The caller-defined namespace (0-255); 0 if unset. "
+			"Only valid when type == KeyType.Codepoint."
 		)
 		.def_property_readonly("name", &slughorn::Key::name,
 			"The string name. Only valid when type == KeyType.Name."

@@ -7,7 +7,8 @@ namespace detail {
 inline slughorn::freetype::LoadConfig makeLoadConfig(
 	std::optional<slughorn::Atlas::SplitStrategy> strategy,
 	bool uniform,
-	std::optional<slughorn::freetype::LogCallback> log
+	std::optional<slughorn::freetype::LogCallback> log,
+	uint8_t mask=0
 ) {
 	slughorn::freetype::LoadConfig config;
 
@@ -16,6 +17,8 @@ inline slughorn::freetype::LoadConfig makeLoadConfig(
 	config.uniform = uniform;
 
 	if(log) config.log = *log;
+
+	config.mask = mask;
 
 	return config;
 }
@@ -31,13 +34,15 @@ void bind_freetype(py::module_& freetype) {
 			slughorn::Atlas& atlas,
 			std::optional<slughorn::Atlas::SplitStrategy> strategy,
 			bool uniform,
-			std::optional<slughorn::freetype::LogCallback> log
+			std::optional<slughorn::freetype::LogCallback> log,
+			uint8_t mask
 		) {
-			auto config = detail::makeLoadConfig(strategy, uniform, log);
+			auto config = detail::makeLoadConfig(strategy, uniform, log, mask);
 
 			return slughorn::freetype::loadAsciiFont(fontPath, atlas, &config);
 		},
 		"font_path"_a, "atlas"_a, "strategy"_a=py::none(), "uniform"_a=false, "log"_a=py::none(),
+		"mask"_a=0,
 		"Load printable ASCII (codepoints 32-126) from font_path into atlas.\n"
 		"Creates and destroys an FT_Library/FT_Face internally.\n"
 		"strategy: optional callable(curves) -> (splits_x, splits_y), e.g.:\n"
@@ -45,6 +50,9 @@ void bind_freetype(py::module_& freetype) {
 		"uniform: if True, all glyphs share the same em-space bounding box\n"
 		"    (required for setLayerShapeIndex glyph-swap cycling).\n"
 		"log: optional callable(level: int, msg: str) for load-time diagnostics.\n"
+		"mask: opt-in Key namespace (0-255) packed into every loaded glyph's Key,\n"
+		"    e.g. to load a second font's variant of the same codepoints without\n"
+		"    colliding with a previously-loaded font (see slughorn.Key).\n"
 		"Returns True on success, False if the font cannot be opened."
 	);
 
@@ -55,9 +63,10 @@ void bind_freetype(py::module_& freetype) {
 			slughorn::Atlas& atlas,
 			std::optional<slughorn::Atlas::SplitStrategy> strategy,
 			bool uniform,
-			std::optional<slughorn::freetype::LogCallback> log
+			std::optional<slughorn::freetype::LogCallback> log,
+			uint8_t mask
 		) {
-			auto config = detail::makeLoadConfig(strategy, uniform, log);
+			auto config = detail::makeLoadConfig(strategy, uniform, log, mask);
 
 			return slughorn::freetype::loadFontGlyphs(fontPath, codepoints, atlas, &config);
 		},
@@ -67,12 +76,15 @@ void bind_freetype(py::module_& freetype) {
 		"strategy"_a=py::none(),
 		"uniform"_a=false,
 		"log"_a=py::none(),
+		"mask"_a=0,
 		"Load an explicit list of Unicode codepoints from font_path into atlas.\n"
 		"Creates and destroys an FT_Library/FT_Face internally.\n"
 		"strategy: optional callable(curves) -> (splits_x, splits_y).\n"
 		"uniform: if True, all glyphs share the same em-space bounding box\n"
 		"    (required for setLayerShapeIndex glyph-swap cycling).\n"
 		"log: optional callable(level: int, msg: str) for load-time diagnostics.\n"
+		"mask: opt-in Key namespace (0-255) packed into every loaded glyph's Key\n"
+		"    (see slughorn.Key).\n"
 		"Returns the number of glyphs successfully added."
 	);
 
@@ -82,19 +94,23 @@ void bind_freetype(py::module_& freetype) {
 			slughorn::Atlas& atlas,
 			std::optional<slughorn::Atlas::SplitStrategy> strategy,
 			bool uniform,
-			std::optional<slughorn::freetype::LogCallback> log
+			std::optional<slughorn::freetype::LogCallback> log,
+			uint8_t mask
 		) {
-			auto config = detail::makeLoadConfig(strategy, uniform, log);
+			auto config = detail::makeLoadConfig(strategy, uniform, log, mask);
 
 			return slughorn::freetype::loadAllFontGlyphs(fontPath, atlas, &config);
 		},
 		"font_path"_a, "atlas"_a, "strategy"_a=py::none(), "uniform"_a=false, "log"_a=py::none(),
+		"mask"_a=0,
 		"Load every mapped codepoint from font_path into atlas.\n"
 		"Creates and destroys an FT_Library/FT_Face internally.\n"
 		"strategy: optional callable(curves) -> (splits_x, splits_y).\n"
 		"uniform: if True, all glyphs share the same em-space bounding box\n"
 		"    (required for setLayerShapeIndex glyph-swap cycling).\n"
 		"log: optional callable(level: int, msg: str) for load-time diagnostics.\n"
+		"mask: opt-in Key namespace (0-255) packed into every loaded glyph's Key\n"
+		"    (see slughorn.Key).\n"
 		"Returns the number of glyphs successfully added."
 	);
 
