@@ -1998,6 +1998,44 @@ private:
 
 		if(!info || info->curves.empty()) return Layer{};
 
+		// angle==0 needs no rotated/baked geometry -- reference the atlas glyph directly instead
+		// of copying its curves under a fresh auto-key, exactly mirroring text()'s per-character
+		// Layer construction (same em-space anchor math). Layer.transform has no rotation field
+		// (see NEXT_SESSION.md's "Real gap #1"), so angle!=0 still has to bake -- but the common
+		// unrotated case (e.g. every non-D4 die face in decalcube.cpp) no longer does.
+		//
+		// NOTE 2026-08-14: consumers that map a shape's declared em-bounds across a fixed-size
+		// target (DecalDrawable's planar decals) need their OWN compensation for this -- see
+		// NEXT_SESSION.md's DecalDrawable em-window writeup. Referencing the real glyph here is
+		// correct; whether it LOOKS correct downstream depends on that consumer.
+		if(angle == 0_cv) {
+			slug_t dy = ty / fontSize;
+
+			switch(anchorY) {
+				case TextAnchorY::Baseline: break;
+				case TextAnchorY::CapCenter: dy -= metrics.capHeightRatio * 0.5_cv; break;
+				case TextAnchorY::CapTop: dy -= metrics.capHeightRatio; break;
+				case TextAnchorY::XCenter: dy -= metrics.xHeightRatio * 0.5_cv; break;
+			}
+
+			Layer layer{
+				.key = Key(cp, mask),
+				.color = color,
+				.transform = {.x = tx / fontSize, .y = dy},
+				.scale = fontSize
+			};
+
+			_composite.layers.push_back(layer);
+
+#ifdef SLUGHORN_HAS_MSDF
+			// See text()'s own comment: this bypasses _commitFill(), so _applyMSDF() has no
+			// addShape() call to piggyback on and must be called directly.
+			_applyMSDF(Key(cp, mask));
+#endif
+
+			return layer;
+		}
+
 		slug_t anchorOffsetY = 0_cv;
 
 		switch(anchorY) {
