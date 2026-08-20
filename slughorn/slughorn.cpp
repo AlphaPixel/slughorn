@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstring>
+#include <iostream>
 #include <map>
 
 using namespace slughorn::literals;
@@ -1046,6 +1047,27 @@ void Atlas::buildShapeBands(
 
 		if(rangeX < 1e-6_cv) rangeX = 1e-6_cv;
 		if(rangeY < 1e-6_cv) rangeY = 1e-6_cv;
+	}
+
+	// --------------------------------------------------------------------------------------------
+	// Scale sanity check: slughorn is designed around normalized, roughly unit-scale em-space
+	// (see CurveDecomposer's tolerance doc -- "0-1 em-space" is the norm, a "1000-unit em square"
+	// the documented edge of legitimate large-scale authoring, e.g. raw font units). A shape fed
+	// large, un-normalized coordinates (e.g. raw world/map/tile positions) still builds and
+	// serializes without error, but has been observed to produce visible rendering artifacts once
+	// auto-fit to a viewport drives pixels-per-em far below what the analytic renderer expects.
+	// This can't see the eventual render scale, so it's a heuristic on authored extent, not a hard
+	// limit -- hence a warning, not a throw. Normalize coordinates (e.g. to a small bounding box)
+	// and scale on-screen size via the CTM/viewport instead.
+	// --------------------------------------------------------------------------------------------
+	constexpr slug_t LARGE_SCALE_WARN_THRESHOLD = 1000_cv;
+
+	if(rangeX > LARGE_SCALE_WARN_THRESHOLD || rangeY > LARGE_SCALE_WARN_THRESHOLD) {
+		std::cerr << detail::to_sstr(
+			"slughorn: warning: shape '", key, "' spans ", rangeX, "x", rangeY, " em-units -- ",
+			"far larger than slughorn's normalized-authoring convention and known to risk "
+			"rendering artifacts at low pixels-per-em. Consider normalizing input coordinates."
+		) << std::endl;
 	}
 
 	// --------------------------------------------------------------------------------------------

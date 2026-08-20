@@ -520,11 +520,11 @@ public:
 	// default 4.0 -- Bevel/Round ignore miterLimit entirely); open subpath endpoints get a
 	// Butt/Round/Square cap per @p cap.
 	//
-	// Does NOT patch "star" vertices -- points where 2+ INDEPENDENT subpaths in this same call
-	// happen to share an endpoint (e.g. several disconnected 2-point edges meeting at one point,
-	// as osgslug-tmp.icon.cpp's buildWireframe() draws). That's not a 2-segment corner and isn't
-	// defined by any join style above; a separate additive pass (search "star vertex" in this
-	// file) patches those unconditionally with a round disc, after the loop below.
+	// Independent butt-capped subpaths that share an endpoint leave an uncovered "star" vertex.
+	// A separate additive pass (search "star vertex" below) patches those with a round disc.
+	// Round and square caps already contain the complete endpoint disc, so adding another contour
+	// for them would be geometrically redundant and can amplify analytic coverage where the
+	// coincident boundaries meet.
 	bool strokePath(
 		slug_t width, bool cw=false,
 		LineJoin join=LineJoin::Miter, LineCap cap=LineCap::Butt, slug_t miterLimit=4_cv
@@ -851,10 +851,11 @@ public:
 
 		// Star-vertex patch: cluster collected arms by coincident location via spatial hash
 		// bucketing (not naive O(n^2) -- a large MVT linestring batch could have hundreds of
-		// subpaths per call), and unconditionally round-disc any cluster spanning 2+ DISTINCT
+		// subpaths per call), and round-disc any butt-capped cluster spanning 2+ DISTINCT
 		// subpath indices (same-subpath self-touching is just that subpath's own cap, not a
-		// star). Purely additive: never touches per-subpath wall-building above.
-		if(arms.size() >= 2) {
+		// star). Round and square caps already contain this disc; emitting it again adds a
+		// redundant winding contour and can overstate analytic antialiasing at tangent edges.
+		if(cap == LineCap::Butt && arms.size() >= 2) {
 			const slug_t eps = std::max(1e-6_cv, h * 1e-4_cv);
 
 			auto cellOf = [&](slug_t x, slug_t y) -> std::pair<int64_t, int64_t> {
