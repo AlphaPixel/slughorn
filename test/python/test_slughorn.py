@@ -664,6 +664,37 @@ def test_atlas_curve_texture(built_atlas):
 	assert td.format == "RGBA32F"
 	assert len(bytes(td.bytes)) > 0
 
+def test_atlas_curve_texture_half_precision_opt_in(rect_curves):
+	info = slughorn.ShapeInfo()
+	info.curves = rect_curves
+
+	f32_atlas = slughorn.Atlas()
+	f32_atlas.add_shape(slughorn.Key("rect"), info)
+	f32_atlas.build()
+
+	f16_atlas = slughorn.Atlas()
+	f16_atlas.add_shape(slughorn.Key("rect"), info)
+	f16_atlas.set_curve_texture_format("RGBA16F")
+	f16_atlas.build()
+
+	f32_tex = f32_atlas.curve_texture
+	f16_tex = f16_atlas.curve_texture
+
+	assert f32_tex.format == "RGBA32F"
+	assert f16_tex.format == "RGBA16F"
+	assert (f32_tex.width, f32_tex.height) == (f16_tex.width, f16_tex.height)
+	# Same texel count, half the bytes/texel.
+	assert len(bytes(f16_tex.bytes)) == len(bytes(f32_tex.bytes)) // 2
+
+def test_atlas_set_curve_texture_format_invalid(atlas):
+	with pytest.raises(Exception):
+		atlas.set_curve_texture_format("RGBA8")
+
+def test_atlas_set_curve_texture_format_throws_after_build(built_atlas):
+	with pytest.raises(Exception):
+		built_atlas.set_curve_texture_format("RGBA16F")
+	assert built_atlas.curve_texture.format == "RGBA32F"
+
 def test_atlas_band_texture(built_atlas):
 	td = built_atlas.band_texture
 	assert td.format == "RGBA16UI"

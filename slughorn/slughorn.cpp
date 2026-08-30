@@ -1260,12 +1260,15 @@ void Atlas::packTextures() {
 
 	const uint32_t curveTexHeight = std::max(1u, (totalCurveTexels + _texWidth - 1) / _texWidth);
 
+	const bool curveIsHalf = _curveFormat == TextureData::Format::RGBA16F;
+	const size_t curveChannelBytes = curveIsHalf ? sizeof(uint16_t) : sizeof(float);
+
 	_curveData.width = _texWidth;
 	_curveData.height = curveTexHeight;
-	_curveData.format = TextureData::Format::RGBA32F;
+	_curveData.format = _curveFormat;
 
-	// 4 floats per texel
-	_curveData.bytes.assign(size_t{_texWidth} * curveTexHeight * 4 * sizeof(float), 0);
+	// 4 channels per texel, each curveChannelBytes wide.
+	_curveData.bytes.assign(size_t{_texWidth} * curveTexHeight * 4 * curveChannelBytes, 0);
 
 	// --------------------------------------------------------------------------------------------
 	// Pass 1: measure band texture height
@@ -1355,11 +1358,20 @@ void Atlas::packTextures() {
 
 		if(y >= curveTexHeight) return;
 
-		float* p = reinterpret_cast<float*>(
-			_curveData.bytes.data() + (size_t{y} * _texWidth + x) * 4 * sizeof(float)
-		);
+		uint8_t* p = _curveData.bytes.data() + (size_t{y} * _texWidth + x) * 4 * curveChannelBytes;
 
-		p[0] = r; p[1] = g; p[2] = b; p[3] = a;
+		if(curveIsHalf) {
+			auto* half = reinterpret_cast<uint16_t*>(p);
+
+			half[0] = detail::floatToHalf(r);
+			half[1] = detail::floatToHalf(g);
+			half[2] = detail::floatToHalf(b);
+			half[3] = detail::floatToHalf(a);
+		} else {
+			auto* full = reinterpret_cast<float*>(p);
+
+			full[0] = r; full[1] = g; full[2] = b; full[3] = a;
+		}
 	};
 
 	auto writeBandTexel = [&](uint32_t idx, uint16_t r, uint16_t g, uint16_t b, uint16_t a) {
@@ -1394,6 +1406,7 @@ void Atlas::packTextures() {
 	// Alignment wrappers record padding waste into _packingStats automatically.
 	// --------------------------------------------------------------------------------------------
 	_packingStats = PackingStats{};
+	_packingStats.curveFormat = _curveFormat;
 	_packingStats.curveTexelsTotal = _texWidth * curveTexHeight;
 	_packingStats.bandTexelsTotal = _texWidth * bandTexHeight;
 	_packingStats.scanlineTexelsTotal = _texWidth * scanlineTexHeight;

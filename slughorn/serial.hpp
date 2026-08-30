@@ -353,7 +353,7 @@ json buildJson(
 	// Buffer views
 	json bv0 = {
 		{"byteLength", curve.bytes.size()},
-		{"format", "RGBA32F"},
+		{"format", detail::to_sstr(curve.format)},
 		{"width", curve.width},
 		{"height", curve.height}
 	};
@@ -552,6 +552,7 @@ Atlas atlasFromJson(
 		const std::string fmt = bv.at("format");
 
 		if (fmt == "RGBA32F") td.format = Atlas::TextureData::Format::RGBA32F;
+		else if(fmt == "RGBA16F") td.format = Atlas::TextureData::Format::RGBA16F;
 		else if(fmt == "RGBA16UI") td.format = Atlas::TextureData::Format::RGBA16UI;
 		else if(fmt == "RGBA8") td.format = Atlas::TextureData::Format::RGBA8;
 		else if(fmt == "RGB32F") td.format = Atlas::TextureData::Format::RGB32F;

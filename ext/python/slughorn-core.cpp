@@ -765,12 +765,13 @@ void bind_core(py::module_& m) {
 		.def_property_readonly("format", [](const slughorn::Atlas::TextureData& td) -> const char* {
 			switch(td.format) {
 				case slughorn::Atlas::TextureData::Format::RGBA32F: return "RGBA32F";
+				case slughorn::Atlas::TextureData::Format::RGBA16F: return "RGBA16F";
 				case slughorn::Atlas::TextureData::Format::RGBA16UI: return "RGBA16UI";
 				case slughorn::Atlas::TextureData::Format::RGBA8: return "RGBA8";
 				case slughorn::Atlas::TextureData::Format::RGB32F: return "RGB32F";
 			}
 			return "unknown";
-		}, "String: 'RGBA32F' (curve), 'RGBA16UI' (band), 'RGBA8' (gradient), 'RGB32F' (MSDF array).")
+		}, "String: 'RGBA16F' (curve), 'RGBA16UI' (band), 'RGBA8' (gradient), 'RGB32F' (MSDF array).")
 		.def_property_readonly("bytes", [](const slughorn::Atlas::TextureData& td) {
 			return bytesView(td.bytes);
 		}, "Zero-copy memoryview of the raw pixel data (row-major). "
@@ -912,6 +913,23 @@ void bind_core(py::module_& m) {
 			"Idempotent - subsequent calls are no-ops."
 		)
 
+		.def("set_curve_texture_format",
+			[](slughorn::Atlas& a, const std::string& fmt) {
+				slughorn::Atlas::TextureData::Format f;
+
+				if(fmt == "RGBA32F") f = slughorn::Atlas::TextureData::Format::RGBA32F;
+				else if(fmt == "RGBA16F") f = slughorn::Atlas::TextureData::Format::RGBA16F;
+				else throw std::invalid_argument("expected 'RGBA32F' or 'RGBA16F', got '" + fmt + "'");
+
+				a.setCurveTextureFormat(f);
+			},
+			"format"_a,
+			"Select the curve texture's storage format: 'RGBA32F' (default, full precision) or\n"
+			"'RGBA16F' (matches the reference Slug format, halves curve-texture memory, real\n"
+			"precision tradeoff -- can visibly degrade shapes under heavy zoom). Must be called\n"
+			"before build(); no-op after."
+		)
+
 		.def_property_readonly("is_built", &slughorn::Atlas::isBuilt,
 			"True after build() has been called."
 		)
@@ -1003,7 +1021,7 @@ void bind_core(py::module_& m) {
 				return a.getCurveTextureData();
 			},
 			py::return_value_policy::reference_internal,
-			"TextureData for the RGBA32F curve texture (valid after build())."
+			"TextureData for the RGBA16F curve texture (valid after build())."
 		)
 
 		.def_property_readonly("band_texture",

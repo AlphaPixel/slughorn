@@ -77,7 +77,7 @@ def resolve_key_arg(raw: str | None, ord_char: str | None) -> slughorn.Key:
 	return make_key(raw)
 
 
-_FORMAT_BYTES_PER_TEXEL = {"RGBA32F": 16, "RGBA16UI": 8, "RGBA8": 4}
+_FORMAT_BYTES_PER_TEXEL = {"RGBA32F": 16, "RGBA16F": 8, "RGBA16UI": 8, "RGBA8": 4}
 
 def tex_size_str(tex) -> str:
     bpt = _FORMAT_BYTES_PER_TEXEL.get(tex.format, 0)

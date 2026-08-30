@@ -42,8 +42,12 @@
 #include <cstring>
 #include <algorithm>
 #include <cmath>
+#include <iostream>
+#include <iterator>
 #include <vector>
 #include <string>
+
+#include <unistd.h>
 
 using namespace slughorn::literals;
 using slughorn::slug_t;
@@ -304,6 +308,16 @@ static GLuint uploadSlugTexture(const slughorn::Atlas::TextureData& td) {
 			GL_RGBA32F,
 			(GLsizei)td.width, (GLsizei)td.height, 0,
 			GL_RGBA, GL_FLOAT,
+			td.bytes.data()
+		);
+	} else if(td.format == slughorn::Atlas::TextureData::Format::RGBA16F) {
+		// Curve texture. Bytes are already packed as half-floats by Atlas::packTextures();
+		// GL_HALF_FLOAT tells GL to upload them as-is, not to convert from GL_FLOAT.
+		glTexImage2D(
+			GL_TEXTURE_2D, 0,
+			GL_RGBA16F,
+			(GLsizei)td.width, (GLsizei)td.height, 0,
+			GL_RGBA, GL_HALF_FLOAT,
 			td.bytes.data()
 		);
 	} else {
@@ -662,7 +676,7 @@ static void onScroll(GLFWwindow* win, double /*xoffset*/, double yoffset) {
 	view->distance *= zoom;
 
 	if(view->distance < 0.35f) view->distance = 0.35f;
-	if(view->distance > 20.0f) view->distance = 20.0f;
+	if(view->distance > 1000000.0f) view->distance = 1000000.0f;
 }
 
 // ============================================================================
@@ -671,7 +685,23 @@ static void onScroll(GLFWwindow* win, double /*xoffset*/, double yoffset) {
 
 int main(int argc, char** argv) {
 	if(argc < 2) {
-		std::fprintf(stderr, "Usage: %s <font.ttf>\n", argv[0]);
+		std::fprintf(stderr, "Usage: %s <font.ttf> [--curve-precision 16|32]\n", argv[0]);
+		std::fprintf(stderr,
+			"  --curve-precision: curve texture float precision (DEFAULT 32). 16 halves\n"
+			"    curve-texture memory but is a real precision tradeoff -- can visibly\n"
+			"    degrade shape edges under heavy zoom.\n"
+		);
+		return 1;
+	}
+
+	std::string curvePrecision = "32";
+
+	for(int i = 2; i < argc - 1; i++) {
+		if(std::string(argv[i]) == "--curve-precision") curvePrecision = argv[i + 1];
+	}
+
+	if(curvePrecision != "16" && curvePrecision != "32") {
+		std::fprintf(stderr, "Invalid --curve-precision: %s (expected 16 or 32)\n", curvePrecision.c_str());
 		return 1;
 	}
 
@@ -680,7 +710,25 @@ int main(int argc, char** argv) {
 	// ------------------------------------------------------------------------
 	slughorn::Atlas atlas;
 
-	const std::string text = "slughorn";
+	if(curvePrecision == "16")
+		atlas.setCurveTextureFormat(slughorn::Atlas::TextureData::Format::RGBA16F);
+
+	// Renders piped stdin instead of the default "slughorn" wordmark, e.g. `echo kK | ...`.
+	// isatty() guards against blocking forever waiting for input when nothing is piped
+	// (an interactive terminal with no redirection).
+	std::string text = "slughorn";
+
+	if(!isatty(fileno(stdin))) {
+		std::string piped(
+			(std::istreambuf_iterator<char>(std::cin)),
+			std::istreambuf_iterator<char>()
+		);
+
+		while(!piped.empty() && (piped.back() == '\n' || piped.back() == '\r')) piped.pop_back();
+
+		if(!piped.empty()) text = piped;
+	}
+
 	std::vector<uint32_t> codepoints;
 
 	for(unsigned char ch : text)
@@ -912,8 +960,12 @@ int main(int argc, char** argv) {
 		if(view.usePerspective) {
 			perspectiveMatrix(45.0f * 3.14159265f / 180.0f, aspect, 0.01f, 100.0f, proj);
 		} else {
+			// margin is added to the numerator, not after the divide, so it scales down
+			// together with the rest as distance grows -- an additive-after-divide margin
+			// would asymptote to a fixed floor and silently cap how far you can zoom in,
+			// regardless of how high the distance clamp in onScroll() goes.
 			const float margin = 0.15f;
-			const float halfH = 0.5f / view.distance + margin;
+			const float halfH = (0.5f + margin) / view.distance;
 			const float halfW = halfH * aspect;
 			orthoMatrix(-halfW, halfW, -halfH, halfH, -100.0f, 100.0f, proj);
 		}

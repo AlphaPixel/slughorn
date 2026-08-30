@@ -418,7 +418,9 @@ inline Sampler decode(
 	const Atlas::TextureData& bandTex
 ) {
 
-	if(curveTex.format != Atlas::TextureData::Format::RGBA32F)
+	const bool curveIsHalf = curveTex.format == Atlas::TextureData::Format::RGBA16F;
+
+	if(!curveIsHalf && curveTex.format != Atlas::TextureData::Format::RGBA32F)
 		throw std::runtime_error("Unexpected curve texture format")
 	;
 
@@ -437,8 +439,30 @@ inline Sampler decode(
 		return out;
 	}
 
-	const auto* curveData = reinterpret_cast<const float*>(curveTex.bytes.data());
+	const auto* curveBytes = curveTex.bytes.data();
 	const auto* bandData = reinterpret_cast<const uint16_t*>(bandTex.bytes.data());
+
+	// Curve texel values are either raw float32 or half-float, per curveIsHalf above --
+	// always returned as float32 here so the rest of decode() stays format-agnostic.
+	auto readCurveTexel = [&](uint32_t texelIndex) -> std::array<float, 4> {
+		if(texelIndex >= curveTex.width * curveTex.height)
+			throw std::runtime_error("Curve texture read out of bounds")
+		;
+
+		std::array<float, 4> v;
+
+		if(curveIsHalf) {
+			const auto* p = reinterpret_cast<const uint16_t*>(curveBytes) + size_t{texelIndex} * 4;
+
+			for(size_t i = 0; i < 4; i++) v[i] = detail::halfToFloat(p[i]);
+		} else {
+			const auto* p = reinterpret_cast<const float*>(curveBytes) + size_t{texelIndex} * 4;
+
+			for(size_t i = 0; i < 4; i++) v[i] = p[i];
+		}
+
+		return v;
+	};
 
 	const uint32_t shapeStart = shape.bandTexY * bandTex.width + shape.bandTexX;
 	const uint32_t numHBands = shape.bandMaxY + 1;
@@ -521,12 +545,8 @@ inline Sampler decode(
 		const uint32_t texel0 = globalIndex * 2;
 		const uint32_t texel1 = texel0 + 1;
 
-		if(texel1 >= curveTex.width * curveTex.height)
-			throw std::runtime_error("Curve texture read out of bounds")
-		;
-
-		const float* t0 = curveData + size_t{texel0} * 4;
-		const float* t1 = curveData + size_t{texel1} * 4;
+		const auto t0 = readCurveTexel(texel0);
+		const auto t1 = readCurveTexel(texel1);
 
 		remap[globalIndex] = static_cast<uint32_t>(out.curves.size());
 

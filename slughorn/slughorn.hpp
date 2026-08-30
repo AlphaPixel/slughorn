@@ -4,6 +4,7 @@
 #include <cmath>
 #include <concepts>
 #include <cstdint>
+#include <cstring>
 #include <functional>
 #include <numbers>
 #include <optional>
@@ -35,6 +36,69 @@ inline std::string to_sstr(const auto&... args) {
 	((oss << args), ...);
 
 	return oss.str();
+}
+
+// IEEE 754 binary32 -> binary16, round-to-nearest-even. Values below the smallest normal
+// half (~6.1e-5) flush to zero rather than encoding a denormal -- curve/em coordinates never
+// legitimately operate at that scale, so the extra denormal-handling complexity isn't worth it.
+inline uint16_t floatToHalf(float value) {
+	uint32_t bits;
+
+	std::memcpy(&bits, &value, sizeof(bits));
+
+	const uint32_t sign = (bits >> 16) & 0x8000u;
+	int32_t exponent = static_cast<int32_t>((bits >> 23) & 0xFFu) - 127 + 15;
+	uint32_t mantissa = bits & 0x7FFFFFu;
+
+	if(exponent <= 0) return static_cast<uint16_t>(sign);
+
+	if(exponent >= 0x1F) return static_cast<uint16_t>(sign | 0x7C00u); // Inf/NaN/overflow
+
+	mantissa += 0x00000FFFu + ((mantissa >> 13) & 1u); // Round to nearest, ties to even
+
+	if(mantissa & 0x00800000u) { // Rounding overflowed the mantissa into the exponent
+		mantissa = 0;
+		exponent++;
+
+		if(exponent >= 0x1F) return static_cast<uint16_t>(sign | 0x7C00u);
+	}
+
+	return static_cast<uint16_t>(sign | (static_cast<uint32_t>(exponent) << 10) | (mantissa >> 13));
+}
+
+// IEEE 754 binary16 -> binary32. Inverse of floatToHalf(), including denormal handling on the
+// decode side (a half encoded elsewhere, e.g. by a GPU or another tool, may legitimately use one).
+inline float halfToFloat(uint16_t half) {
+	const uint32_t sign = static_cast<uint32_t>(half & 0x8000u) << 16;
+	uint32_t exponent = (half >> 10) & 0x1Fu;
+	uint32_t mantissa = half & 0x3FFu;
+	uint32_t bits;
+
+	if(exponent == 0) {
+		if(mantissa == 0) {
+			bits = sign;
+		} else {
+			exponent = 127 - 15 + 1;
+
+			while((mantissa & 0x400u) == 0) {
+				mantissa <<= 1;
+				exponent--;
+			}
+
+			mantissa &= 0x3FFu;
+			bits = sign | (exponent << 23) | (mantissa << 13);
+		}
+	} else if(exponent == 0x1Fu) {
+		bits = sign | 0x7F800000u | (mantissa << 13);
+	} else {
+		bits = sign | ((exponent - 15 + 127) << 23) | (mantissa << 13);
+	}
+
+	float value;
+
+	std::memcpy(&value, &bits, sizeof(value));
+
+	return value;
 }
 
 }
@@ -750,7 +814,8 @@ struct FontMetrics {
 //
 // Owns the two raw pixel buffers required by the Slug rendering algorithm (Lengyel 2017):
 //
-// - Curve texture (RGBA32F): packed quadratic Bezier control points
+// - Curve texture (RGBA32F by default, RGBA16F opt-in via setCurveTextureFormat()): packed
+//   quadratic Bezier control points
 // - Band texture (RGBA16UI): band headers + curve index lists
 //
 // Atlas is completely backend-agnostic; it has no dependencies on OSG, VSG, raw OpenGL, or any
@@ -959,11 +1024,13 @@ public:
 	// a GPU texture (width/height are in texels); `format` tells the graphics backend how to
 	// interpret the bytes:
 	//
-	// RGBA32F - four 32-bit floats per texel (curve texture)
+	// RGBA32F - four 32-bit floats per texel (curve texture, default -- see setCurveTextureFormat())
+	// RGBA16F - four 16-bit floats per texel (curve texture, opt-in; matches the reference Slug
+	//   format, halves curve-texture memory, real precision tradeoff -- see setCurveTextureFormat())
 	// RGBA16UI - four 16-bit unsigned ints per texel (band texture)
 	// --------------------------------------------------------------------------------------------
 	struct TextureData {
-		enum class Format { RGBA32F, RGBA16UI, RGBA8, RGB32F };
+		enum class Format { RGBA32F, RGBA16F, RGBA16UI, RGBA8, RGB32F };
 
 		std::vector<uint8_t> bytes;
 
@@ -1015,7 +1082,12 @@ public:
 	};
 
 	struct PackingStats {
-		// Curve texture (RGBA32F, 16 bytes/texel)
+		// Which format the curve texture was actually packed in -- set by packTextures() from
+		// whatever Atlas::setCurveTextureFormat() was called with (RGBA32F by default).
+		TextureData::Format curveFormat = TextureData::Format::RGBA32F;
+
+		// Curve texture (RGBA32F by default, 16 bytes/texel; RGBA16F opt-in, 8 bytes/texel --
+		// see Atlas::setCurveTextureFormat())
 		uint32_t curveTexelsUsed = 0; // texels written with actual curve data
 		uint32_t curveTexelsPadding = 0; // texels wasted to row-alignment bumps
 		uint32_t curveTexelsTotal = 0; // width * height (allocated)
@@ -1100,8 +1172,10 @@ public:
 			return live ? cv(sdfTexelsPadding) / cv(live) : 0.f;
 		}
 
-		// GPU bytes allocated per channel, derived from each channel's fixed texture format.
-		size_t curveBytes() const { return size_t(curveTexelsTotal) * 16; } // RGBA32F
+		// GPU bytes allocated per channel, derived from each channel's texture format.
+		size_t curveBytes() const {
+			return size_t(curveTexelsTotal) * (curveFormat == TextureData::Format::RGBA16F ? 8 : 16);
+		}
 		size_t bandBytes() const { return size_t(bandTexelsTotal) * 8; } // RGBA16UI
 		size_t gradientBytes() const { return size_t(gradientTexelsTotal) * 4; } // RGBA8
 		size_t sdfBytes() const { return size_t(sdfTexelsTotal) * 4; } // RGBA8
@@ -1219,14 +1293,47 @@ public:
 
 	// Opt in to SDF/MSDF atlas generation. Must be called before build().
 	// When set, build() will call rasterizeSDFAtlas() after packTextures(), producing a packed
-	// RGB8 texture retrievable via getSDFAtlasData(). No-op if called after build().
-	void setSDFOptions(const SDFOptions& opts) { if(!_built) _sdfOptions = opts; }
+	// RGB8 texture retrievable via getSDFAtlasData(). Throws if called after build().
+	void setSDFOptions(const SDFOptions& opts) {
+		if(_built) throw std::runtime_error("Atlas::setSDFOptions: must be called before build()");
+
+		_sdfOptions = opts;
+	}
+
+	// Selects the curve texture's storage format. Must be called before build(); throws after.
+	//
+	// RGBA32F (default): full float precision. Safe for arbitrary authored coordinate ranges --
+	// slughorn is not font-only, unlike the reference Slug implementation this format choice
+	// traces back to, so there's no guarantee content stays within a range where reduced
+	// precision is imperceptible.
+	//
+	// RGBA16F: matches the reference Slug curve texture format, halves curve-texture memory.
+	// Real precision tradeoff, not just a repack -- can visibly degrade shape edges under heavy
+	// zoom (quantization that's sub-pixel at normal scale becomes multi-pixel once magnified).
+	// Only argument accepted is RGBA32F or RGBA16F; anything else throws.
+	void setCurveTextureFormat(TextureData::Format format) {
+		if(_built) throw std::runtime_error(
+			"Atlas::setCurveTextureFormat: must be called before build()"
+		);
+
+		if(format != TextureData::Format::RGBA32F && format != TextureData::Format::RGBA16F) {
+			throw std::invalid_argument(detail::to_sstr(
+				"Atlas::setCurveTextureFormat: expected RGBA32F or RGBA16F, got ", format
+			));
+		}
+
+		_curveFormat = format;
+	}
 
 	// Opt in to scanline curve texture generation. Must be called before build().
 	// When set, build() decomposes every shape's curves into monotonic segments and packs them
 	// into a flat RGBA32F texture retrievable via getScanlineCurveTextureData().
-	// No-op if called after build().
-	void enableScanlineData() { if(!_built) _scanlineEnabled = true; }
+	// Throws if called after build().
+	void enableScanlineData() {
+		if(_built) throw std::runtime_error("Atlas::enableScanlineData: must be called before build()");
+
+		_scanlineEnabled = true;
+	}
 
 	// Register a geometry shape under @p key.
 	//
@@ -1523,6 +1630,10 @@ private:
 	bool _scanlineEnabled = false;
 
 	uint32_t _texWidth;
+
+	// Set by setCurveTextureFormat(); RGBA32F default matches slughorn's pre-2026-08-29
+	// behavior. See setCurveTextureFormat() for the precision-vs-size tradeoff.
+	TextureData::Format _curveFormat = TextureData::Format::RGBA32F;
 };
 
 // ================================================================================================
@@ -1680,12 +1791,15 @@ struct CurveDecomposer {
 	void lineTo(slug_t x3, slug_t y3) {
 		_requireFinite({x3, y3});
 
-		curves.push_back({
-			_x, _y,
-			(_x + x3) * 0.5_cv,
-			(_y + y3) * 0.5_cv,
-			x3, y3
-		});
+		// Control point duplicates the endpoint rather than sitting at the exact midpoint.
+		// A midpoint control point makes the shader's quadratic coefficient degenerate to
+		// (near-)zero, which is numerically unstable to solve for directly -- rounding noise
+		// in the stored midpoint (worse at reduced precision, e.g. RGBA16F curve textures, but
+		// present at any precision) can push it just past the "treat as linear" epsilon and
+		// into the fragile branch, producing visible jaggies on straight edges under zoom.
+		// Duplicating the endpoint keeps the coefficient robustly non-zero instead. Matches the
+		// reference Slug implementation's documented convention (github.com/EricLengyel/Slug).
+		curves.push_back({_x, _y, x3, y3, x3, y3});
 
 		_x = x3;
 		_y = y3;
@@ -2096,10 +2210,12 @@ inline std::ostream& operator<<(std::ostream& os, const Atlas::ShapeInfo& info) 
 	;
 }
 
+inline std::ostream& operator<<(std::ostream& os, Atlas::TextureData::Format format);
+
 inline std::ostream& operator<<(std::ostream& os, const Atlas::PackingStats& p) {
 	return os
 		<< "PackingStats("
-		<< "curve: " << p.curveTexelsUsed << " used"
+		<< "curve: " << p.curveFormat << " " << p.curveTexelsUsed << " used"
 		<< " + " << p.curveTexelsPadding << " padding"
 		<< " / " << p.curveTexelsTotal << " total"
 		<< " (" << int(p.curveUtilization() * 100.f) << "% util,"
@@ -2132,6 +2248,7 @@ inline std::ostream& operator<<(std::ostream& os, const Atlas::PackingStats& p) 
 inline std::ostream& operator<<(std::ostream& os, Atlas::TextureData::Format format) {
 	switch(format) {
 		case Atlas::TextureData::Format::RGBA32F: return os << "RGBA32F";
+		case Atlas::TextureData::Format::RGBA16F: return os << "RGBA16F";
 		case Atlas::TextureData::Format::RGBA16UI: return os << "RGBA16UI";
 		case Atlas::TextureData::Format::RGBA8: return os << "RGBA8";
 		case Atlas::TextureData::Format::RGB32F: return os << "RGB32F";
