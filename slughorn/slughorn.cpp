@@ -1289,7 +1289,10 @@ void Atlas::packTextures() {
 			for(const auto& band : bands) {
 				const auto count = static_cast<uint32_t>(band.curveIndices.size());
 
-				cursor = alignCursorForSpan(cursor, _texWidth, count);
+				// No row-alignment here: the shader now re-derives each curve's row via
+				// slug_CalcBandLoc() per fetch (see Atlas.shaders.cpp), so a band's list is
+				// free to span multiple texture rows -- it no longer needs to start at a row
+				// boundary to avoid straddling one.
 				cursor += count;
 			}
 		};
@@ -1494,25 +1497,13 @@ void Atlas::packTextures() {
 				const auto& band = bands[b];
 				auto count = static_cast<uint32_t>(band.curveIndices.size());
 
-				// CORRECTION: count > _texWidth IS a real, hard limit, not an arbitrary one --
-				// a band's curve-index list must fit within a single texture row. The shader's
-				// read loop (slug_HFill/slug_VFill in Atlas.shaders.cpp) only wraps the list's
-				// STARTING offset via slug_CalcBandLoc(); it then does
-				// texelFetch(..., hbandLoc.x + curveIndex, hbandLoc.y, ...) with a FIXED row,
-				// so a list longer than one row reads garbage/wrong data past the row boundary.
-				// alignCursorForSpan() can only shift where a span STARTS, it cannot make a
-				// span wider than the row fit without straddling. An earlier version of this
-				// comment claimed the shader already handled multi-row lists and replaced this
-				// check with a uint16_t-only one -- that was wrong, and got caught when a real
-				// tile (738-curve band) still corrupted at texWidth=512 after that "fix".
-				if(count > _texWidth) {
-					throw std::runtime_error(detail::to_sstr(
-						"Atlas::build: ", key, "'s band has ", count, " curves, which "
-						"does not fit in a texture row of width ", _texWidth, ". Increase "
-						"the Atlas's texWidth (constructor parameter) to at least the next "
-						"power of two >= ", count
-					));
-				}
+				// 2026-08-26: the old "count > _texWidth" guard here (a band's curve-index list
+				// must fit within a single texture row) is GONE -- the shader's read loop
+				// (slug_Render in Atlas.shaders.cpp) now re-derives each curve's row via
+				// slug_CalcBandLoc() per fetch, instead of computing the row once at the
+				// list's start and flat-adding curveIndex to it. A band's list can now span
+				// as many rows as it needs; the real ceiling is the uint16_t header fields
+				// below, not the texture row width.
 
 				// Separate, independent limit: header.count is a uint16_t regardless of
 				// texWidth. Only reachable if _texWidth itself somehow exceeded 65535.
@@ -1525,8 +1516,9 @@ void Atlas::packTextures() {
 
 				_packingStats.bandMaxCount = std::max(_packingStats.bandMaxCount, count);
 
-				cursor = alignBand(cursor, count);
-
+				// No row-alignment for the curve-index list itself (see the comment above) -
+				// only the fixed-size indirection/header block still needs to avoid straddling
+				// a row, and that alignment happened once already, at shapeStart.
 				const uint32_t hi = headerBase + b;
 
 				// offset is relative to shapeStart and also a uint16_t. This is the more

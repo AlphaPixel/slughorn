@@ -182,10 +182,14 @@ float slug_Render(vec2 renderCoord, vec4 bandTransform, ivec2 glyphLoc, ivec2 ba
 	// Horizontal bands -- headers at glyphLoc + 2*IS + bandY
 	float xcov = 0.0, xwgt = 0.0;
 	uvec2 hbandData = texelFetch(u_bandTexture, ivec2(glyphLoc.x + 2 * SLUG_INDIRECTION_SIZE + bandY, glyphLoc.y), 0).xy;
-	ivec2 hbandLoc = slug_CalcBandLoc(glyphLoc, hbandData.y);
 
 	for(int ci = 0; ci < int(hbandData.x); ci++) {
-		ivec2 curveLoc = ivec2(texelFetch(u_bandTexture, ivec2(hbandLoc.x + ci, hbandLoc.y), 0).xy);
+		// Re-derive this fetch's row every iteration (instead of computing hbandLoc once
+		// and flat-adding ci to its X) so a band's curve-index list can span more than one
+		// texture row -- removes the old "count > texWidth" hard limit on shape complexity.
+		// Costs up to ~10us on complex scenes vs. the single-fetch version; worth it.
+		ivec2 hbandLoc = slug_CalcBandLoc(glyphLoc, hbandData.y + uint(ci));
+		ivec2 curveLoc = ivec2(texelFetch(u_bandTexture, hbandLoc, 0).xy);
 		vec4 p12 = texelFetch(u_curveTexture, curveLoc, 0) - vec4(renderCoord, renderCoord);
 		vec2 p3 = texelFetch(u_curveTexture, ivec2(curveLoc.x + 1, curveLoc.y), 0).xy - renderCoord;
 
@@ -202,10 +206,11 @@ float slug_Render(vec2 renderCoord, vec4 bandTransform, ivec2 glyphLoc, ivec2 ba
 	// Vertical bands -- headers at glyphLoc + 2*IS + numHBands + bandX
 	float ycov = 0.0, ywgt = 0.0;
 	uvec2 vbandData = texelFetch(u_bandTexture, ivec2(glyphLoc.x + 2 * SLUG_INDIRECTION_SIZE + bandMax.y + 1 + bandX, glyphLoc.y), 0).xy;
-	ivec2 vbandLoc = slug_CalcBandLoc(glyphLoc, vbandData.y);
 
 	for(int ci = 0; ci < int(vbandData.x); ci++) {
-		ivec2 curveLoc = ivec2(texelFetch(u_bandTexture, ivec2(vbandLoc.x + ci, vbandLoc.y), 0).xy);
+		// See the matching comment in the horizontal-band loop above.
+		ivec2 vbandLoc = slug_CalcBandLoc(glyphLoc, vbandData.y + uint(ci));
+		ivec2 curveLoc = ivec2(texelFetch(u_bandTexture, vbandLoc, 0).xy);
 		vec4 p12 = texelFetch(u_curveTexture, curveLoc, 0) - vec4(renderCoord, renderCoord);
 		vec2 p3 = texelFetch(u_curveTexture, ivec2(curveLoc.x + 1, curveLoc.y), 0).xy - renderCoord;
 
