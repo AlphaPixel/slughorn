@@ -521,7 +521,12 @@ inline Sampler decode(
 				const auto* texel = readBandTexel(shapeStart + h.offset + j);
 				const uint32_t cx = texel[0];
 				const uint32_t cy = texel[1];
-				const uint32_t idx = (cy * curveTex.width + cx) / 2;
+
+				// Raw texel address of the curve's first texel, used directly as the dedup/remap
+				// key -- NOT divided down into a "curve index" via an assumed 2-texels-per-curve
+				// stride. That assumption breaks once endpoint-shared packing lets a curve's
+				// first texel land at an odd offset (a shared texel isn't always curve-aligned).
+				const uint32_t idx = cy * curveTex.width + cx;
 
 				indices.push_back(idx);
 				globalIndices.push_back(idx);
@@ -548,7 +553,7 @@ inline Sampler decode(
 	out.curves.reserve(globalIndices.size());
 
 	for(uint32_t globalIndex : globalIndices) {
-		const uint32_t texel0 = globalIndex * 2;
+		const uint32_t texel0 = globalIndex;
 		const uint32_t texel1 = texel0 + 1;
 
 		const auto t0 = readCurveTexel(texel0);

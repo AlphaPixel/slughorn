@@ -1252,9 +1252,20 @@ void Atlas::packTextures() {
 	uint32_t totalCurveTexels = 0;
 
 	for(const auto& kv : _build) {
-		for(size_t i = 0; i < kv.second.curves.size(); i++) {
-			totalCurveTexels = alignCursorForSpan(totalCurveTexels, _texWidth, 2);
-			totalCurveTexels += 2;
+		const auto& curves = kv.second.curves;
+
+		// Endpoint-sharing: when curve i's start point is bit-exact with curve i-1's end
+		// point, curve i needs only 1 new texel (its tail) instead of 2 -- it reuses curve
+		// i-1's tail texel as its own texel0 (see the write pass below for the layout). No
+		// row-alignment here either: the shader now re-derives a curve's second texel's row
+		// via slug_CalcCurveLoc() per fetch, so a curve's 2 texels are free to straddle a row.
+		for(size_t i = 0; i < curves.size(); i++) {
+			const bool shared = i > 0
+				&& curves[i].x1 == curves[i - 1].x3
+				&& curves[i].y1 == curves[i - 1].y3
+			;
+
+			totalCurveTexels += shared ? 1 : 2;
 		}
 	}
 
@@ -1376,6 +1387,29 @@ void Atlas::packTextures() {
 		}
 	};
 
+	// Patches only the B/A channels of an already-written curve texel, leaving R/G (the shared
+	// endpoint) untouched -- used to fold a shared curve's own control point 2 into the previous
+	// curve's tail texel instead of allocating a fresh one.
+	auto patchCurveTexelBA = [&](uint32_t idx, slug_t b, slug_t a) {
+		const uint32_t x = idx % _texWidth;
+		const uint32_t y = idx / _texWidth;
+
+		if(y >= curveTexHeight) return;
+
+		uint8_t* p = _curveData.bytes.data() + (size_t{y} * _texWidth + x) * 4 * curveChannelBytes;
+
+		if(curveIsHalf) {
+			auto* half = reinterpret_cast<uint16_t*>(p);
+
+			half[2] = detail::floatToHalf(b);
+			half[3] = detail::floatToHalf(a);
+		} else {
+			auto* full = reinterpret_cast<float*>(p);
+
+			full[2] = b; full[3] = a;
+		}
+	};
+
 	auto writeBandTexel = [&](uint32_t idx, uint16_t r, uint16_t g) {
 		const uint32_t x = idx % _texWidth;
 		const uint32_t y = idx / _texWidth;
@@ -1405,7 +1439,9 @@ void Atlas::packTextures() {
 	// --------------------------------------------------------------------------------------------
 	// Pass 2: real packing
 	//
-	// Alignment wrappers record padding waste into _packingStats automatically.
+	// Alignment wrapper records padding waste into _packingStats automatically. Curves have no
+	// equivalent wrapper: endpoint-sharing packs them densely with no row alignment at all (see
+	// the measurement pass above), so curveTexelsPadding is always 0 going forward.
 	// --------------------------------------------------------------------------------------------
 	_packingStats = PackingStats{};
 	_packingStats.curveFormat = _curveFormat;
@@ -1413,14 +1449,6 @@ void Atlas::packTextures() {
 	_packingStats.curveTexelsTotal = _texWidth * curveTexHeight;
 	_packingStats.bandTexelsTotal = _texWidth * bandTexHeight;
 	_packingStats.scanlineTexelsTotal = _texWidth * scanlineTexHeight;
-
-	auto alignCurve = [&](uint32_t cursor, uint32_t span) -> uint32_t {
-		const uint32_t aligned = alignCursorForSpan(cursor, _texWidth, span);
-
-		_packingStats.curveTexelsPadding += aligned - cursor;
-
-		return aligned;
-	};
 
 	auto alignBand = [&](uint32_t cursor, uint32_t span) -> uint32_t {
 		const uint32_t aligned = alignCursorForSpan(cursor, _texWidth, span);
@@ -1439,20 +1467,52 @@ void Atlas::packTextures() {
 		auto& g = kv.second;
 
 		// Curves
+		//
+		// Endpoint-sharing (Lengyel's Slug convention): when curve ci's start point is
+		// bit-exact with the previous curve's end point, ci's texel0 IS the previous curve's
+		// tail texel -- its RG already holds the shared point, so only its BA (ci's own
+		// control point 2) needs patching in, and only ci's own tail texel is newly allocated.
+		// A chain of N connected curves costs N+1 texels instead of 2N. Deliberately NOT keyed
+		// off contourStarts (see slughorn.hpp's comment on that field) -- a direct coordinate
+		// check works uniformly regardless of shape origin and degrades safely to the old 2N
+		// layout when nothing matches.
 		std::vector<uint32_t> curveLocs(g.curves.size());
 
-		for(size_t ci = 0; ci < g.curves.size(); ci++) {
-			curveTexelOffset = alignCurve(curveTexelOffset, 2);
-			curveLocs[ci] = curveTexelOffset;
+		uint32_t prevTailTexel = 0;
+		bool havePrev = false;
 
+		for(size_t ci = 0; ci < g.curves.size(); ci++) {
 			const auto& c = g.curves[ci];
 
-			writeCurveTexel(curveTexelOffset, c.x1, c.y1, c.x2, c.y2);
-			writeCurveTexel(curveTexelOffset + 1, c.x3, c.y3, 0_cv, 0_cv);
+			const bool shared = havePrev
+				&& c.x1 == g.curves[ci - 1].x3
+				&& c.y1 == g.curves[ci - 1].y3
+			;
 
-			curveTexelOffset += 2;
+			if(shared) {
+				curveLocs[ci] = prevTailTexel;
 
-			_packingStats.curveTexelsUsed += 2;
+				patchCurveTexelBA(prevTailTexel, c.x2, c.y2);
+
+				writeCurveTexel(curveTexelOffset, c.x3, c.y3, 0_cv, 0_cv);
+
+				prevTailTexel = curveTexelOffset;
+				curveTexelOffset += 1;
+
+				_packingStats.curveTexelsUsed += 1;
+			} else {
+				curveLocs[ci] = curveTexelOffset;
+
+				writeCurveTexel(curveTexelOffset, c.x1, c.y1, c.x2, c.y2);
+				writeCurveTexel(curveTexelOffset + 1, c.x3, c.y3, 0_cv, 0_cv);
+
+				prevTailTexel = curveTexelOffset + 1;
+				curveTexelOffset += 2;
+
+				_packingStats.curveTexelsUsed += 2;
+			}
+
+			havePrev = true;
 		}
 
 		// Band texture block layout per shape:

@@ -21,6 +21,7 @@
 #include <cassert>
 #include <iostream>
 #include <string>
+#include <utility>
 
 using namespace slughorn::literals;
 
@@ -37,6 +38,60 @@ static void printGrid(const slughorn::render::Grid& g) {
 
 		std::cout << '\n';
 	}
+}
+
+// Mirrors slug_CalcCurveLoc() (Atlas.shaders.cpp / slughorn-example-glfw.cpp) bit-for-bit:
+//
+//   loc.y += loc.x >> texWidthLog2;
+//   loc.x &= (1 << texWidthLog2) - 1;
+//
+// No real curve produced by today's packTextures() can ever exercise this formula's wrap
+// branch -- curves are still unconditionally 2-texel-aligned, so texel0.x is always even and
+// texel0.x+1 never crosses a row. Endpoint-shared packing (planned) removes that alignment, so
+// this checks the formula in isolation against the row-boundary case it will need to handle,
+// rather than waiting for a real Shape that can't produce it yet.
+static std::pair<uint32_t, uint32_t> slug_CalcCurveLoc(
+	uint32_t x,
+	uint32_t y,
+	uint32_t offset,
+	uint32_t texWidthLog2
+) {
+	const uint32_t lx = x + offset;
+
+	return {lx & ((1u << texWidthLog2) - 1), y + (lx >> texWidthLog2)};
+}
+
+static int runCurveLocWrapTest() {
+	const uint32_t texWidthLog2 = 3;
+	const uint32_t texWidth = 1u << texWidthLog2;
+
+	// render.hpp's addressing scheme (decode()'s decodeBandList): the raw linear texel address
+	// (cy * width + cx) is the dedup key, and a curve's second texel is just "+1" in that flat
+	// space -- row boundaries are handled for free by linear indexing.
+	auto flatAddr = [&](uint32_t x, uint32_t y) { return y * texWidth + x; };
+
+	// Case 1: texel0 at the last column of a row. Its texel1 (offset +1) must land at column 0
+	// of the NEXT row -- the case a shared-endpoint chain can produce once packTextures() stops
+	// row-aligning every curve.
+	{
+		const auto [wx, wy] = slug_CalcCurveLoc(7, 2, 1, texWidthLog2);
+
+		assert(wx == 0 && wy == 3 && "row-wrap case: texel0 at last column must wrap to next row");
+		assert(flatAddr(7, 2) + 1 == flatAddr(wx, wy) && "GPU wrap formula disagrees with render.hpp's flat addressing");
+	}
+
+	// Case 2: mid-row, no wrap -- the ONLY case that occurs today, so this must match the old
+	// flat "curveLoc.x + 1, same row" behavior exactly (the no-op requirement).
+	{
+		const auto [wx, wy] = slug_CalcCurveLoc(3, 2, 1, texWidthLog2);
+
+		assert(wx == 4 && wy == 2 && "no-wrap case must be unchanged from the old curveLoc.x+1 path");
+		assert(flatAddr(3, 2) + 1 == flatAddr(wx, wy) && "GPU wrap formula disagrees with render.hpp's flat addressing");
+	}
+
+	std::cout << "Curve-fetch row-wrap formula checks passed.\n";
+
+	return 0;
 }
 
 static int runInMemory() {
@@ -58,6 +113,8 @@ static int runInMemory() {
 	canvas.finalize(Key("triangle_comp"));
 
 	atlas.build();
+
+	std::cout << atlas.getPackingStats() << '\n';
 
 	// --- Circle ---
 	{
@@ -220,6 +277,8 @@ static int runFromFile(const std::string& path) {
 
 int main(int argc, char** argv) {
 	if(argc > 1) return runFromFile(argv[1]);
+
+	if(const int rc = runCurveLocWrapTest()) return rc;
 
 	return runInMemory();
 }
