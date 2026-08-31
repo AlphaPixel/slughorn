@@ -697,7 +697,7 @@ def test_atlas_set_curve_texture_format_throws_after_build(built_atlas):
 
 def test_atlas_band_texture(built_atlas):
 	td = built_atlas.band_texture
-	assert td.format == "RGBA16UI"
+	assert td.format == "RG16UI"
 	assert len(bytes(td.bytes)) > 0
 
 def test_atlas_gradient_texture_empty_without_gradients(built_atlas):

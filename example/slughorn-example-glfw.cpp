@@ -30,7 +30,7 @@
 // u_mvp          mat4       view-projection transform
 // u_time         float      seconds since start
 // u_curveTexture sampler2D  (unit 0) RGBA32F curve data
-// u_bandTexture  usampler2D (unit 1) RGBA16UI band data
+// u_bandTexture  usampler2D (unit 1) RG16UI band data
 
 #include "slughorn/freetype.hpp"
 
@@ -320,8 +320,19 @@ static GLuint uploadSlugTexture(const slughorn::Atlas::TextureData& td) {
 			GL_RGBA, GL_HALF_FLOAT,
 			td.bytes.data()
 		);
+	} else if(td.format == slughorn::Atlas::TextureData::Format::RG16UI) {
+		// Band texture (current default). B/A are never consumed by the shader (which only
+		// ever reads .xy), so this is lossless, not a tradeoff like RGBA16F above.
+		glTexImage2D(
+			GL_TEXTURE_2D, 0,
+			GL_RG16UI,
+			(GLsizei)td.width, (GLsizei)td.height, 0,
+			GL_RG_INTEGER, GL_UNSIGNED_SHORT,
+			td.bytes.data()
+		);
 	} else {
-		// RGBA16UI -- band texture
+		// RGBA16UI -- legacy band texture format, read-compat only (a .slug/.slugb serialized
+		// before 2026-08-29 can still deserialize into this format).
 		glTexImage2D(
 			GL_TEXTURE_2D, 0,
 			GL_RGBA16UI,

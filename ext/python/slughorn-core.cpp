@@ -767,11 +767,12 @@ void bind_core(py::module_& m) {
 				case slughorn::Atlas::TextureData::Format::RGBA32F: return "RGBA32F";
 				case slughorn::Atlas::TextureData::Format::RGBA16F: return "RGBA16F";
 				case slughorn::Atlas::TextureData::Format::RGBA16UI: return "RGBA16UI";
+				case slughorn::Atlas::TextureData::Format::RG16UI: return "RG16UI";
 				case slughorn::Atlas::TextureData::Format::RGBA8: return "RGBA8";
 				case slughorn::Atlas::TextureData::Format::RGB32F: return "RGB32F";
 			}
 			return "unknown";
-		}, "String: 'RGBA16F' (curve), 'RGBA16UI' (band), 'RGBA8' (gradient), 'RGB32F' (MSDF array).")
+		}, "String: 'RGBA16F' (curve), 'RG16UI' (band), 'RGBA8' (gradient), 'RGB32F' (MSDF array).")
 		.def_property_readonly("bytes", [](const slughorn::Atlas::TextureData& td) {
 			return bytesView(td.bytes);
 		}, "Zero-copy memoryview of the raw pixel data (row-major). "
@@ -1029,7 +1030,7 @@ void bind_core(py::module_& m) {
 				return a.getBandTextureData();
 			},
 			py::return_value_policy::reference_internal,
-			"TextureData for the RGBA16UI band texture (valid after build())."
+			"TextureData for the RG16UI band texture (valid after build())."
 		)
 
 		.def_property_readonly("gradient_texture",

@@ -51,7 +51,7 @@
 //     },
 //     "bufferViews": [
 //       { "byteOffset": 0,    "byteLength": N, "format": "RGBA32F",  "width": 512, "height": H },
-//       { "byteOffset": N,    "byteLength": M, "format": "RGBA16UI", "width": 512, "height": H },
+//       { "byteOffset": N,    "byteLength": M, "format": "RG16UI",   "width": 512, "height": H },
 //       { "byteOffset": ...,  "byteLength": P, "format": "RGBA8",    "width": 512, "height": H },  // optional gradient
 //       { "byteOffset": ...,  "byteLength": Q, "format": "RGB32F",   "width": T,   "height": T, "depth": L } // optional MSDF array
 //     ],
@@ -360,7 +360,7 @@ json buildJson(
 
 	json bv1 = {
 		{"byteLength", band.bytes.size()},
-		{"format", "RGBA16UI"},
+		{"format", detail::to_sstr(band.format)},
 		{"width", band.width},
 		{"height", band.height}
 	};
@@ -554,6 +554,7 @@ Atlas atlasFromJson(
 		if (fmt == "RGBA32F") td.format = Atlas::TextureData::Format::RGBA32F;
 		else if(fmt == "RGBA16F") td.format = Atlas::TextureData::Format::RGBA16F;
 		else if(fmt == "RGBA16UI") td.format = Atlas::TextureData::Format::RGBA16UI;
+		else if(fmt == "RG16UI") td.format = Atlas::TextureData::Format::RG16UI;
 		else if(fmt == "RGBA8") td.format = Atlas::TextureData::Format::RGBA8;
 		else if(fmt == "RGB32F") td.format = Atlas::TextureData::Format::RGB32F;
 		else throw std::runtime_error("slughorn-serial: unknown texture format '" + fmt + "'");

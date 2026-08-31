@@ -424,9 +424,15 @@ inline Sampler decode(
 		throw std::runtime_error("Unexpected curve texture format")
 	;
 
-	if(bandTex.format != Atlas::TextureData::Format::RGBA16UI)
+	const bool bandIsLegacy = bandTex.format == Atlas::TextureData::Format::RGBA16UI;
+
+	if(!bandIsLegacy && bandTex.format != Atlas::TextureData::Format::RG16UI)
 		throw std::runtime_error("Unexpected band texture format")
 	;
+
+	// RG16UI (current) is 2 uint16_t/texel; RGBA16UI (legacy read-compat) is 4 -- callers only
+	// ever read indices 0/1 either way (B/A were never consumed even in the legacy format).
+	const uint32_t bandStride = bandIsLegacy ? 4 : 2;
 
 	Sampler out;
 
@@ -475,7 +481,7 @@ inline Sampler decode(
 			throw std::runtime_error("Band texture read out of bounds")
 		;
 
-		return bandData + size_t{texelIndex} * 4;
+		return bandData + size_t{texelIndex} * bandStride;
 	};
 
 	for(uint32_t q = 0; q < Atlas::INDIRECTION_SIZE; q++) {

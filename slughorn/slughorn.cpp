@@ -1310,10 +1310,12 @@ void Atlas::packTextures() {
 
 	_bandData.width = _texWidth;
 	_bandData.height = bandTexHeight;
-	_bandData.format = TextureData::Format::RGBA16UI;
+	_bandData.format = TextureData::Format::RG16UI;
 
-	// 4 uint16_t per texel
-	_bandData.bytes.assign(size_t{_texWidth} * bandTexHeight * 4 * sizeof(uint16_t), 0);
+	// 2 uint16_t per texel -- B/A are never consumed (indirection entries read only R; headers
+	// and curve locations read only RG), confirmed by every writeBandTexel() call below always
+	// having passed 0 for those two channels. Lossless: real values are exact uint16, no rounding.
+	_bandData.bytes.assign(size_t{_texWidth} * bandTexHeight * 2 * sizeof(uint16_t), 0);
 
 	// --------------------------------------------------------------------------------------------
 	// Pass 1: pre-compute monotonic curve decomposition for Scanline Sweeper (opt-in)
@@ -1374,17 +1376,17 @@ void Atlas::packTextures() {
 		}
 	};
 
-	auto writeBandTexel = [&](uint32_t idx, uint16_t r, uint16_t g, uint16_t b, uint16_t a) {
+	auto writeBandTexel = [&](uint32_t idx, uint16_t r, uint16_t g) {
 		const uint32_t x = idx % _texWidth;
 		const uint32_t y = idx / _texWidth;
 
 		if(y >= bandTexHeight) return;
 
 		uint16_t* p = reinterpret_cast<uint16_t*>(
-			_bandData.bytes.data() + (size_t{y} * _texWidth + x) * 4 * sizeof(uint16_t)
+			_bandData.bytes.data() + (size_t{y} * _texWidth + x) * 2 * sizeof(uint16_t)
 		);
 
-		p[0] = r; p[1] = g; p[2] = b; p[3] = a;
+		p[0] = r; p[1] = g;
 	};
 
 	auto writeScanlineTexel = [&](uint32_t idx, slug_t r, slug_t g, slug_t b, slug_t a) {
@@ -1407,6 +1409,7 @@ void Atlas::packTextures() {
 	// --------------------------------------------------------------------------------------------
 	_packingStats = PackingStats{};
 	_packingStats.curveFormat = _curveFormat;
+	_packingStats.bandFormat = TextureData::Format::RG16UI;
 	_packingStats.curveTexelsTotal = _texWidth * curveTexHeight;
 	_packingStats.bandTexelsTotal = _texWidth * bandTexHeight;
 	_packingStats.scanlineTexelsTotal = _texWidth * scanlineTexHeight;
@@ -1492,8 +1495,8 @@ void Atlas::packTextures() {
 			g.indirX.size() == INDIRECTION_SIZE
 		) {
 			for(uint32_t q = 0; q < INDIRECTION_SIZE; q++) {
-				writeBandTexel(shapeStart + q, g.indirY[q], 0, 0, 0);
-				writeBandTexel(shapeStart + INDIRECTION_SIZE + q, g.indirX[q], 0, 0, 0);
+				writeBandTexel(shapeStart + q, g.indirY[q], 0);
+				writeBandTexel(shapeStart + INDIRECTION_SIZE + q, g.indirX[q], 0);
 			}
 
 			_packingStats.bandTexelsUsed += 2 * INDIRECTION_SIZE;
@@ -1559,8 +1562,7 @@ void Atlas::packTextures() {
 					writeBandTexel(
 						cursor,
 						static_cast<uint16_t>(curveLoc % _texWidth),
-						static_cast<uint16_t>(curveLoc / _texWidth),
-						0, 0
+						static_cast<uint16_t>(curveLoc / _texWidth)
 					);
 
 					cursor++;
@@ -1577,15 +1579,13 @@ void Atlas::packTextures() {
 		for(uint32_t i = 0; i < numHBands; i++) writeBandTexel(
 			shapeStart + indirSize + i,
 			headers[i].count,
-			headers[i].offset,
-			0, 0
+			headers[i].offset
 		);
 
 		for(uint32_t i = 0; i < numVBands; i++) writeBandTexel(
 			shapeStart + indirSize + numHBands + i,
 			headers[numHBands + i].count,
-			headers[numHBands + i].offset,
-			0, 0
+			headers[numHBands + i].offset
 		);
 
 		_packingStats.bandTexelsUsed += numBandHeaders;

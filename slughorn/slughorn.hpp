@@ -816,7 +816,7 @@ struct FontMetrics {
 //
 // - Curve texture (RGBA32F by default, RGBA16F opt-in via setCurveTextureFormat()): packed
 //   quadratic Bezier control points
-// - Band texture (RGBA16UI): band headers + curve index lists
+// - Band texture (RG16UI): band headers + curve index lists
 //
 // Atlas is completely backend-agnostic; it has no dependencies on OSG, VSG, raw OpenGL, or any
 // other graphics library. After build() the caller retrieves TextureData descriptors and hands them
@@ -1027,10 +1027,14 @@ public:
 	// RGBA32F - four 32-bit floats per texel (curve texture, default -- see setCurveTextureFormat())
 	// RGBA16F - four 16-bit floats per texel (curve texture, opt-in; matches the reference Slug
 	//   format, halves curve-texture memory, real precision tradeoff -- see setCurveTextureFormat())
-	// RGBA16UI - four 16-bit unsigned ints per texel (band texture)
+	// RG16UI - two 16-bit unsigned ints per texel (band texture, current default). B/A are never
+	//   consumed by the shader (indirection entries read only R; headers/curve locations read
+	//   only RG) for any content type, so this is lossless, not a tradeoff like RGBA16F.
+	// RGBA16UI - legacy 4-channel band texture format (2 always-zero trailing channels); no
+	//   longer written by Atlas::packTextures(), kept only to read pre-2026-08-29 .slug/.slugb
 	// --------------------------------------------------------------------------------------------
 	struct TextureData {
-		enum class Format { RGBA32F, RGBA16F, RGBA16UI, RGBA8, RGB32F };
+		enum class Format { RGBA32F, RGBA16F, RGBA16UI, RG16UI, RGBA8, RGB32F };
 
 		std::vector<uint8_t> bytes;
 
@@ -1092,7 +1096,11 @@ public:
 		uint32_t curveTexelsPadding = 0; // texels wasted to row-alignment bumps
 		uint32_t curveTexelsTotal = 0; // width * height (allocated)
 
-		// Band texture (RGBA16UI, 8 bytes/texel)
+		// Which format the band texture was actually packed in -- RG16UI by default (current
+		// packTextures() output); only ever RGBA16UI when loaded from a pre-2026-08-29 file.
+		TextureData::Format bandFormat = TextureData::Format::RG16UI;
+
+		// Band texture (RG16UI by default, 4 bytes/texel; RGBA16UI legacy read-compat, 8 bytes/texel)
 		uint32_t bandTexelsUsed = 0;
 		uint32_t bandTexelsPadding = 0;
 		uint32_t bandTexelsTotal = 0;
@@ -1176,7 +1184,9 @@ public:
 		size_t curveBytes() const {
 			return size_t(curveTexelsTotal) * (curveFormat == TextureData::Format::RGBA16F ? 8 : 16);
 		}
-		size_t bandBytes() const { return size_t(bandTexelsTotal) * 8; } // RGBA16UI
+		size_t bandBytes() const {
+			return size_t(bandTexelsTotal) * (bandFormat == TextureData::Format::RGBA16UI ? 8 : 4);
+		}
 		size_t gradientBytes() const { return size_t(gradientTexelsTotal) * 4; } // RGBA8
 		size_t sdfBytes() const { return size_t(sdfTexelsTotal) * 4; } // RGBA8
 		size_t msdfBytes() const { return size_t(msdfTexelsTotal) * 12; } // RGB32F
@@ -2220,7 +2230,7 @@ inline std::ostream& operator<<(std::ostream& os, const Atlas::PackingStats& p) 
 		<< " / " << p.curveTexelsTotal << " total"
 		<< " (" << int(p.curveUtilization() * 100.f) << "% util,"
 		<< " " << int(p.curvePaddingRatio() * 100.f) << "% pad)"
-		<< " | band: " << p.bandTexelsUsed << " used"
+		<< " | band: " << p.bandFormat << " " << p.bandTexelsUsed << " used"
 		<< " + " << p.bandTexelsPadding << " padding"
 		<< " / " << p.bandTexelsTotal << " total"
 		<< " (" << int(p.bandUtilization() * 100.f) << "% util,"
@@ -2250,6 +2260,7 @@ inline std::ostream& operator<<(std::ostream& os, Atlas::TextureData::Format for
 		case Atlas::TextureData::Format::RGBA32F: return os << "RGBA32F";
 		case Atlas::TextureData::Format::RGBA16F: return os << "RGBA16F";
 		case Atlas::TextureData::Format::RGBA16UI: return os << "RGBA16UI";
+		case Atlas::TextureData::Format::RG16UI: return os << "RG16UI";
 		case Atlas::TextureData::Format::RGBA8: return os << "RGBA8";
 		case Atlas::TextureData::Format::RGB32F: return os << "RGB32F";
 	}
