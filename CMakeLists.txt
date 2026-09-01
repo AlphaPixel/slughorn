@@ -220,7 +220,11 @@ endif()
 # slughorn is the top-level project.
 
 if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
-	find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
+	# An extension module needs Python headers but must not link libpython. manylinux
+	# deliberately omits the embeddable Development.Embed library, so request the
+	# module-development component rather than the aggregate "Development" one (same fix as
+	# OpenSceneGraph.py's CMakeLists.txt:10-11).
+	find_package(Python3 COMPONENTS Interpreter Development.Module REQUIRED)
 
 	if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/ext/pybind11/CMakeLists.txt")
 		message(FATAL_ERROR
