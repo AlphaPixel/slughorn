@@ -2,25 +2,6 @@
 
 #include "slughorn/nanosvg.hpp"
 
-namespace detail {
-
-inline slughorn::nanosvg::LoadConfig makeNanosvgLoadConfig(
-	std::optional<slughorn::nanosvg::LogCallback> log,
-	bool autoMetrics = true,
-	slughorn::Atlas::ShapeInfo::Origin origin = {}
-) {
-	slughorn::nanosvg::LoadConfig config;
-
-	if(log) config.log = *log;
-
-	config.autoMetrics = autoMetrics;
-	config.origin = origin;
-
-	return config;
-}
-
-} // namespace detail
-
 namespace slughorn_python {
 
 void bind_nanosvg(py::module_& nanosvg) {
@@ -55,80 +36,86 @@ void bind_nanosvg(py::module_& nanosvg) {
 		"or stored as geometry-only (curves in atlas, no CompositeShape layer).\n"
 		"origin overrides LoadConfig.origin for matched shapes (None = inherit).");
 
+	py::class_<slughorn::nanosvg::LoadConfig>(nanosvg, "LoadConfig")
+		.def(py::init([](py::kwargs kwargs) {
+			slughorn::nanosvg::LoadConfig config;
+
+			for(auto item : kwargs) {
+				auto key = item.first.cast<std::string>();
+
+				if(key == "log") config.log = item.second.cast<slughorn::nanosvg::LogCallback>();
+				else if(key == "rules") {
+					config.rules = item.second.cast<std::vector<slughorn::nanosvg::ShapeRule>>();
+				}
+				else if(key == "auto_metrics") config.autoMetrics = item.second.cast<bool>();
+				else if(key == "origin") {
+					config.origin = item.second.cast<slughorn::Atlas::ShapeInfo::Origin>();
+				}
+				else if(key == "width") config.width = item.second.cast<slug_t>();
+				else if(key == "height") config.height = item.second.cast<slug_t>();
+				else if(key == "height_em") config.heightEm = item.second.cast<slug_t>();
+				else throw py::type_error("LoadConfig got an unexpected keyword argument '" + key + "'");
+			}
+
+			return config;
+		}),
+		"Construct with optional field=value kwargs, e.g. LoadConfig(auto_metrics=False)."
+		)
+		.def_readwrite("log", &slughorn::nanosvg::LoadConfig::log,
+			"Optional callable(level: int, msg: str) for load-time diagnostics; "
+			"omit (None) to print warnings/errors to stderr."
+		)
+		.def_readwrite("rules", &slughorn::nanosvg::LoadConfig::rules,
+			"List of ShapeRule objects applied in order; first match wins."
+		)
+		.def_readwrite("auto_metrics", &slughorn::nanosvg::LoadConfig::autoMetrics,
+			"If True (default), curves are shifted to local origin and shape metrics\n"
+			"are derived from the curve bbox; layer.transform.x/y carries the offset\n"
+			"(multiply by image width/height to recover authoring coords). If False,\n"
+			"curves are stored as-is in SVG canvas space and layer.transform is zero."
+		)
+		.def_readwrite("origin", &slughorn::nanosvg::LoadConfig::origin,
+			"Global origin for all shapes (overridden per-shape by ShapeRule.origin)."
+		)
+		.def_readwrite("width", &slughorn::nanosvg::LoadConfig::width,
+			"Output: raw SVG width, populated by loadImage/loadFile/loadString."
+		)
+		.def_readwrite("height", &slughorn::nanosvg::LoadConfig::height,
+			"Output: raw SVG height, populated by loadImage/loadFile/loadString."
+		)
+		.def_readwrite("height_em", &slughorn::nanosvg::LoadConfig::heightEm,
+			"Output: SVG viewport height in em-space, populated by "
+			"loadImage/loadFile/loadString."
+		)
+		.def("__repr__", [](const slughorn::nanosvg::LoadConfig& c) { return streamRepr(c); })
+	;
+
 	nanosvg.def("load_file",
-		[](
-			const std::string& path,
-			slughorn::Atlas& atlas,
-			slughorn::KeyIterator& keys,
-			slug_t dpi,
-			std::optional<slughorn::nanosvg::LogCallback> log,
-			std::vector<slughorn::nanosvg::ShapeRule> rules,
-			bool autoMetrics,
-			slughorn::Atlas::ShapeInfo::Origin origin
-		) {
-			auto config = detail::makeNanosvgLoadConfig(log, autoMetrics, origin);
-
-			config.rules = std::move(rules);
-
-			return slughorn::nanosvg::loadFile(path, atlas, keys, dpi, &config);
-		},
+		&slughorn::nanosvg::loadFile,
 		"path"_a,
 		"atlas"_a,
 		"keys"_a=slughorn::KeyIterator(),
 		"dpi"_a=96_cv,
-		"log"_a=py::none(),
-		"rules"_a=std::vector<slughorn::nanosvg::ShapeRule>(),
-		"auto_metrics"_a=true,
-		"origin"_a=slughorn::Atlas::ShapeInfo::Origin{},
+		"config"_a=nullptr,
 		"Parse an SVG file and pack every filled shape into atlas.\n"
 		"keys is advanced in-place; pass the same KeyIterator to subsequent calls\n"
 		"to pack multiple SVGs into the same atlas without key collisions.\n"
-		"log(level, msg) is called for warnings (level=1) and errors (level=2); "
-		"omit to print to stderr.\n"
-		"rules is a list of ShapeRule objects applied in order; first match wins.\n"
-		"auto_metrics: when True (default) curves are shifted to local origin and shape\n"
-		"metrics are derived from the curve bbox; layer.transform.x/y carries the offset\n"
-		"(multiply by image width/height to recover authoring coords). When False, curves\n"
-		"are stored as-is in SVG canvas space and layer.transform is zero.\n"
-		"origin: global origin for all shapes (overridden per-shape by ShapeRule.origin)."
+		"config: optional LoadConfig; its output fields (width, height, height_em)\n"
+		"    are populated in place on return."
 	);
 
 	nanosvg.def("load_string",
-		[](
-			const std::string& svg,
-			slughorn::Atlas& atlas,
-			slughorn::KeyIterator& keys,
-			slug_t dpi,
-			std::optional<slughorn::nanosvg::LogCallback> log,
-			std::vector<slughorn::nanosvg::ShapeRule> rules,
-			bool autoMetrics,
-			slughorn::Atlas::ShapeInfo::Origin origin
-		) {
-			auto config = detail::makeNanosvgLoadConfig(log, autoMetrics, origin);
-
-			config.rules = std::move(rules);
-
-			return slughorn::nanosvg::loadString(svg, atlas, keys, dpi, &config);
-		},
+		&slughorn::nanosvg::loadString,
 		"svg"_a,
 		"atlas"_a,
 		"keys"_a=slughorn::KeyIterator(),
 		"dpi"_a=96_cv,
-		"log"_a=py::none(),
-		"rules"_a=std::vector<slughorn::nanosvg::ShapeRule>(),
-		"auto_metrics"_a=true,
-		"origin"_a=slughorn::Atlas::ShapeInfo::Origin{},
+		"config"_a=nullptr,
 		"Parse an SVG string and pack every filled shape into atlas.\n"
 		"keys is advanced in-place; pass the same KeyIterator to subsequent calls\n"
 		"to pack multiple SVGs into the same atlas without key collisions.\n"
-		"log(level, msg) is called for warnings (level=1) and errors (level=2); "
-		"omit to print to stderr.\n"
-		"rules is a list of ShapeRule objects applied in order; first match wins.\n"
-		"auto_metrics: when True (default) curves are shifted to local origin and shape\n"
-		"metrics are derived from the curve bbox; layer.transform.x/y carries the offset\n"
-		"(multiply by image width/height to recover authoring coords). When False, curves\n"
-		"are stored as-is in SVG canvas space and layer.transform is zero.\n"
-		"origin: global origin for all shapes (overridden per-shape by ShapeRule.origin)."
+		"config: optional LoadConfig; its output fields (width, height, height_em)\n"
+		"    are populated in place on return."
 	);
 }
 

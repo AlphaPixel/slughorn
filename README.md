@@ -18,11 +18,13 @@ https://github.com/user-attachments/assets/5ca6563e-a7d3-44df-9800-beb8716efcad
 
 <div align="center">
 
-**🔨 What We're Working On** &nbsp;&nbsp;<sub>*Last updated: August 13th, 2026*</sub>
+**🔨 What We're Working On** &nbsp;&nbsp;<sub>*Last updated: September 1st, 2026*</sub>
 
 | | Feature | Status |
 |:---:|---------|:------:|
 | 🎨 | Add support for improved "decal" style rendering | ![In Progress](https://img.shields.io/badge/In_Progress-f59e0b?style=flat-square) |
+| 🎨 | CI/CD Python package builds/publishing | ![In Progress](https://img.shields.io/badge/In_Progress-f59e0b?style=flat-square) |
+| 🧰 | Reduce texture memory usage | ![Complete](https://img.shields.io/badge/Complete-16a34a?style=flat-square) |
 | 🧰 | `Key` mask/namespace support | ![Complete](https://img.shields.io/badge/Complete-16a34a?style=flat-square) |
 | 🧰 | Add support for simple Miters/Caps | ![Complete](https://img.shields.io/badge/Complete-16a34a?style=flat-square) |
 | 🧰 | **Remove** the `expand` parameter as CPU-side "hack" | ![Complete](https://img.shields.io/badge/Complete-16a34a?style=flat-square) |

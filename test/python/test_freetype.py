@@ -114,7 +114,9 @@ def test_load_glyphs_empty_codepoints(atlas):
 
 def test_load_glyphs_uniform_metrics(atlas):
 	_skip_if_no_font(_MONO_PATH)
-	slughorn.freetype.load_font_glyphs(MONO_FONT, DIGIT_CODEPOINTS, atlas, uniform=True)
+	config = slughorn.freetype.LoadConfig()
+	config.uniform = True
+	slughorn.freetype.load_font_glyphs(MONO_FONT, DIGIT_CODEPOINTS, atlas, config)
 	atlas.build()
 	shapes = [atlas.get_shape(slughorn.Key(cp)) for cp in DIGIT_CODEPOINTS]
 	assert all(s is not None for s in shapes)
@@ -123,6 +125,17 @@ def test_load_glyphs_uniform_metrics(atlas):
 		assert s.width   == pytest.approx(ref.width,   abs=1e-5)
 		assert s.height  == pytest.approx(ref.height,  abs=1e-5)
 		assert s.advance == pytest.approx(ref.advance, abs=1e-5)
+
+def test_load_glyphs_output_metrics(atlas):
+	# LoadConfig.metrics/family_name/style_name are output fields populated in place
+	# by the high-level load*_font functions (here, load_font_glyphs).
+	_skip_if_no_font(_MONO_PATH)
+	config = slughorn.freetype.LoadConfig()
+	slughorn.freetype.load_font_glyphs(MONO_FONT, DIGIT_CODEPOINTS, atlas, config)
+	assert isinstance(config.metrics, slughorn.FontMetrics)
+	assert config.metrics.units_per_em > 0
+	assert config.family_name != ""
+	assert config.style_name != ""
 
 
 # ---------------------------------------------------------------------------
@@ -244,8 +257,10 @@ def test_log_callback_bad_path(atlas):
 	messages = []
 	def on_log(level, msg):
 		messages.append((level, msg))
+	config = slughorn.freetype.LoadConfig()
+	config.log = on_log
 	try:
-		slughorn.freetype.load_font_glyphs("/nonexistent/font.ttf", DIGIT_CODEPOINTS, atlas, log=on_log)
+		slughorn.freetype.load_font_glyphs("/nonexistent/font.ttf", DIGIT_CODEPOINTS, atlas, config)
 	except Exception:
 		pass
 	# Whether the error is raised or reported via the log, at least one must happen.
@@ -255,7 +270,9 @@ def test_log_callback_receives_strings(atlas):
 	messages = []
 	def on_log(level, msg):
 		messages.append((level, msg))
-	slughorn.freetype.load_font_glyphs(MONO_FONT, DIGIT_CODEPOINTS, atlas, log=on_log)
+	config = slughorn.freetype.LoadConfig()
+	config.log = on_log
+	slughorn.freetype.load_font_glyphs(MONO_FONT, DIGIT_CODEPOINTS, atlas, config)
 	# No warnings expected on a valid font, but the callback must not crash if called.
 	for level, msg in messages:
 		assert isinstance(level, int)
@@ -270,8 +287,10 @@ def test_strategy_callable(atlas):
 	_skip_if_no_font(_MONO_PATH)
 	def my_strategy(curves):
 		return slughorn.Atlas.compute_uniform_splits(curves, 4, 4)
+	config = slughorn.freetype.LoadConfig()
+	config.strategy = my_strategy
 	n = slughorn.freetype.load_font_glyphs(
-		MONO_FONT, [ord("A")], atlas, strategy=my_strategy
+		MONO_FONT, [ord("A")], atlas, config
 	)
 	assert n == 1
 	atlas.build()

@@ -19,8 +19,10 @@ def import_compiled_slughorn():
 
 	try:
 		mod = importlib.import_module("slughorn")
+
 		if valid(mod):
 			return mod
+
 	except ImportError:
 		pass
 
@@ -50,14 +52,11 @@ def import_compiled_slughorn():
 
 	return mod
 
-
 slughorn = import_compiled_slughorn()
-
 
 def fail(message: str, code_: int=1) -> None:
 	print(f"ERROR: {message}", file=sys.stderr)
 	raise SystemExit(code_)
-
 
 def make_key(raw: str) -> slughorn.Key:
 	try:
@@ -66,40 +65,41 @@ def make_key(raw: str) -> slughorn.Key:
 	except ValueError:
 		return slughorn.Key(raw)
 
-
 def resolve_key_arg(raw: str | None, ord_char: str | None) -> slughorn.Key:
 	if ord_char is not None:
 		if len(ord_char) != 1:
 			fail(f"--ord requires a single character, got: {ord_char!r}")
+
 		return slughorn.Key(ord(ord_char))
+
 	if raw is None:
 		fail("a key argument or --ord is required")
-	return make_key(raw)
 
+	return make_key(raw)
 
 _FORMAT_BYTES_PER_TEXEL = {"RGBA32F": 16, "RGBA16F": 8, "RGBA16UI": 8, "RG16UI": 4, "RGBA8": 4}
 
 def tex_size_str(tex) -> str:
-    bpt = _FORMAT_BYTES_PER_TEXEL.get(tex.format, 0)
-    total = tex.width * tex.height * bpt
-    if total >= 1024 * 1024:
-        return f"{total / (1024 * 1024):.1f} MiB"
-    if total >= 1024:
-        return f"{total // 1024} KiB"
-    return f"{total} B"
+	bpt = _FORMAT_BYTES_PER_TEXEL.get(tex.format, 0)
+	total = tex.width * tex.height * bpt
 
+	if total >= 1024 * 1024:
+		return f"{total / (1024 * 1024):.1f} MiB"
+
+	if total >= 1024:
+		return f"{total // 1024} KiB"
+
+	return f"{total} B"
 
 def key_type_name(key) -> str:
 	type_obj = key.type
 	return type_obj.name if hasattr(type_obj, "name") else str(type_obj)
-
 
 def key_to_serial_json(key) -> dict:
 	if key_type_name(key) == "Codepoint":
 		return {"type": "codepoint", "value": key.codepoint}
 
 	return {"type": "name", "value": key.name}
-
 
 def format_key(key) -> str:
 	type_name = key_type_name(key)
@@ -111,24 +111,25 @@ def format_key(key) -> str:
 
 	return key.name
 
-
 def load_atlas(path: str):
 	if not hasattr(slughorn, "read"):
 		fail("slughorn.read() is not available; build with SERIAL enabled", 2)
 
 	try:
 		return slughorn.read(path)
+
 	except Exception as exc:  # pragma: no cover
 		fail(f"failed to load atlas from {path}: {exc}")
-
 
 def read_serial_json(path: str) -> str:
 	try:
 		data = Path(path).read_bytes()
+
 	except OSError as exc:
 		fail(f"failed to read atlas from {path}: {exc}")
 
 	stripped = data.lstrip()
+
 	if stripped.startswith(b"{"):
 		return data.decode("utf-8")
 
@@ -152,12 +153,12 @@ def read_serial_json(path: str) -> str:
 
 	return data[json_start:json_end].decode("utf-8").rstrip()
 
-
 def filter_serial_json_by_key(serial_json: str, key) -> str:
 	target = key_to_serial_json(key)
 
 	try:
 		data = json.loads(serial_json)
+
 	except json.JSONDecodeError as exc:
 		fail(f"failed to parse serialized atlas JSON: {exc}")
 
@@ -187,6 +188,7 @@ def filter_serial_json_by_key(serial_json: str, key) -> str:
 					continue
 
 				shape = shape_by_key.get(serialized_key)
+
 				if shape is not None:
 					layer_shapes.append(shape)
 					seen.add(serialized_key)
@@ -196,20 +198,16 @@ def filter_serial_json_by_key(serial_json: str, key) -> str:
 
 	return json.dumps(result, separators=(",", ":"))
 
-
 def ensure_serial_support() -> None:
 	if not hasattr(slughorn, "write"):
 		fail("slughorn.write() is not available; build with SERIAL enabled", 2)
-
 
 def ensure_freetype_support() -> None:
 	if not hasattr(slughorn, "freetype"):
 		fail("slughorn.freetype is not available; build with FREETYPE enabled", 2)
 
-
 def clamp(x: float, lo: float, hi: float) -> float:
 	return lo if x < lo else hi if x > hi else x
-
 
 def compute_render_size(shape, size_hint: int=256) -> tuple[int, int]:
 	w = shape.width
@@ -223,7 +221,6 @@ def compute_render_size(shape, size_hint: int=256) -> tuple[int, int]:
 	out_h = max(1, int(round(h * scale)))
 
 	return out_w, out_h
-
 
 class EmTransform:
 	def __init__(self, shape, width: int, height: int, margin: float=0.0):
@@ -248,15 +245,14 @@ class EmTransform:
 
 		return int(u * self.width), int(v * self.height)
 
-
 @contextlib.contextmanager
 def timer(enabled: bool, label: str):
 	start = time.perf_counter()
+
 	yield
 
 	if enabled:
 		print(f"{label}: {time.perf_counter() - start:.3f}s")
-
 
 def save_image(grid, filename: str, flip_y: bool=False) -> str:
 	if flip_y:
@@ -274,7 +270,6 @@ def save_image(grid, filename: str, flip_y: bool=False) -> str:
 
 	return f"Saved {w}x{h} image -> {filename}"
 
-
 def build_curves_svg_string(
 	decoded,
 	atlas,
@@ -283,9 +278,9 @@ def build_curves_svg_string(
 	margin: float=0.0,
 	flip_y: bool=True,
 ) -> str:
-	shape    = decoded.shape
-	indir_x  = bytes(decoded.indir_x)
-	indir_y  = bytes(decoded.indir_y)
+	shape = decoded.shape
+	indir_x = bytes(decoded.indir_x)
+	indir_y = bytes(decoded.indir_y)
 	indir_size = len(indir_x)
 	contours = atlas.get_shape_contours(key)
 
@@ -411,7 +406,6 @@ def build_curves_svg_string(
 
 	return svg
 
-
 def save_curves_svg(
 	decoded,
 	atlas,
@@ -428,26 +422,26 @@ def save_curves_svg(
 
 	return f"Saved SVG debug -> {filename}"
 
-
 def default_output_path(raw_key: str, suffix: str) -> str:
 	safe = raw_key.replace("/", "_")
 	return str(Path(safe).with_suffix(suffix))
 
-
 def parse_codepoint(raw: str) -> int:
 	text = raw.strip()
+
 	if not text:
 		raise ValueError("empty codepoint")
 
 	upper = text.upper()
+
 	if upper.startswith("U+"):
 		return int(upper[2:], 16)
 
 	return int(text, 0)
 
-
 def parse_codepoint_range(raw: str) -> tuple[int, int]:
 	text = raw.strip()
+
 	if "-" not in text:
 		raise ValueError(f"range must use START-END syntax: {raw!r}")
 
@@ -460,12 +454,10 @@ def parse_codepoint_range(raw: str) -> tuple[int, int]:
 
 	return start, end
 
-
 def validate_codepoint(cp: int) -> int:
 	if not (0 <= cp <= 0x10FFFF):
 		raise ValueError(f"codepoint out of Unicode range: U+{cp:X}")
 	return cp
-
 
 def dedupe_codepoints(codepoints: list[int]) -> list[int]:
 	seen: set[int] = set()
@@ -480,9 +472,9 @@ def dedupe_codepoints(codepoints: list[int]) -> list[int]:
 
 	return ordered
 
-
 def build_font_codepoint_selection(args) -> tuple[str, list[int] | None]:
 	selections = sum(bool(x) for x in (args.ascii, args.range, args.chars))
+
 	if selections > 1:
 		fail("choose at most one of --ascii, --range, or --chars", 2)
 
@@ -492,6 +484,7 @@ def build_font_codepoint_selection(args) -> tuple[str, list[int] | None]:
 	if args.range is not None:
 		try:
 			start, end = parse_codepoint_range(args.range)
+
 		except ValueError as exc:
 			fail(str(exc), 2)
 
@@ -502,21 +495,23 @@ def build_font_codepoint_selection(args) -> tuple[str, list[int] | None]:
 
 	return "all", None
 
-
 def get_shape_or_fail(atlas, key):
 	shape = atlas.get_shape(key)
+
 	if shape is None:
 		available = ", ".join(format_key(k) for k in atlas.get_shapes().keys())
 		fail(f"key not found: {format_key(key)}\nAvailable shapes: {available or '(none)'}")
-	return shape
 
+	return shape
 
 def decode_or_fail(atlas, key):
 	shape = atlas.get_shape(key)
+
 	if shape is not None:
 		return atlas.decode(key)
 
 	composite = atlas.get_composite_shape(key)
+
 	if composite is not None:
 		if len(composite.layers) == 1:
 			layer_key = composite.layers[0].key
@@ -529,7 +524,6 @@ def decode_or_fail(atlas, key):
 	available = ", ".join(format_key(k) for k in atlas.get_shapes().keys())
 	fail(f"key not found: {format_key(key)}\nAvailable shapes: {available or '(none)'}")
 
-
 def command_info(args) -> int:
 	if args.json:
 		serial_json = read_serial_json(args.atlas)
@@ -539,6 +533,7 @@ def command_info(args) -> int:
 			serial_json = filter_serial_json_by_key(serial_json, key)
 
 		print(serial_json)
+
 		return 0
 
 	atlas = load_atlas(args.atlas)
@@ -580,6 +575,7 @@ def command_info(args) -> int:
 				indir_y = bytes(decoded.indir_y)
 				print(f"  curves:      {len(decoded.curves)}")
 				print(f"  bands:       {len(indir_x)}x{len(indir_y)}")
+
 			except Exception:
 				pass
 
@@ -602,8 +598,10 @@ def command_info(args) -> int:
 						indir_y = bytes(ldecoded.indir_y)
 						print(f"    curves:    {len(ldecoded.curves)}")
 						print(f"    bands:     {len(indir_x)}x{len(indir_y)}")
+
 					except Exception:
 						pass
+
 				else:
 					print(f"    (shape not found in atlas)")
 
@@ -611,7 +609,6 @@ def command_info(args) -> int:
 			fail(f"key not found: {format_key(key)}")
 
 	return 0
-
 
 def command_list(args) -> int:
 	atlas = load_atlas(args.atlas)
@@ -622,6 +619,7 @@ def command_list(args) -> int:
 
 	if show_shapes:
 		print("Shapes:")
+
 		for key in sorted(shapes.keys(), key=format_key):
 			print(f"  {format_key(key)}")
 
@@ -630,11 +628,11 @@ def command_list(args) -> int:
 
 	if show_composites:
 		print("Composites:")
+
 		for key in sorted(composites.keys(), key=format_key):
 			print(f"  {format_key(key)}")
 
 	return 0
-
 
 def command_render(args) -> int:
 	atlas = load_atlas(args.atlas)
@@ -649,8 +647,8 @@ def command_render(args) -> int:
 		message = save_image(grid, output, flip_y=args.flip_y)
 
 	print(message)
-	return 0
 
+	return 0
 
 def command_svg(args) -> int:
 	atlas = load_atlas(args.atlas)
@@ -670,8 +668,8 @@ def command_svg(args) -> int:
 		)
 
 	print(message)
-	return 0
 
+	return 0
 
 def command_shell(args) -> int:
 	atlas = load_atlas(args.atlas)
@@ -697,17 +695,20 @@ def command_shell(args) -> int:
 
 	if args.plain:
 		code.interact(banner=banner, local=ns)
+
 		return 0
 
 	try:
 		from IPython import start_ipython
+
 	except ImportError:
 		code.interact(banner=banner + "\n(IPython not installed; using stdlib REPL)", local=ns)
+
 		return 0
 
 	start_ipython(argv=[], user_ns=ns)
-	return 0
 
+	return 0
 
 def command_font(args) -> int:
 	ensure_serial_support()
@@ -759,9 +760,10 @@ def command_font(args) -> int:
 		"chars": f"{len(codepoints or [])} explicit chars",
 		"all": "full font charmap",
 	}[mode]
-	print(f"Packed {loaded} glyphs from {args.font} ({label}) -> {args.output}")
-	return 0
 
+	print(f"Packed {loaded} glyphs from {args.font} ({label}) -> {args.output}")
+
+	return 0
 
 def build_parser() -> argparse.ArgumentParser:
 	parser = argparse.ArgumentParser(
@@ -829,12 +831,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 	return parser
 
-
 def main(argv: list[str] | None=None) -> int:
 	parser = build_parser()
 	args = parser.parse_args(argv)
 	return args.func(args)
-
 
 if __name__ == "__main__":
 	raise SystemExit(main())

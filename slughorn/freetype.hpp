@@ -88,6 +88,17 @@ struct LoadConfig {
 	std::string styleName = {};
 };
 
+inline std::ostream& operator<<(std::ostream& os, const LoadConfig& c) {
+	return os
+		<< "LoadConfig("
+		<< "uniform=" << c.uniform
+		<< " mask=" << static_cast<int>(c.mask)
+		<< " familyName=" << c.familyName
+		<< " styleName=" << c.styleName
+		<< ")"
+	;
+}
+
 // =============================================================================
 // Font metrics
 // =============================================================================

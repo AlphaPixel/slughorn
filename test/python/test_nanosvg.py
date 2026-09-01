@@ -255,7 +255,9 @@ def test_log_callback_called_on_bad_file(atlas):
 	def on_log(level, msg):
 		messages.append((level, msg))
 
-	slughorn.nanosvg.load_file("/nonexistent/path/file.svg", atlas, log=on_log)
+	config = slughorn.nanosvg.LoadConfig()
+	config.log = on_log
+	slughorn.nanosvg.load_file("/nonexistent/path/file.svg", atlas, config=config)
 	assert len(messages) > 0
 
 def test_log_callback_receives_level_and_string(atlas):
@@ -264,7 +266,9 @@ def test_log_callback_receives_level_and_string(atlas):
 	def on_log(level, msg):
 		messages.append((level, msg))
 
-	slughorn.nanosvg.load_file("/nonexistent/path/file.svg", atlas, log=on_log)
+	config = slughorn.nanosvg.LoadConfig()
+	config.log = on_log
+	slughorn.nanosvg.load_file("/nonexistent/path/file.svg", atlas, config=config)
 
 	for level, msg in messages:
 		assert isinstance(level, int)
@@ -278,7 +282,9 @@ def test_log_callback_receives_level_and_string(atlas):
 def test_shape_rule_force_exclude(atlas):
 	sp    = slughorn.nanosvg.ShapePolicy
 	rules = [slughorn.nanosvg.ShapeRule("exclude", sp.ForceExclude)]
-	composite = slughorn.nanosvg.load_string(_SVG_WITH_IDS, atlas, rules=rules)
+	config = slughorn.nanosvg.LoadConfig()
+	config.rules = rules
+	composite = slughorn.nanosvg.load_string(_SVG_WITH_IDS, atlas, config=config)
 	# "exclude" rect should be absent; "keep" and "geo" remain.
 	keys = {layer.key for layer in composite.layers}
 	assert len(composite) == 2, f"expected 2 layers after ForceExclude, got {len(composite)}"
@@ -286,7 +292,9 @@ def test_shape_rule_force_exclude(atlas):
 def test_shape_rule_geometry_only(atlas):
 	sp    = slughorn.nanosvg.ShapePolicy
 	rules = [slughorn.nanosvg.ShapeRule("geo", sp.GeometryOnly)]
-	composite = slughorn.nanosvg.load_string(_SVG_WITH_IDS, atlas, rules=rules)
+	config = slughorn.nanosvg.LoadConfig()
+	config.rules = rules
+	composite = slughorn.nanosvg.load_string(_SVG_WITH_IDS, atlas, config=config)
 	# "geo" is present in composite with drawMode=Geometry; 2 layers are Visible.
 	assert len(composite) == 3, f"expected 3 total layers (geo=geometry-only), got {len(composite)}"
 	visible = [l for l in composite.layers if l.drawMode == slughorn.DrawMode.Visible]
@@ -295,14 +303,18 @@ def test_shape_rule_geometry_only(atlas):
 def test_shape_rule_geometry_only_layer_invisible(atlas):
 	sp    = slughorn.nanosvg.ShapePolicy
 	rules = [slughorn.nanosvg.ShapeRule("geo", sp.GeometryOnly)]
-	composite = slughorn.nanosvg.load_string(_SVG_WITH_IDS, atlas, rules=rules)
+	config = slughorn.nanosvg.LoadConfig()
+	config.rules = rules
+	composite = slughorn.nanosvg.load_string(_SVG_WITH_IDS, atlas, config=config)
 	geo_layers = [l for l in composite.layers if l.drawMode == slughorn.DrawMode.Geometry]
 	assert len(geo_layers) == 1, "expected exactly one geometry-only layer"
 
 def test_shape_rule_geometry_only_shape_in_atlas(atlas):
 	sp    = slughorn.nanosvg.ShapePolicy
 	rules = [slughorn.nanosvg.ShapeRule("geo", sp.GeometryOnly)]
-	composite = slughorn.nanosvg.load_string(_SVG_WITH_IDS, atlas, rules=rules)
+	config = slughorn.nanosvg.LoadConfig()
+	config.rules = rules
+	composite = slughorn.nanosvg.load_string(_SVG_WITH_IDS, atlas, config=config)
 	atlas.build()
 	# All layers (visible and geometry-only) must resolve in the atlas.
 	for layer in composite.layers:
@@ -313,7 +325,9 @@ def test_shape_rule_geometry_only_transform_accessible(atlas):
 	# a separate lookup map.
 	sp    = slughorn.nanosvg.ShapePolicy
 	rules = [slughorn.nanosvg.ShapeRule("geo", sp.GeometryOnly)]
-	composite = slughorn.nanosvg.load_string(_SVG_WITH_IDS, atlas, rules=rules)
+	config = slughorn.nanosvg.LoadConfig()
+	config.rules = rules
+	composite = slughorn.nanosvg.load_string(_SVG_WITH_IDS, atlas, config=config)
 	geo_layer = next(l for l in composite.layers if l.drawMode == slughorn.DrawMode.Geometry)
 	# "geo" rect starts at x=200 in a 300-wide SVG; normalized: 200/300 ≈ 0.667.
 	assert geo_layer.transform.x == pytest.approx(200.0 / 300.0, abs=1e-3)
@@ -347,13 +361,15 @@ def test_load_string_normalized(atlas):
 	assert layer.transform.y == pytest.approx(0.1, abs=1e-3)
 
 def test_load_string_auto_metrics_true(atlas):
-	# With auto_metrics=True (default) all shapes succeed; metrics derived from curves.
-	composite = slughorn.nanosvg.load_string(_SVG_TWO_SOLIDS, atlas, auto_metrics=True)
+	# auto_metrics defaults to True; all shapes succeed, metrics derived from curves.
+	composite = slughorn.nanosvg.load_string(_SVG_TWO_SOLIDS, atlas)
 	assert len(composite) == 2
 
 def test_load_string_auto_metrics_false_transform_zero(atlas):
 	# With auto_metrics=False the origin shift is suppressed; layer.transform must be (0, 0).
-	composite = slughorn.nanosvg.load_string(_SVG_ONE_SOLID, atlas, auto_metrics=False)
+	config = slughorn.nanosvg.LoadConfig()
+	config.auto_metrics = False
+	composite = slughorn.nanosvg.load_string(_SVG_ONE_SOLID, atlas, config=config)
 	assert len(composite) == 1
 	layer = composite.layers[0]
 	assert layer.transform.x == pytest.approx(0.0, abs=1e-5)
@@ -362,7 +378,9 @@ def test_load_string_auto_metrics_false_transform_zero(atlas):
 def test_load_string_auto_metrics_false_square_metrics(atlas):
 	# _SVG_ONE_SOLID is a 100x100 SVG. With auto_metrics=False the declared canvas is
 	# the full viewport: width=1.0, height=1.0 (heightEm = 100/100 = 1.0).
-	composite = slughorn.nanosvg.load_string(_SVG_ONE_SOLID, atlas, auto_metrics=False)
+	config = slughorn.nanosvg.LoadConfig()
+	config.auto_metrics = False
+	composite = slughorn.nanosvg.load_string(_SVG_ONE_SOLID, atlas, config=config)
 	atlas.build()
 	shape = atlas.get_shape(composite.layers[0].key)
 	assert shape is not None
@@ -372,7 +390,9 @@ def test_load_string_auto_metrics_false_square_metrics(atlas):
 def test_load_string_auto_metrics_false_non_square_metrics(atlas):
 	# _SVG_TWO_SOLIDS is a 200x100 SVG. heightEm = 100/200 = 0.5.
 	# Both shapes should declare width=1.0, height=0.5 (the full viewport).
-	composite = slughorn.nanosvg.load_string(_SVG_TWO_SOLIDS, atlas, auto_metrics=False)
+	config = slughorn.nanosvg.LoadConfig()
+	config.auto_metrics = False
+	composite = slughorn.nanosvg.load_string(_SVG_TWO_SOLIDS, atlas, config=config)
 	atlas.build()
 	for layer in composite.layers:
 		shape = atlas.get_shape(layer.key)
@@ -380,9 +400,38 @@ def test_load_string_auto_metrics_false_non_square_metrics(atlas):
 		assert shape.width  == pytest.approx(1.0, abs=1e-3)
 		assert shape.height == pytest.approx(0.5, abs=1e-3)
 
+def test_load_string_output_metrics_square(atlas):
+	# _SVG_ONE_SOLID is a 100x100 SVG; LoadConfig.width/height/height_em are output
+	# fields populated in place by load_string after a successful parse.
+	config = slughorn.nanosvg.LoadConfig()
+	slughorn.nanosvg.load_string(_SVG_ONE_SOLID, atlas, config=config)
+	assert config.width == pytest.approx(100.0, abs=1e-3)
+	assert config.height == pytest.approx(100.0, abs=1e-3)
+	assert config.height_em == pytest.approx(1.0, abs=1e-3)
+
+def test_load_string_output_metrics_non_square(atlas):
+	# _SVG_TWO_SOLIDS is a 200x100 SVG, so height_em = 100/200 = 0.5.
+	config = slughorn.nanosvg.LoadConfig()
+	slughorn.nanosvg.load_string(_SVG_TWO_SOLIDS, atlas, config=config)
+	assert config.width == pytest.approx(200.0, abs=1e-3)
+	assert config.height == pytest.approx(100.0, abs=1e-3)
+	assert config.height_em == pytest.approx(0.5, abs=1e-3)
+
+def test_load_file_output_metrics(atlas, tmp_path):
+	# Same output fields, populated via load_file instead of load_string.
+	svg_path = tmp_path / "square.svg"
+	svg_path.write_text(_SVG_ONE_SOLID)
+	config = slughorn.nanosvg.LoadConfig()
+	slughorn.nanosvg.load_file(str(svg_path), atlas, config=config)
+	assert config.width == pytest.approx(100.0, abs=1e-3)
+	assert config.height == pytest.approx(100.0, abs=1e-3)
+	assert config.height_em == pytest.approx(1.0, abs=1e-3)
+
 def test_load_string_auto_metrics_false_renderable(atlas):
 	# Shapes loaded with auto_metrics=False must still build and render without crashing.
-	composite = slughorn.nanosvg.load_string(_SVG_ONE_SOLID, atlas, auto_metrics=False)
+	config = slughorn.nanosvg.LoadConfig()
+	config.auto_metrics = False
+	composite = slughorn.nanosvg.load_string(_SVG_ONE_SOLID, atlas, config=config)
 	atlas.build()
 	grid = atlas.decode(composite.layers[0].key).render_grid(32, 0.0, True)
 	flat = memoryview(grid).cast('B').cast('f')
@@ -397,7 +446,9 @@ def test_shape_rule_origin_centered(atlas):
 	sp     = slughorn.nanosvg.ShapePolicy
 	origin = slughorn.ShapeInfo.Origin(slughorn.ShapeInfo.Origin.Type.Centered)
 	rules  = [slughorn.nanosvg.ShapeRule("keep", sp.Default, origin)]
-	composite = slughorn.nanosvg.load_string(_SVG_WITH_IDS, atlas, rules=rules)
+	config = slughorn.nanosvg.LoadConfig()
+	config.rules = rules
+	composite = slughorn.nanosvg.load_string(_SVG_WITH_IDS, atlas, config=config)
 	# "keep" rect is x=0..100, y=0..100; Centered → center at (50, 50), normalized by 1/300.
 	# SVG shape id "keep" becomes Key("keep").
 	keep_layer = next(l for l in composite.layers if l.key == slughorn.Key("keep"))

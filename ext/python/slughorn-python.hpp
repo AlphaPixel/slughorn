@@ -36,9 +36,6 @@ PYBIND11_MAKE_OPAQUE(std::vector<slughorn::Layer>);
 
 // ================================================================================================
 // detail - internal helpers and Python trampolines shared across bind_*() translation units.
-// Submodule-local helpers (detail::makeLoadConfig, detail::makeNanosvgLoadConfig) are NOT here --
-// they live in slughorn-freetype.cpp/slughorn-nanosvg.cpp respectively, which reopen this same
-// `detail` namespace to add them.
 // ================================================================================================
 
 namespace detail {
@@ -218,9 +215,6 @@ struct CurveDecomposerRef {
 } // namespace detail
 
 // Bring detail helpers into file scope so existing call sites in each bind_*() need no change.
-// makeLoadConfig/makeNanosvgLoadConfig are intentionally left out; call sites should say
-// detail::makeLoadConfig/detail::makeNanosvgLoadConfig explicitly (see slughorn-freetype.cpp/
-// slughorn-nanosvg.cpp, which define them locally).
 using detail::bytesView;
 using detail::vectorView1D;
 using detail::arrayView1D;

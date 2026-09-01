@@ -2,115 +2,89 @@
 
 #include "slughorn/freetype.hpp"
 
-namespace detail {
-
-inline slughorn::freetype::LoadConfig makeLoadConfig(
-	std::optional<slughorn::Atlas::SplitStrategy> strategy,
-	bool uniform,
-	std::optional<slughorn::freetype::LogCallback> log,
-	uint8_t mask=0
-) {
-	slughorn::freetype::LoadConfig config;
-
-	if(strategy) config.strategy = *strategy;
-
-	config.uniform = uniform;
-
-	if(log) config.log = *log;
-
-	config.mask = mask;
-
-	return config;
-}
-
-} // namespace detail
-
 namespace slughorn_python {
 
 void bind_freetype(py::module_& freetype) {
-	freetype.def("load_ascii_font",
-		[](
-			const std::string& fontPath,
-			slughorn::Atlas& atlas,
-			std::optional<slughorn::Atlas::SplitStrategy> strategy,
-			bool uniform,
-			std::optional<slughorn::freetype::LogCallback> log,
-			uint8_t mask
-		) {
-			auto config = detail::makeLoadConfig(strategy, uniform, log, mask);
+	py::class_<slughorn::freetype::LoadConfig>(freetype, "LoadConfig")
+		.def(py::init([](py::kwargs kwargs) {
+			slughorn::freetype::LoadConfig config;
 
-			return slughorn::freetype::loadAsciiFont(fontPath, atlas, &config);
-		},
-		"font_path"_a, "atlas"_a, "strategy"_a=py::none(), "uniform"_a=false, "log"_a=py::none(),
-		"mask"_a=0,
+			for(auto item : kwargs) {
+				auto key = item.first.cast<std::string>();
+
+				if(key == "strategy") config.strategy = item.second.cast<slughorn::Atlas::SplitStrategy>();
+				else if(key == "log") config.log = item.second.cast<slughorn::freetype::LogCallback>();
+				else if(key == "uniform") config.uniform = item.second.cast<bool>();
+				else if(key == "mask") config.mask = item.second.cast<uint8_t>();
+				else if(key == "metrics") config.metrics = item.second.cast<slughorn::FontMetrics>();
+				else if(key == "family_name") config.familyName = item.second.cast<std::string>();
+				else if(key == "style_name") config.styleName = item.second.cast<std::string>();
+				else throw py::type_error("LoadConfig got an unexpected keyword argument '" + key + "'");
+			}
+
+			return config;
+		}),
+		"Construct with optional field=value kwargs, e.g. LoadConfig(uniform=True, mask=3)."
+		)
+		.def_readwrite("strategy", &slughorn::freetype::LoadConfig::strategy,
+			"Optional callable(curves) -> (splits_x, splits_y), e.g.:\n"
+			"    lambda c: slughorn.Atlas.compute_adaptive_splits(c, 8, 8)"
+		)
+		.def_readwrite("log", &slughorn::freetype::LoadConfig::log,
+			"Optional callable(level: int, msg: str) for load-time diagnostics."
+		)
+		.def_readwrite("uniform", &slughorn::freetype::LoadConfig::uniform,
+			"If True, all glyphs in a batch share the same em-space bounding box\n"
+			"(required for setLayerShapeIndex glyph-swap cycling)."
+		)
+		.def_readwrite("mask", &slughorn::freetype::LoadConfig::mask,
+			"Opt-in Key namespace (0-255) packed into every loaded glyph's Key,\n"
+			"e.g. to load a second font's variant of the same codepoints without\n"
+			"colliding with a previously-loaded font (see slughorn.Key)."
+		)
+		.def_readwrite("metrics", &slughorn::freetype::LoadConfig::metrics,
+			"Output: em-space font metrics, populated by the high-level load*_font\n"
+			"functions (not by the FT_Face-taking overloads)."
+		)
+		.def_readwrite("family_name", &slughorn::freetype::LoadConfig::familyName,
+			"Output: populated by the high-level load*_font functions."
+		)
+		.def_readwrite("style_name", &slughorn::freetype::LoadConfig::styleName,
+			"Output: populated by the high-level load*_font functions."
+		)
+		.def("__repr__", [](const slughorn::freetype::LoadConfig& c) { return streamRepr(c); })
+	;
+
+	freetype.def("load_ascii_font",
+		&slughorn::freetype::loadAsciiFont,
+		"font_path"_a, "atlas"_a, "config"_a=nullptr,
 		"Load printable ASCII (codepoints 32-126) from font_path into atlas.\n"
 		"Creates and destroys an FT_Library/FT_Face internally.\n"
-		"strategy: optional callable(curves) -> (splits_x, splits_y), e.g.:\n"
-		"    lambda c: slughorn.Atlas.compute_adaptive_splits(c, 8, 8)\n"
-		"uniform: if True, all glyphs share the same em-space bounding box\n"
-		"    (required for setLayerShapeIndex glyph-swap cycling).\n"
-		"log: optional callable(level: int, msg: str) for load-time diagnostics.\n"
-		"mask: opt-in Key namespace (0-255) packed into every loaded glyph's Key,\n"
-		"    e.g. to load a second font's variant of the same codepoints without\n"
-		"    colliding with a previously-loaded font (see slughorn.Key).\n"
+		"config: optional LoadConfig; its output fields (metrics, family_name,\n"
+		"    style_name) are populated in place on return.\n"
 		"Returns True on success, False if the font cannot be opened."
 	);
 
 	freetype.def("load_font_glyphs",
-		[](
-			const std::string& fontPath,
-			const std::vector<uint32_t>& codepoints,
-			slughorn::Atlas& atlas,
-			std::optional<slughorn::Atlas::SplitStrategy> strategy,
-			bool uniform,
-			std::optional<slughorn::freetype::LogCallback> log,
-			uint8_t mask
-		) {
-			auto config = detail::makeLoadConfig(strategy, uniform, log, mask);
-
-			return slughorn::freetype::loadFontGlyphs(fontPath, codepoints, atlas, &config);
-		},
+		&slughorn::freetype::loadFontGlyphs,
 		"font_path"_a,
 		"codepoints"_a,
 		"atlas"_a,
-		"strategy"_a=py::none(),
-		"uniform"_a=false,
-		"log"_a=py::none(),
-		"mask"_a=0,
+		"config"_a=nullptr,
 		"Load an explicit list of Unicode codepoints from font_path into atlas.\n"
 		"Creates and destroys an FT_Library/FT_Face internally.\n"
-		"strategy: optional callable(curves) -> (splits_x, splits_y).\n"
-		"uniform: if True, all glyphs share the same em-space bounding box\n"
-		"    (required for setLayerShapeIndex glyph-swap cycling).\n"
-		"log: optional callable(level: int, msg: str) for load-time diagnostics.\n"
-		"mask: opt-in Key namespace (0-255) packed into every loaded glyph's Key\n"
-		"    (see slughorn.Key).\n"
+		"config: optional LoadConfig; its output fields (metrics, family_name,\n"
+		"    style_name) are populated in place on return.\n"
 		"Returns the number of glyphs successfully added."
 	);
 
 	freetype.def("load_all_font_glyphs",
-		[](
-			const std::string& fontPath,
-			slughorn::Atlas& atlas,
-			std::optional<slughorn::Atlas::SplitStrategy> strategy,
-			bool uniform,
-			std::optional<slughorn::freetype::LogCallback> log,
-			uint8_t mask
-		) {
-			auto config = detail::makeLoadConfig(strategy, uniform, log, mask);
-
-			return slughorn::freetype::loadAllFontGlyphs(fontPath, atlas, &config);
-		},
-		"font_path"_a, "atlas"_a, "strategy"_a=py::none(), "uniform"_a=false, "log"_a=py::none(),
-		"mask"_a=0,
+		&slughorn::freetype::loadAllFontGlyphs,
+		"font_path"_a, "atlas"_a, "config"_a=nullptr,
 		"Load every mapped codepoint from font_path into atlas.\n"
 		"Creates and destroys an FT_Library/FT_Face internally.\n"
-		"strategy: optional callable(curves) -> (splits_x, splits_y).\n"
-		"uniform: if True, all glyphs share the same em-space bounding box\n"
-		"    (required for setLayerShapeIndex glyph-swap cycling).\n"
-		"log: optional callable(level: int, msg: str) for load-time diagnostics.\n"
-		"mask: opt-in Key namespace (0-255) packed into every loaded glyph's Key\n"
-		"    (see slughorn.Key).\n"
+		"config: optional LoadConfig; its output fields (metrics, family_name,\n"
+		"    style_name) are populated in place on return.\n"
 		"Returns the number of glyphs successfully added."
 	);
 
@@ -118,15 +92,11 @@ void bind_freetype(py::module_& freetype) {
 		const std::string& fontPath,
 		const std::vector<uint32_t>& codepoints,
 		slughorn::Atlas& atlas,
-		std::optional<slughorn::Atlas::SplitStrategy> strategy,
-		bool uniform,
-		std::optional<slughorn::freetype::LogCallback> log
+		slughorn::freetype::LoadConfig* config
 	) -> py::dict {
 		std::map<uint32_t, slughorn::CompositeShape> colorGlyphs;
 
-		auto config = detail::makeLoadConfig(strategy, uniform, log);
-
-		slughorn::freetype::loadEmojiFont(fontPath, codepoints, atlas, colorGlyphs, &config);
+		slughorn::freetype::loadEmojiFont(fontPath, codepoints, atlas, colorGlyphs, config);
 
 		py::dict result;
 
@@ -137,14 +107,12 @@ void bind_freetype(py::module_& freetype) {
 		"font_path"_a,
 		"codepoints"_a,
 		"atlas"_a,
-		"strategy"_a=py::none(),
-		"uniform"_a=false,
-		"log"_a=py::none(),
+		"config"_a=nullptr,
 		"Load COLR emoji from font_path for the given codepoints into atlas.\n"
 		"codepoints is a list of uint32_t Unicode codepoints.\n"
 		"Creates and destroys an FT_Library/FT_Face internally.\n"
-		"strategy: optional callable(curves) -> (splits_x, splits_y).\n"
-		"log: optional callable(level: int, msg: str) for load-time diagnostics.\n"
+		"config: optional LoadConfig; its output fields (metrics, family_name,\n"
+		"    style_name) are populated in place on return.\n"
 		"Returns a dict mapping codepoint (int) -> CompositeShape "
 		"for each successfully loaded glyph."
 	);
