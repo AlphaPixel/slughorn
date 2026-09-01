@@ -56,10 +56,30 @@ jobs:
           CIBW_BUILD: cp312-manylinux_x86_64 cp313-manylinux_x86_64 cp314-manylinux_x86_64
           CIBW_ARCHS_LINUX: x86_64
           CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
-          # freetype-devel for SLUGHORN_FREETYPE; git is required at CMake-configure time to
+          # manylinux_2_28's freetype-devel (2.9.1) predates FT_COLOR_H/COLR emoji support that
+          # slughorn/freetype.hpp needs, so build a modern FreeType from source instead of
+          # `dnf install freetype-devel`. PIC is required -- without it, the static libfreetype.a
+          # fails to link into slughorn.cpython-*.so ("relocation ... can not be used when making
+          # a shared object"). Optional deps disabled since slughorn doesn't need them and it
+          # keeps this self-contained. Installs to /usr/local, which CMake's find_package()
+          # already searches by default. git is separately required at CMake-configure time to
           # apply slughorn's nanosvg upstream-fix patches (see CMakeLists.txt SLUGHORN_NANOSVG).
+          # cmake itself is already on PATH in this image (manylinux_2_28 ships a pipx-installed
+          # one; scikit-build-core's own log already confirms "using CMake 4.2.3").
           CIBW_BEFORE_ALL: >-
-            dnf install -y freetype-devel git
+            dnf install -y git &&
+            git clone --depth 1 --branch VER-2-14-3 https://github.com/freetype/freetype.git /tmp/freetype-src &&
+            cmake -S /tmp/freetype-src -B /tmp/freetype-build
+            -DCMAKE_BUILD_TYPE=Release
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+            -DFT_DISABLE_ZLIB=ON
+            -DFT_DISABLE_BZIP2=ON
+            -DFT_DISABLE_PNG=ON
+            -DFT_DISABLE_HARFBUZZ=ON
+            -DFT_DISABLE_BROTLI=ON
+            -DBUILD_SHARED_LIBS=OFF &&
+            cmake --build /tmp/freetype-build -j$(nproc) &&
+            cmake --install /tmp/freetype-build --prefix /usr/local
           CIBW_REPAIR_WHEEL_COMMAND: auditwheel repair -w {dest_dir} {wheel}
           # cibuildwheel installs the repaired wheel into an isolated test environment first.
           CIBW_TEST_COMMAND: >-
@@ -112,8 +132,22 @@ jobs:
           CIBW_BUILD: cp312-manylinux_aarch64 cp313-manylinux_aarch64 cp314-manylinux_aarch64
           CIBW_ARCHS_LINUX: aarch64
           CIBW_MANYLINUX_AARCH64_IMAGE: manylinux_2_28
+          # See linux-x86_64's CIBW_BEFORE_ALL above for why this builds FreeType from source
+          # instead of `dnf install freetype-devel` (manylinux's 2.9.1 predates FT_COLOR_H).
           CIBW_BEFORE_ALL: >-
-            dnf install -y freetype-devel git
+            dnf install -y git &&
+            git clone --depth 1 --branch VER-2-14-3 https://github.com/freetype/freetype.git /tmp/freetype-src &&
+            cmake -S /tmp/freetype-src -B /tmp/freetype-build
+            -DCMAKE_BUILD_TYPE=Release
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+            -DFT_DISABLE_ZLIB=ON
+            -DFT_DISABLE_BZIP2=ON
+            -DFT_DISABLE_PNG=ON
+            -DFT_DISABLE_HARFBUZZ=ON
+            -DFT_DISABLE_BROTLI=ON
+            -DBUILD_SHARED_LIBS=OFF &&
+            cmake --build /tmp/freetype-build -j$(nproc) &&
+            cmake --install /tmp/freetype-build --prefix /usr/local
           CIBW_REPAIR_WHEEL_COMMAND: auditwheel repair -w {dest_dir} {wheel}
           CIBW_TEST_COMMAND: >-
             python -c "import slughorn;
