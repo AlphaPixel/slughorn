@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.15)
 
-project(SlugHorn LANGUAGES C CXX)
+project(SlugHorn LANGUAGES C CXX VERSION 0.0.2)
 
 # =============================================================================
 # Compile options
@@ -283,6 +283,12 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
 	target_link_libraries(slughorn_python PRIVATE slughorn_python_bindings)
 	target_compile_features(slughorn_python PUBLIC cxx_std_20)
 	target_compile_options(slughorn_python PRIVATE ${SLUGHORN_COMPILE_OPTIONS})
+
+	# No separate Python package directory -- the compiled module IS the top-level `slughorn`
+	# import. DESTINATION "." puts it at the wheel root (scikit-build-core installs
+	# CMAKE_INSTALL_PREFIX as the wheel's site-packages root), so `import slughorn` resolves
+	# straight to this .so/.pyd with no wrapper package.
+	install(TARGETS slughorn_python DESTINATION .)
 
 	add_custom_target(pytest
 		COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_BINARY_DIR}

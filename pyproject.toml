@@ -1,0 +1,43 @@
+[build-system]
+requires = ["scikit-build-core>=1.0"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "slughorn"
+dynamic = ["version"]
+description = "GPU vector graphics: quadratic-Bezier curve rendering via signed distance fields"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+
+[project.urls]
+Repository = "https://github.com/AlphaPixel/slughorn"
+
+[tool.scikit-build]
+# Every optional feature here is vendored as a git submodule (pybind11, nanosvg, json, earcut,
+# msdfgen) except FreeType, which is a normal system/vcpkg dependency -- see CIBW_BEFORE_ALL /
+# vcpkg install steps in .github/workflows/wheels.yml. MSDF is built MSDFGEN_CORE_ONLY (see this
+# repo's own CMakeLists.txt), which skips msdfgen's PNG-requiring `msdfgen-ext` target entirely
+# (ext/msdfgen/CMakeLists.txt: `if(NOT MSDFGEN_CORE_ONLY)` gates `find_package(PNG REQUIRED)`),
+# so it costs nothing extra in CI. Blend2D is left off: not vendored, no distro/manylinux
+# package exists, and its only path in (build from source in CI) would make the sdist fallback
+# unbuildable on any platform without a prebuilt wheel -- deferred, 2026-09-01.
+cmake.args = [
+	"-DSLUGHORN_SERIAL=ON",
+	"-DSLUGHORN_NANOSVG=ON",
+	"-DSLUGHORN_FREETYPE=ON",
+	"-DSLUGHORN_TESSELLATE=ON",
+	"-DSLUGHORN_MSDF=ON",
+]
+
+# Pulls the single version of record out of CMakeLists.txt's `project(... VERSION x.y.z ...)`
+# call, so the wheel's metadata version can never drift from the CMake-side one. NOTE: as of
+# 2026-09-01 this is a second, CMake-only copy of the version -- slughorn/slughorn.hpp's own
+# SLUGHORN_VERSION_MAJOR/MINOR/PATCH constants are still hand-maintained separately and are NOT
+# generated from this. Keep both in sync by hand until that's converted to a configure_file
+# header (see ~/dev/OpenSceneGraph.py CLAUDE.md-referenced single-source-versioning pattern).
+[[tool.dynamic-metadata]]
+provider = "scikit_build_core.metadata.regex"
+field = "version"
+input = "CMakeLists.txt"
+regex = 'project\([^)]*VERSION\s+(?P<value>[0-9.]+)'

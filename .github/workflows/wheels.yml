@@ -1,0 +1,262 @@
+name: Build wheels
+
+on:
+  push:
+    branches: [main]
+    # Release tags build the same wheels, then unlock the publish job below.
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      build:
+        description: Build release artifacts
+        required: true
+        default: false
+        type: boolean
+      target:
+        description: Artifact set to build
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - linux-x86_64
+          - linux-aarch64
+          - windows-x86_64
+          - sdist
+
+# The workflow only needs to read the repository and upload its wheel artifact.
+permissions:
+  contents: read
+
+jobs:
+  linux-x86_64:
+    name: Linux x86-64 / CPython 3.12-3.14 / manylinux_2_28
+    # Pushes remain visible in Actions but do not consume build capacity.
+    # Run manually with: gh workflow run wheels.yml -f build=true
+    if: inputs.build && (inputs.target == 'all' || inputs.target == 'linux-x86_64')
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # pybind11/nanosvg/json/earcut are all vendored submodules the build needs.
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Set up cibuildwheel host Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.11 - 3.14"
+
+      - name: Build and test repaired wheel
+        uses: pypa/cibuildwheel@v3.4.1
+        with:
+          output-dir: ${{ github.workspace }}/wheelhouse
+        env:
+          CIBW_BUILD: cp312-manylinux_x86_64 cp313-manylinux_x86_64 cp314-manylinux_x86_64
+          CIBW_ARCHS_LINUX: x86_64
+          CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
+          # freetype-devel for SLUGHORN_FREETYPE; git is required at CMake-configure time to
+          # apply slughorn's nanosvg upstream-fix patches (see CMakeLists.txt SLUGHORN_NANOSVG).
+          CIBW_BEFORE_ALL: >-
+            dnf install -y freetype-devel git
+          CIBW_REPAIR_WHEEL_COMMAND: auditwheel repair -w {dest_dir} {wheel}
+          # cibuildwheel installs the repaired wheel into an isolated test environment first.
+          CIBW_TEST_COMMAND: >-
+            python -c "import slughorn;
+            from slughorn import Key, Atlas;
+            assert hasattr(slughorn, 'freetype'), 'freetype submodule missing';
+            assert hasattr(slughorn, 'nanosvg'), 'nanosvg submodule missing';
+            assert hasattr(slughorn, 'tessellate'), 'tessellate submodule missing';
+            assert hasattr(slughorn, 'canvas'), 'canvas submodule missing';
+            assert hasattr(slughorn, 'render'), 'render submodule missing';
+            assert hasattr(slughorn, 'emoji'), 'emoji submodule missing'"
+
+      - name: Inspect repaired wheel dependencies
+        run: |
+          wheel="$(find "${{ github.workspace }}/wheelhouse" -maxdepth 1 -name '*.whl' -print -quit)"
+          test -n "$wheel"
+          docker run --rm \
+            --volume "${{ github.workspace }}/wheelhouse:/wheelhouse:ro" \
+            quay.io/pypa/manylinux_2_28_x86_64 \
+            auditwheel show "/wheelhouse/$(basename "$wheel")"
+
+      - name: Upload repaired wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: slughorn-manylinux_2_28-x86_64
+          path: wheelhouse/*.whl
+          if-no-files-found: error
+
+  linux-aarch64:
+    name: Linux ARM64 / CPython 3.12-3.14 / manylinux_2_28
+    if: inputs.build && (inputs.target == 'all' || inputs.target == 'linux-aarch64')
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Set up cibuildwheel host Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.11 - 3.14"
+
+      - name: Build and test repaired wheel
+        uses: pypa/cibuildwheel@v3.4.1
+        with:
+          output-dir: ${{ github.workspace }}/wheelhouse
+        env:
+          CIBW_BUILD: cp312-manylinux_aarch64 cp313-manylinux_aarch64 cp314-manylinux_aarch64
+          CIBW_ARCHS_LINUX: aarch64
+          CIBW_MANYLINUX_AARCH64_IMAGE: manylinux_2_28
+          CIBW_BEFORE_ALL: >-
+            dnf install -y freetype-devel git
+          CIBW_REPAIR_WHEEL_COMMAND: auditwheel repair -w {dest_dir} {wheel}
+          CIBW_TEST_COMMAND: >-
+            python -c "import slughorn;
+            from slughorn import Key, Atlas;
+            assert hasattr(slughorn, 'freetype'), 'freetype submodule missing';
+            assert hasattr(slughorn, 'nanosvg'), 'nanosvg submodule missing';
+            assert hasattr(slughorn, 'tessellate'), 'tessellate submodule missing';
+            assert hasattr(slughorn, 'canvas'), 'canvas submodule missing';
+            assert hasattr(slughorn, 'render'), 'render submodule missing';
+            assert hasattr(slughorn, 'emoji'), 'emoji submodule missing'"
+
+      - name: Inspect repaired wheel dependencies
+        run: |
+          wheel="$(find "${{ github.workspace }}/wheelhouse" -maxdepth 1 -name '*.whl' -print -quit)"
+          test -n "$wheel"
+          docker run --rm \
+            --volume "${{ github.workspace }}/wheelhouse:/wheelhouse:ro" \
+            quay.io/pypa/manylinux_2_28_aarch64 \
+            auditwheel show "/wheelhouse/$(basename "$wheel")"
+
+      - name: Upload repaired wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: slughorn-manylinux_2_28-aarch64
+          path: wheelhouse/*.whl
+          if-no-files-found: error
+
+  windows-x86_64:
+    name: Windows x86-64 / CPython 3.12-3.14
+    if: inputs.build && (inputs.target == 'all' || inputs.target == 'windows-x86_64')
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Set up cibuildwheel host Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      # vcpkg supplies FreeType for Windows; everything else needed (pybind11, nanosvg, json,
+      # earcut) is a vendored git submodule already on disk from the checkout above.
+      - name: Set up vcpkg dependencies
+        shell: pwsh
+        run: |
+          git clone --depth 1 https://github.com/microsoft/vcpkg.git C:\vcpkg
+          & C:\vcpkg\bootstrap-vcpkg.bat
+          & C:\vcpkg\vcpkg.exe install --triplet x64-windows freetype
+
+      - name: Build and test Windows wheel
+        uses: pypa/cibuildwheel@v3.4.1
+        with:
+          output-dir: ${{ github.workspace }}\wheelhouse
+        env:
+          CIBW_BUILD: cp312-win_amd64 cp313-win_amd64 cp314-win_amd64
+          CIBW_ARCHS_WINDOWS: AMD64
+          CIBW_BEFORE_BUILD_WINDOWS: >-
+            python -m pip install delvewheel
+          # scikit-build-core forwards CMAKE_ARGS to the native configure; vcpkg's toolchain
+          # makes CMake's FindFreetype resolve to the library installed above.
+          CIBW_ENVIRONMENT_WINDOWS: >-
+            CMAKE_ARGS="-DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-windows"
+          CIBW_REPAIR_WHEEL_COMMAND_WINDOWS: >-
+            python -m delvewheel repair --add-path C:/vcpkg/installed/x64-windows/bin -w {dest_dir} {wheel}
+          CIBW_TEST_COMMAND: >-
+            python -c "import slughorn; from slughorn import Key, Atlas; assert hasattr(slughorn, 'freetype'); assert hasattr(slughorn, 'nanosvg'); assert hasattr(slughorn, 'tessellate'); assert hasattr(slughorn, 'canvas'); assert hasattr(slughorn, 'render'); assert hasattr(slughorn, 'emoji')"
+
+      - name: Upload Windows wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: slughorn-win-amd64
+          path: wheelhouse/*.whl
+          if-no-files-found: error
+
+  sdist:
+    name: Source distribution
+    if: inputs.build && (inputs.target == 'all' || inputs.target == 'sdist')
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Build sdist
+        run: |
+          python -m pip install build
+          python -m build --sdist
+
+      - name: Install build-time system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfreetype-dev
+
+      # Confirms a clean-clone tree self-builds under a normal `pip install`, exercising the
+      # same fallback path any platform/Python combination without a prebuilt wheel above
+      # would hit on PyPI.
+      - name: Install sdist into a clean venv
+        run: |
+          python -m venv sdist-venv
+          sdist-venv/bin/pip install dist/*.tar.gz
+
+      - name: Smoke-test installed sdist build
+        run: >-
+          sdist-venv/bin/python -c "import slughorn;
+          from slughorn import Key, Atlas;
+          assert hasattr(slughorn, 'freetype'), 'freetype submodule missing';
+          assert hasattr(slughorn, 'nanosvg'), 'nanosvg submodule missing';
+          assert hasattr(slughorn, 'tessellate'), 'tessellate submodule missing'"
+
+      - name: Upload sdist
+        uses: actions/upload-artifact@v4
+        with:
+          name: slughorn-sdist
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    name: Publish to PyPI
+    # Pushes to `main` (and manual test runs) produce build artifacts only.
+    # Publishing requires an explicit versioned release tag, e.g. v0.0.2.
+    if: inputs.build && inputs.target == 'all' && startsWith(github.ref, 'refs/tags/v')
+    needs: [linux-x86_64, linux-aarch64, windows-x86_64, sdist]
+    runs-on: ubuntu-24.04
+    environment:
+      name: pypi
+      url: https://pypi.org/project/slughorn/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: slughorn-*
+          path: dist/
+          merge-multiple: true
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
