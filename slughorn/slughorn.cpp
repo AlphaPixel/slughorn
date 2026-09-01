@@ -886,7 +886,10 @@ Atlas::Contours Atlas::getShapeContours(Key key) const {
 
 			if(begin >= end || begin >= flat->size()) continue;
 
-			result.emplace_back(flat->begin() + begin, flat->begin() + std::min(end, flat->size()));
+			result.emplace_back(
+				flat->begin() + static_cast<std::ptrdiff_t>(begin),
+				flat->begin() + static_cast<std::ptrdiff_t>(std::min(end, flat->size()))
+			);
 		}
 
 		return result;

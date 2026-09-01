@@ -7,14 +7,20 @@ project(SlugHorn LANGUAGES C CXX VERSION 0.0.2)
 # =============================================================================
 
 if(WIN32)
-	set(OSGDEBUG_WARNING_OPTIONS
+	set(SLUGHORN_COMPILE_OPTIONS
 		/W4
 		/WX
 		/wd4100
 		/analyze
+		/analyze:external-
+		# The MSVC STL/SDK headers are reached via the INCLUDE env var, not -I,
+		# so they aren't automatically treated as external; without this,
+		# /analyze produces false positives (e.g. C6031) deep in <xutility>
+		# et al. when heavily-templated code (pybind11) instantiates them.
+		/external:env:INCLUDE
 	)
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-	set(OSGDEBUG_WARNING_OPTIONS
+	set(SLUGHORN_COMPILE_OPTIONS
 		-W
 		-Wall
 		-Wshadow
@@ -27,7 +33,7 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
 		-Wno-unused-parameter
 	)
 else()
-	set(OSGDEBUG_WARNING_OPTIONS)
+	set(SLUGHORN_COMPILE_OPTIONS)
 endif()
 
 # =============================================================================
@@ -163,7 +169,15 @@ if(SLUGHORN_MSDF)
 	set(MSDFGEN_USE_SKIA OFF CACHE BOOL "" FORCE)
 	set(MSDFGEN_DISABLE_SVG OFF CACHE BOOL "" FORCE)
 	set(MSDFGEN_DISABLE_PNG OFF CACHE BOOL "" FORCE)
-	set(MSDFGEN_DYNAMIC_RUNTIME OFF CACHE BOOL "" FORCE)
+	# The rest of the project (and the vcpkg triplet's VCPKG_CRT_LINKAGE) links
+	# the dynamic CRT; msdfgen's own default of static breaks the MSVC link
+	# with a RuntimeLibrary mismatch (MDd vs MTd). This property is a no-op
+	# outside MSVC, so only override it there.
+	if(MSVC)
+		set(MSDFGEN_DYNAMIC_RUNTIME ON CACHE BOOL "" FORCE)
+	else()
+		set(MSDFGEN_DYNAMIC_RUNTIME OFF CACHE BOOL "" FORCE)
+	endif()
 	set(MSDFGEN_INSTALL OFF CACHE BOOL "" FORCE)
 
 	add_subdirectory("ext/msdfgen")
@@ -260,6 +274,9 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
 	)
 	target_compile_features(slughorn_python_bindings PUBLIC cxx_std_20)
 	target_compile_options(slughorn_python_bindings PRIVATE ${SLUGHORN_COMPILE_OPTIONS})
+	# pybind11's per-function registration code pushes these heavily-templated
+	# binding TUs past MSVC's default object-file section limit (C1128).
+	target_compile_options(slughorn_python_bindings PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/bigobj>)
 	set_target_properties(slughorn_python_bindings PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 	if(SLUGHORN_SERIAL)

@@ -24,6 +24,7 @@
 #include "slughorn.hpp"
 
 #include <array>
+#include <bit>
 #include <cmath>
 #include <stdexcept>
 #include <unordered_map>

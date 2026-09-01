@@ -68,6 +68,14 @@ SLUGHORN_IGNORE("-Wimplicit-int-conversion")
 SLUGHORN_IGNORE("-Wshadow")
 SLUGHORN_IGNORE("-Wsign-conversion")
 
+#if defined(_MSC_VER)
+// C4702 (unreachable code): nanosvg.h's nsvg__convertToPixels has a trailing
+// return after a switch whose default: case already returns. /external:W0
+// suppresses front-end parse warnings for external headers, but this is a
+// codegen-time warning MSVC attributes to the compiling TU regardless.
+__pragma(warning(disable: 4702))
+#endif
+
 #include "nanosvg.h"
 
 SLUGHORN_DIAGNOSTIC_POP()

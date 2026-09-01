@@ -2335,6 +2335,16 @@ inline std::ostream& operator<<(std::ostream& os, const FontMetrics& m) {
 	#define SLUGHORN_DIAGNOSTIC_POP() SLUGHORN_PRAGMA(GCC diagnostic pop)
 	#define SLUGHORN_IGNORE(w) SLUGHORN_PRAGMA(GCC diagnostic ignored w)
 
+#elif defined(_MSC_VER)
+	// MSVC identifies warnings by number, not by the -W<name>/-Wno-<name> flags
+	// GCC/Clang use, so SLUGHORN_IGNORE(w) (called with those flag strings)
+	// can't be translated generically here. Push/pop are still functional;
+	// vendored-header call sites that need to silence an MSVC-specific
+	// warning number do so with their own __pragma(warning(disable: N)).
+	#define SLUGHORN_DIAGNOSTIC_PUSH() __pragma(warning(push))
+	#define SLUGHORN_DIAGNOSTIC_POP() __pragma(warning(pop))
+	#define SLUGHORN_IGNORE(w)
+
 #else
 	#define SLUGHORN_DIAGNOSTIC_PUSH()
 	#define SLUGHORN_DIAGNOSTIC_POP()
