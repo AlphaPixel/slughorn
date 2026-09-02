@@ -261,6 +261,24 @@ def test_gradient_info_sweep(gradient_stops):
 	assert gi.start_angle == pytest.approx(0.0)
 	assert gi.end_angle == pytest.approx(0.5)
 
+def test_gradient_info_kwargs_ctor(gradient_stops):
+	gi = slughorn.GradientInfo(
+		type=slughorn.GradientInfo.Type.Radial,
+		stops=gradient_stops,
+		inner_radius=0.3,
+	)
+	assert gi.type == slughorn.GradientInfo.Type.Radial
+	assert len(gi.stops) == 2
+	assert gi.inner_radius == pytest.approx(0.3)
+
+def test_gradient_info_kwargs_ctor_unspecified_fields_keep_defaults():
+	# start_angle=0.0 forces the kwargs overload; every other field should still match
+	# GradientInfo()'s own bare-init defaults.
+	gi = slughorn.GradientInfo(start_angle=0.0)
+	assert gi.type == slughorn.GradientInfo.Type.Linear
+	assert gi.stops == []
+	assert gi.end_angle == pytest.approx(1.0)
+
 def test_build_linear_gradient_matrix():
 	m = slughorn.build_linear_gradient_matrix(0.0, 0.0, 1.0, 0.0)
 	assert isinstance(m, slughorn.Matrix)
@@ -362,6 +380,29 @@ def test_composite_shape_advance():
 def test_composite_shape_repr():
 	assert repr(slughorn.CompositeShape()) != ""
 
+def test_composite_shape_kwargs_ctor_list():
+	layer = slughorn.Layer(slughorn.Key("s"), slughorn.Color(1, 0, 0))
+	cs = slughorn.CompositeShape(layers=[layer], advance=0.6)
+	assert len(cs) == 1
+	assert cs.advance == pytest.approx(0.6)
+	assert cs.mask is None
+
+def test_composite_shape_kwargs_ctor_single_layer():
+	layer = slughorn.Layer(slughorn.Key("s"), slughorn.Color(1, 0, 0))
+	cs = slughorn.CompositeShape(layers=layer)
+	assert len(cs) == 1
+
+def test_composite_shape_kwargs_ctor_layers_instance():
+	layer = slughorn.Layer(slughorn.Key("s"), slughorn.Color(1, 0, 0))
+	cs = slughorn.CompositeShape(layers=slughorn.Layers([layer]))
+	assert len(cs) == 1
+
+def test_composite_shape_kwargs_ctor_with_mask():
+	mask = slughorn.Mask.circle(0.5, 0.5, 0.3)
+	cs = slughorn.CompositeShape(mask=mask)
+	assert cs.mask is not None
+	assert cs.mask.type == slughorn.Mask.Type.Circle
+
 
 # ---------------------------------------------------------------------------
 # FontMetrics (struct; produced by freetype.load_font_metrics)
@@ -387,6 +428,19 @@ def test_font_metrics_fields_readwrite():
 
 def test_font_metrics_repr():
 	assert repr(slughorn.FontMetrics()) != ""
+
+def test_font_metrics_kwargs_ctor():
+	fm = slughorn.FontMetrics(
+		units_per_em=2048,
+		cap_height_ratio=0.72,
+		x_height_ratio=0.53,
+		ascender_ratio=0.80,
+		descender_ratio=0.20,
+		line_gap_ratio=0.0,
+	)
+	assert fm.units_per_em == 2048
+	assert fm.cap_height_ratio == pytest.approx(0.72)
+	assert fm.x_height_ratio == pytest.approx(0.53)
 
 
 # ---------------------------------------------------------------------------
@@ -474,6 +528,30 @@ def test_shape_info_origin_repr():
 
 def test_shape_info_repr():
 	assert repr(slughorn.ShapeInfo()) != ""
+
+def test_shape_info_kwargs_ctor(rect_curves):
+	si = slughorn.ShapeInfo(
+		curves=rect_curves,
+		auto_metrics=False,
+		width=1.0,
+		height=1.0,
+		advance=1.1,
+		origin=slughorn.ShapeInfo.Origin(slughorn.ShapeInfo.Origin.Type.Centered),
+	)
+	assert len(si.curves) == len(rect_curves)
+	assert si.auto_metrics is False
+	assert si.width == pytest.approx(1.0)
+	assert si.advance == pytest.approx(1.1)
+	assert si.origin.type == slughorn.ShapeInfo.Origin.Type.Centered
+
+def test_shape_info_kwargs_ctor_single_field():
+	si = slughorn.ShapeInfo(advance=2.5)
+	assert si.advance == pytest.approx(2.5)
+	assert si.auto_metrics is True  # unspecified fields keep their normal defaults
+
+def test_shape_info_kwargs_ctor_unknown_key_raises():
+	with pytest.raises(TypeError):
+		slughorn.ShapeInfo(not_a_real_field=1)
 
 
 # ---------------------------------------------------------------------------

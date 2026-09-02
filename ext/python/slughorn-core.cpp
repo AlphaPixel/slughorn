@@ -4,6 +4,51 @@
 #include "slughorn/serial.hpp"
 #endif
 
+namespace {
+
+// Shared by ShapeInfo's "curves" property setter and its kwargs constructor: accepts either a
+// (N, 6) float32 buffer (memoryview, numpy array, etc.) or a list of Curve objects.
+void assignShapeInfoCurves(slughorn::Atlas::ShapeInfo& info, py::handle obj) {
+	if(PyObject_CheckBuffer(obj.ptr())) {
+		py::buffer_info bi = py::reinterpret_borrow<py::buffer>(obj).request();
+
+		if(
+			bi.format != py::format_descriptor<slug_t>::format() ||
+			bi.ndim != 2 ||
+			bi.shape[1] != 6
+		) throw std::runtime_error("ShapeInfo.curves: expected (N, 6) float32 buffer");
+
+		info.curves.clear();
+		info.curves.reserve(static_cast<size_t>(bi.shape[0]));
+
+		for(py::ssize_t i = 0; i < bi.shape[0]; i++) {
+			const slug_t* row = reinterpret_cast<const slug_t*>(
+				static_cast<const char*>(bi.ptr) + i * bi.strides[0]
+			);
+
+			info.curves.push_back({row[0], row[1], row[2], row[3], row[4], row[5]});
+		}
+	}
+
+	else info.curves = obj.cast<slughorn::Atlas::Curves>();
+}
+
+// CompositeShape's "layers" field is PYBIND11_MAKE_OPAQUE'd (see slughorn-python.hpp) so
+// cs.layers.append(x) mutates the real C++ vector in place -- but that opts std::vector<Layer>
+// out of pybind's normal implicit list<->vector conversion everywhere it appears as a parameter,
+// including here. Duck-type instead: accept a single Layer, or anything iterable (a plain list/
+// tuple, or an actual Layers instance, which is itself iterable).
+std::vector<slughorn::Layer> layersFromObject(py::object obj) {
+	std::vector<slughorn::Layer> layers;
+
+	if(py::isinstance<slughorn::Layer>(obj)) layers.push_back(obj.cast<slughorn::Layer>());
+	else for(auto item : obj) layers.push_back(item.cast<slughorn::Layer>());
+
+	return layers;
+}
+
+}
+
 namespace slughorn_python {
 
 void bind_core(py::module_& m) {
@@ -172,8 +217,7 @@ void bind_core(py::module_& m) {
 			mat.apply(x, y, ox, oy);
 
 			return py::make_tuple(ox, oy);
-		}, "x"_a, "y"_a,
-			"Apply the matrix to point (x, y), returning (x', y').")
+		}, "x"_a, "y"_a, "Apply the matrix to point (x, y), returning (x', y').")
 		.def("__mul__", &slughorn::Matrix::operator*, "rhs"_a,
 			"Concatenate: (self * rhs) - rhs is applied first."
 		)
@@ -187,18 +231,57 @@ void bind_core(py::module_& m) {
 		.def(py::init<>(), "Default: t=0, color=(0, 0, 0, 1).")
 		.def(py::init([](slug_t t, slughorn::Color color) {
 			return slughorn::GradientStop{t, color};
-		}), "t"_a, "color"_a,
-			"Construct from position t in [0,1] and RGBA color."
-		)
-		.def_readwrite("t", &slughorn::GradientStop::t,
-			"Position along the gradient axis [0, 1]."
-		)
+		}), "t"_a, "color"_a, "Construct from position t in [0,1] and RGBA color.")
+		.def_readwrite("t", &slughorn::GradientStop::t, "Position along the gradient axis [0, 1].")
 		.def_readwrite("color", &slughorn::GradientStop::color)
 		.def("__repr__", [](const slughorn::GradientStop& s) { return streamRepr(s); })
 	;
 
-	auto gradinfo_ = py::class_<slughorn::GradientInfo>(m, "GradientInfo")
+	auto gradinfo_ = py::class_<slughorn::GradientInfo>(m, "GradientInfo");
+
+	// Bound before gradinfo_'s own .def() chain below: the kwargs constructor's "type" default
+	// value needs GradientInfo::Type already registered with pybind at the point .def() runs, or
+	// converting that default to a py::object fails at module-import time (same reasoning as
+	// DrawMode/BlendMode needing to be bound before Layer's ctor, further down, which defaults
+	// its drawMode/blendMode params the same way).
+	py::enum_<slughorn::GradientInfo::Type>(gradinfo_, "Type")
+		.value("Linear", slughorn::GradientInfo::Type::Linear)
+		.value("Radial", slughorn::GradientInfo::Type::Radial)
+		.value("Sweep", slughorn::GradientInfo::Type::Sweep)
+		.value("AffineRadial", slughorn::GradientInfo::Type::AffineRadial)
+	;
+
+	gradinfo_
 		.def(py::init<>(), "Default: linear gradient, no stops.")
+		.def(
+			py::init([](
+				slughorn::GradientInfo::Type type,
+				std::vector<slughorn::GradientStop> stops,
+				slughorn::Matrix transform,
+				slug_t innerRadius,
+				slug_t startAngle,
+				slug_t endAngle
+			) {
+				slughorn::GradientInfo info;
+
+				info.type = type;
+				info.stops = std::move(stops);
+				info.transform = transform;
+				info.innerRadius = innerRadius;
+				info.startAngle = startAngle;
+				info.endAngle = endAngle;
+
+				return info;
+			}),
+			"type"_a=slughorn::GradientInfo::Type::Linear,
+			"stops"_a=std::vector<slughorn::GradientStop>{},
+			"transform"_a=slughorn::Matrix{},
+			"inner_radius"_a=0_cv,
+			"start_angle"_a=0_cv,
+			"end_angle"_a=1_cv,
+			"Construct with optional field=value kwargs, e.g. "
+			"GradientInfo(type=slughorn.GradientInfo.Type.Radial, stops=[...])."
+		)
 		.def_readwrite("type", &slughorn::GradientInfo::type,
 			"GradientInfo.Type.Linear, .Radial, .AffineRadial, or .Sweep."
 		)
@@ -218,13 +301,6 @@ void bind_core(py::module_& m) {
 		.def_readwrite("end_angle", &slughorn::GradientInfo::endAngle,
 			"Sweep only: end angle in turns [0, 1]. Default = 1 (full circle)."
 		)
-	;
-
-	py::enum_<slughorn::GradientInfo::Type>(gradinfo_, "Type")
-		.value("Linear", slughorn::GradientInfo::Type::Linear)
-		.value("Radial", slughorn::GradientInfo::Type::Radial)
-		.value("Sweep", slughorn::GradientInfo::Type::Sweep)
-		.value("AffineRadial", slughorn::GradientInfo::Type::AffineRadial)
 	;
 
 	// Free function: convert two em-space endpoints to a GradientInfo::transform matrix.
@@ -338,33 +414,33 @@ void bind_core(py::module_& m) {
 		.def_readwrite("invert", &slughorn::Mask::invert,
 			"If True, inverts coverage so the outside of the mask shape becomes the inside.")
 		.def_static("msdf", &slughorn::Mask::msdf,
-			py::arg("key"), py::arg("invert") = false,
+			"key"_a, "invert"_a=false,
 			"Construct a baked-MSDF mask. key must be requested with atlas.request_msdf().")
 		.def_static("circle", &slughorn::Mask::circle,
-			py::arg("cx"), py::arg("cy"), py::arg("r"), py::arg("invert") = false,
+			"cx"_a, "cy"_a, "r"_a, "invert"_a=false,
 			"Analytical circle mask: center (cx, cy), radius r.")
 		.def_static("rect", &slughorn::Mask::rect,
-			py::arg("x"), py::arg("y"), py::arg("w"), py::arg("h"), py::arg("invert") = false,
+			"x"_a, "y"_a, "w"_a, "h"_a, "invert"_a=false,
 			"Analytical axis-aligned box mask: corner (x, y), size (w, h).")
 		.def_static("capsule", &slughorn::Mask::capsule,
-			py::arg("ax"), py::arg("ay"), py::arg("bx"), py::arg("by"), py::arg("r"), py::arg("invert") = false,
+			"ax"_a, "ay"_a, "bx"_a, "by"_a, "r"_a, "invert"_a=false,
 			"Analytical capsule mask: endpoints (ax,ay)→(bx,by), radius r.")
 		.def_static("arc", &slughorn::Mask::arc,
-			py::arg("cx"), py::arg("cy"), py::arg("r"), py::arg("a0"), py::arg("a1"), py::arg("invert") = false,
+			"cx"_a, "cy"_a, "r"_a, "a0"_a, "a1"_a, "invert"_a=false,
 			"Analytical pie-sector mask: center (cx,cy), radius r, angle range [a0,a1] radians (0=+X, CCW).")
 		.def_static("arcBand", &slughorn::Mask::arcBand,
-			py::arg("cx"), py::arg("cy"), py::arg("r"), py::arg("a0"), py::arg("a1"), py::arg("rb"), py::arg("invert") = false,
+			"cx"_a, "cy"_a, "r"_a, "a0"_a, "a1"_a, "rb"_a, "invert"_a=false,
 			"Analytical stroked-arc mask: center (cx,cy), arc radius r, angle range [a0,a1], stroke half-width rb.")
 		.def_static("hexagon", &slughorn::Mask::hexagon,
-			py::arg("cx"), py::arg("cy"), py::arg("r"), py::arg("rotation") = 0.0f, py::arg("invert") = false,
+			"cx"_a, "cy"_a, "r"_a, "rotation"_a=0.0f, "invert"_a=false,
 			"Analytical regular-hexagon mask: center (cx,cy), radius r, rotation in radians.")
 		.def_static("octagon", &slughorn::Mask::octagon,
-			py::arg("cx"), py::arg("cy"), py::arg("r"), py::arg("rotation") = 0.0f, py::arg("invert") = false,
+			"cx"_a, "cy"_a, "r"_a, "rotation"_a=0.0f, "invert"_a=false,
 			"Analytical regular-octagon mask: center (cx,cy), radius r, rotation in radians.")
 		.def_static("star", &slughorn::Mask::star,
-			py::arg("cx"), py::arg("cy"), py::arg("r"),
-			py::arg("points"), py::arg("inner_ratio"), py::arg("rotation") = 0.0f,
-			py::arg("invert") = false,
+			"cx"_a, "cy"_a, "r"_a,
+			"points"_a, "inner_ratio"_a, "rotation"_a=0.0f,
+			"invert"_a=false,
 			"Analytical n-pointed star mask: center (cx,cy), outer radius r, point count, "
 			"inner_ratio in [0,1] (0=sharpest spikes, 1=regular polygon), rotation in radians.")
 		.def("__repr__", [](const slughorn::Mask& mk) { return streamRepr(mk); })
@@ -483,6 +559,27 @@ void bind_core(py::module_& m) {
 
 	py::class_<slughorn::CompositeShape>(m, "CompositeShape")
 		.def(py::init<>())
+		.def(
+			py::init([](
+				py::object layers,
+				slug_t advance,
+				std::optional<slughorn::Mask> mask
+			) {
+				slughorn::CompositeShape composite;
+
+				composite.layers = layersFromObject(layers);
+				composite.advance = advance;
+				composite.mask = std::move(mask);
+
+				return composite;
+			}),
+			"layers"_a=py::list(),
+			"advance"_a=0_cv,
+			"mask"_a=py::none(),
+			"Construct with optional field=value kwargs, e.g. "
+			"CompositeShape(layers=[layer0, layer1], advance=0.6). "
+			"layers accepts a single Layer, a list/tuple of Layer, or a Layers instance."
+		)
 		.def_readwrite(
 			"layers",
 			&slughorn::CompositeShape::layers,
@@ -511,6 +608,35 @@ void bind_core(py::module_& m) {
 		"slughorn.freetype.load_font_metrics(); consumed by Canvas.text()."
 	)
 		.def(py::init<>())
+		.def(
+			py::init([](
+				slug_t unitsPerEM,
+				slug_t capHeightRatio,
+				slug_t xHeightRatio,
+				slug_t ascenderRatio,
+				slug_t descenderRatio,
+				slug_t lineGapRatio
+			) {
+				slughorn::FontMetrics fm;
+
+				fm.unitsPerEM = unitsPerEM;
+				fm.capHeightRatio = capHeightRatio;
+				fm.xHeightRatio = xHeightRatio;
+				fm.ascenderRatio = ascenderRatio;
+				fm.descenderRatio = descenderRatio;
+				fm.lineGapRatio = lineGapRatio;
+
+				return fm;
+			}),
+			"units_per_em"_a=0_cv,
+			"cap_height_ratio"_a=0_cv,
+			"x_height_ratio"_a=0_cv,
+			"ascender_ratio"_a=0_cv,
+			"descender_ratio"_a=0_cv,
+			"line_gap_ratio"_a=0_cv,
+			"Construct with optional field=value kwargs, for supplying synthetic metrics "
+			"without a real font file, e.g. FontMetrics(cap_height_ratio=0.7)."
+		)
 		.def_readwrite("units_per_em", &slughorn::FontMetrics::unitsPerEM,
 			"Raw em units (e.g. 1000 or 2048); not a ratio."
 		)
@@ -563,33 +689,42 @@ void bind_core(py::module_& m) {
 	// ============================================================================================
 	auto shapeinfo_ = py::class_<slughorn::Atlas::ShapeInfo>(m, "ShapeInfo")
 		.def(py::init<>())
+		.def(py::init([](py::kwargs kwargs) {
+			slughorn::Atlas::ShapeInfo info;
+
+			for(auto item : kwargs) {
+				auto key = item.first.cast<std::string>();
+
+				if(key == "curves") assignShapeInfoCurves(info, item.second);
+				else if(key == "auto_metrics") info.autoMetrics = item.second.cast<bool>();
+				else if(key == "bearing_x") info.bearingX = item.second.cast<slug_t>();
+				else if(key == "bearing_y") info.bearingY = item.second.cast<slug_t>();
+				else if(key == "width") info.width = item.second.cast<slug_t>();
+				else if(key == "height") info.height = item.second.cast<slug_t>();
+				else if(key == "advance") info.advance = item.second.cast<slug_t>();
+				else if(key == "num_bands_x") info.numBandsX = item.second.cast<int>();
+				else if(key == "num_bands_y") info.numBandsY = item.second.cast<int>();
+				else if(key == "splits_x") {
+					info.splitsX = item.second.cast<std::vector<slug_t>>();
+				}
+				else if(key == "splits_y") {
+					info.splitsY = item.second.cast<std::vector<slug_t>>();
+				}
+				else if(key == "origin") {
+					info.origin = item.second.cast<slughorn::Atlas::ShapeInfo::Origin>();
+				}
+				else throw py::type_error("ShapeInfo got an unexpected keyword argument '" + key + "'");
+			}
+
+			return info;
+		}),
+			"Construct with optional field=value kwargs, e.g. "
+			"ShapeInfo(curves=my_curves, auto_metrics=False)."
+		)
 		.def_property("curves",
 			[](const slughorn::Atlas::ShapeInfo& info) { return info.curves; },
 			[](slughorn::Atlas::ShapeInfo& info, py::object obj) {
-				if(PyObject_CheckBuffer(obj.ptr())) {
-					py::buffer_info bi = py::reinterpret_borrow<py::buffer>(obj).request();
-
-					if(
-						bi.format != py::format_descriptor<slug_t>::format() ||
-						bi.ndim != 2 ||
-						bi.shape[1] != 6
-					) throw std::runtime_error(
-						"ShapeInfo.curves: expected (N, 6) float32 buffer"
-					);
-
-					info.curves.clear();
-					info.curves.reserve(static_cast<size_t>(bi.shape[0]));
-
-					for(py::ssize_t i = 0; i < bi.shape[0]; i++) {
-						const slug_t* row = reinterpret_cast<const slug_t*>(
-							static_cast<const char*>(bi.ptr) + i * bi.strides[0]
-						);
-
-						info.curves.push_back({row[0], row[1], row[2], row[3], row[4], row[5]});
-					}
-				}
-
-				else info.curves = obj.cast<slughorn::Atlas::Curves>();
+				assignShapeInfoCurves(info, obj);
 			},
 			"List of Curve objects in em-normalized coordinates (get), "
 			"or a (N, 6) float32 buffer to assign from (set)."

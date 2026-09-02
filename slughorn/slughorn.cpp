@@ -1383,7 +1383,9 @@ void Atlas::packTextures() {
 			half[1] = detail::floatToHalf(g);
 			half[2] = detail::floatToHalf(b);
 			half[3] = detail::floatToHalf(a);
-		} else {
+		}
+
+		else {
 			auto* full = reinterpret_cast<float*>(p);
 
 			full[0] = r; full[1] = g; full[2] = b; full[3] = a;
@@ -1406,7 +1408,9 @@ void Atlas::packTextures() {
 
 			half[2] = detail::floatToHalf(b);
 			half[3] = detail::floatToHalf(a);
-		} else {
+		}
+
+		else {
 			auto* full = reinterpret_cast<float*>(p);
 
 			full[2] = b; full[3] = a;
@@ -1503,7 +1507,9 @@ void Atlas::packTextures() {
 				curveTexelOffset += 1;
 
 				_packingStats.curveTexelsUsed += 1;
-			} else {
+			}
+
+			else {
 				curveLocs[ci] = curveTexelOffset;
 
 				writeCurveTexel(curveTexelOffset, c.x1, c.y1, c.x2, c.y2);

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.15)
 
-project(SlugHorn LANGUAGES C CXX VERSION 0.0.2)
+project(slughorn LANGUAGES C CXX VERSION 0.0.3)
 
 # =============================================================================
 # Compile options
