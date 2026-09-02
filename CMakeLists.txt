@@ -299,6 +299,15 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
 
 	set_target_properties(slughorn_python PROPERTIES
 		OUTPUT_NAME "slughorn"
+		# On Windows, a MODULE target's companion import library defaults to the same
+		# OUTPUT_NAME - colliding with the unrelated `slughorn` STATIC library target's own
+		# slughorn.lib in the same output directory under the Visual Studio generator. Worse,
+		# slughorn_python links slughorn (via slughorn_python_bindings) PUBLIC, so slughorn.lib
+		# is a link INPUT to this exact step, and the linker refuses to overwrite a file it's
+		# simultaneously reading (LNK1114, "cannot overwrite the original file", error code 5).
+		# Give the import lib its own name; OUTPUT_NAME above still governs the actual .pyd
+		# Python imports.
+		ARCHIVE_OUTPUT_NAME "slughorn_python"
 		POSITION_INDEPENDENT_CODE ON
 	)
 	target_link_libraries(slughorn_python PRIVATE slughorn_python_bindings)
