@@ -1,0 +1,5 @@
+# Unified-diff files applied verbatim via `git apply` (see CMakeLists.txt's SLUGHORN_NANOSVG
+# patch step). Without this, Windows checkouts (core.autocrlf=true, the GitHub Actions
+# windows-latest default) convert these to CRLF, corrupting the diff format and making
+# `git apply` reject them as "corrupt patch" -- confirmed 2026-09-01 in wheels.yml CI.
+*.diff text eol=lf
