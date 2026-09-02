@@ -177,10 +177,9 @@ jobs:
 
   windows-x86_64:
     name: Windows x86-64 / CPython 3.12-3.14
-    # Disabled until MSVC is tested locally -- `false &&` short-circuits regardless of
-    # inputs.build/target, on purpose. Remove it (and re-add this job to publish's `needs:`
-    # below) once that's done.
-    if: false && inputs.build && (inputs.target == 'all' || inputs.target == 'windows-x86_64')
+    # Re-enabled 2026-09-01 after MSVC-on-Wine validated slughorn's own build (vcpkg's freetype
+    # port is already 2.14.3, so no FreeType-from-source workaround needed here unlike Linux).
+    if: inputs.build && (inputs.target == 'all' || inputs.target == 'windows-x86_64')
     runs-on: windows-latest
 
     steps:
@@ -282,9 +281,7 @@ jobs:
     # Pushes to `main` (and manual test runs) produce build artifacts only.
     # Publishing requires an explicit versioned release tag, e.g. v0.0.2.
     if: inputs.build && inputs.target == 'all' && startsWith(github.ref, 'refs/tags/v')
-    # windows-x86_64 omitted while it's disabled above (if: false) -- a skipped `needs` job
-    # would otherwise cascade-skip this one too. Re-add it once Windows is back on.
-    needs: [linux-x86_64, linux-aarch64, sdist]
+    needs: [linux-x86_64, linux-aarch64, windows-x86_64, sdist]
     runs-on: ubuntu-24.04
     environment:
       name: pypi
