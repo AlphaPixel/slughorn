@@ -213,8 +213,13 @@ jobs:
             python -m pip install delvewheel
           # scikit-build-core forwards CMAKE_ARGS to the native configure; vcpkg's toolchain
           # makes CMake's FindFreetype resolve to the library installed above.
+          # MSBUILDDISABLENODEREUSE stops MSBuild worker processes (MSBuild.exe, mspdbsrv.exe)
+          # from lingering after the build "finishes" - without it, one can still hold a file
+          # handle open in the build directory when Python's isolated-build cleanup immediately
+          # tries to delete it, racing into "PermissionError: ... being used by another process".
           CIBW_ENVIRONMENT_WINDOWS: >-
             CMAKE_ARGS="-DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-windows"
+            MSBUILDDISABLENODEREUSE=1
           CIBW_REPAIR_WHEEL_COMMAND_WINDOWS: >-
             python -m delvewheel repair --add-path C:/vcpkg/installed/x64-windows/bin -w {dest_dir} {wheel}
           CIBW_TEST_COMMAND: >-
