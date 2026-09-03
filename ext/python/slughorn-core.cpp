@@ -2,6 +2,7 @@
 
 #ifdef SLUGHORN_HAS_SERIAL
 #include "slughorn/serial.hpp"
+#include <sstream>
 #endif
 
 namespace {
@@ -1031,6 +1032,21 @@ void bind_core(py::module_& m) {
 			"May be called before or after build()."
 		)
 
+		.def("append", &slughorn::Atlas::append,
+			"source"_a, "mask"_a=0, "name_prefix"_a="",
+			"Merge another, already-built Atlas's shapes and composites into this one.\n\n"
+			"Must be called before build() (silently no-ops if this atlas is already\n"
+			"built). source must itself already be built - e.g. the result of\n"
+			"slughorn.read().\n\n"
+			"mask namespaces Codepoint keys via Key's existing bit-packed mask field;\n"
+			"the real codepoint (and any auto-key marker bits) pass through untouched.\n"
+			"mask=0 is fine for a real, bounded-codepoint source (a font); pick a\n"
+			"distinct mask per source for auto-keyed shape libraries, which have no\n"
+			"safe default.\n\n"
+			"name_prefix independently namespaces Name keys as 'name_prefix:name'.\n"
+			"Empty (the default) leaves Name keys unprefixed."
+		)
+
 		.def("normalize_shape_metrics",
 			&slughorn::Atlas::normalizeShapeMetrics,
 			"keys"_a,
@@ -1482,6 +1498,37 @@ void bind_core(py::module_& m) {
 		"Write a built Atlas to disk.\n"
 		"Extension determines format: .slug -> JSON + base64, .slugb -> binary.\n"
 		"Raises RuntimeError if the atlas is not built or the file cannot be written.\n"
+		"Only available when slughorn was compiled with SLUGHORN_SERIAL=ON."
+	);
+
+	m.def("read_string",
+		[](const std::string& json) {
+			std::istringstream in(json);
+
+			return slughorn::serial::read(in);
+		},
+		"json"_a,
+		"Load an already-built Atlas from an in-memory .slug JSON string - never touches\n"
+		"disk. For a JSON blob embedded as a compile-time string literal (e.g. a fallback\n"
+		"font or icon library baked into a header), this is the counterpart to write_string()\n"
+		"and the intended source for Atlas.append().\n"
+		"Raises RuntimeError if the JSON is invalid.\n"
+		"Only available when slughorn was compiled with SLUGHORN_SERIAL=ON."
+	);
+
+	m.def("write_string",
+		[](const slughorn::Atlas& atlas, bool pretty) {
+			std::ostringstream out;
+
+			slughorn::serial::writeJSON(atlas, out, pretty);
+
+			return out.str();
+		},
+		"atlas"_a, "pretty"_a=true,
+		"Serialize a built Atlas to an in-memory .slug JSON string - never touches disk.\n"
+		"Counterpart to read_string(); useful for embedding the result as a compile-time\n"
+		"string literal (e.g. via a bin/slughorn codegen step).\n"
+		"Raises RuntimeError if the atlas is not built.\n"
 		"Only available when slughorn was compiled with SLUGHORN_SERIAL=ON."
 	);
 #endif

@@ -188,6 +188,22 @@ uint32_t alignCursorForSpan(uint32_t cursor, uint32_t width, uint32_t span) {
 	return cursor;
 }
 
+// Re-keys @p key for Atlas::append(): Codepoint keys get their mask field replaced (the real
+// codepoint and any AUTO_KEY_START marker bits pass through untouched); Name keys get prefixed.
+slughorn::Key remapAppendKey(const slughorn::Key& key, uint8_t mask, const std::string& namePrefix) {
+	using slughorn::Key;
+
+	if(key.type() == Key::Type::Name) {
+		if(namePrefix.empty()) return key;
+
+		return Key(namePrefix + ":" + key.name());
+	}
+
+	const uint32_t raw = (key.codepoint() & ~Key::MASK_MASK) | (uint32_t(mask) << Key::MASK_SHIFT);
+
+	return Key(raw);
+}
+
 }
 
 namespace slughorn {
@@ -318,6 +334,38 @@ uint32_t Atlas::addGradient(const GradientInfo& info) {
 
 void Atlas::addCompositeShape(Key key, CompositeShape composite) {
 	_compositeShapes[key] = std::move(composite);
+}
+
+// ================================================================================================
+// Atlas::append
+// ================================================================================================
+
+void Atlas::append(const Atlas& source, uint8_t mask, const std::string& namePrefix) {
+	if(_built) return;
+
+	for(const auto& [key, shape] : source.getShapes()) {
+		ShapeInfo info;
+
+		info.curves = shape.curves;
+		info.contourStarts = shape.contourStarts;
+		info.autoMetrics = false;
+		info.bearingX = shape.bearingX;
+		info.bearingY = shape.bearingY;
+		info.width = shape.width;
+		info.height = shape.height;
+		info.advance = shape.advance;
+		info.origin = shape.origin;
+
+		addShape(remapAppendKey(key, mask, namePrefix), info);
+	}
+
+	for(const auto& [key, composite] : source.getCompositeShapes()) {
+		CompositeShape copy = composite;
+
+		for(auto& layer : copy.layers) layer.key = remapAppendKey(layer.key, mask, namePrefix);
+
+		addCompositeShape(remapAppendKey(key, mask, namePrefix), std::move(copy));
+	}
 }
 
 // ================================================================================================

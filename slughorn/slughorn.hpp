@@ -1362,6 +1362,29 @@ public:
 	// replaces the previous definition.
 	void addCompositeShape(Key key, CompositeShape composite);
 
+	// Merge another, already-built Atlas's shapes and composites into this one -- e.g. an
+	// embedded fallback font or a standalone icon-set library loaded via serial::read().
+	//
+	// Must be called before build() (same precondition as addShape() -- silently no-ops if this
+	// atlas is already built). @p source must itself already be built: its getShapes() is what
+	// gets walked, and that map is only populated post-build() (or post-serial::read()).
+	//
+	// @p mask namespaces Type::Codepoint keys, reusing Key's existing bit-packed mask field (see
+	// Key(uint32_t, uint8_t)) -- the same collision-avoidance mechanism freetype::LoadConfig::mask
+	// already uses for live FreeType loads. The full raw packed codepoint is preserved (including
+	// any KeyIterator::AUTO_KEY_START marker bits); only the mask field is replaced. mask=0 is a
+	// reasonable default for a real, bounded-codepoint source (a font); it is NOT safe for a
+	// source keyed via an unprefixed KeyIterator (e.g. auto-keyed icon shapes), since those already
+	// collide with any other atlas built the same way -- pick a distinct mask per such source.
+	//
+	// @p namePrefix independently namespaces Type::Name keys as `namePrefix + ":" + name`. Empty
+	// (the default) leaves Name keys unprefixed; two sources sharing an unprefixed name silently
+	// alias, same "already present -> skip" precedent as an unprefixed mask=0.
+	//
+	// Composite shapes are copied too, with every Layer::key remapped through the same mask/prefix
+	// so they still resolve to the correct re-keyed shape after the merge.
+	void append(const Atlas& source, uint8_t mask=0, const std::string& namePrefix="");
+
 	// Force all shapes in @p keys to share the same em-space bounding box.
 	//
 	// Must be called after addShape() but before build(). Keys not present in the atlas

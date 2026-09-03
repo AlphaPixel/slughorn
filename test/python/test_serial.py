@@ -196,6 +196,79 @@ def test_binary_roundtrip_composite(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# In-memory JSON string (read_string / write_string) — no disk I/O
+# ---------------------------------------------------------------------------
+
+@skip_serial
+def test_serial_read_string_exists():
+    assert hasattr(slughorn, "read_string")
+
+@skip_serial
+def test_serial_write_string_exists():
+    assert hasattr(slughorn, "write_string")
+
+@skip_serial
+def test_write_string_unbuilt_atlas_raises():
+    atlas = slughorn.Atlas()
+    with pytest.raises(RuntimeError):
+        slughorn.write_string(atlas)
+
+@skip_serial
+def test_read_string_invalid_json_raises():
+    with pytest.raises(RuntimeError):
+        slughorn.read_string("not json")
+
+@skip_serial
+def test_write_string_returns_str():
+    assert isinstance(slughorn.write_string(_unit_square_atlas()), str)
+
+@skip_serial
+def test_string_roundtrip_is_built():
+    back = slughorn.read_string(slughorn.write_string(_unit_square_atlas()))
+    assert back.is_built
+
+@skip_serial
+def test_string_roundtrip_shape_present():
+    back = slughorn.read_string(slughorn.write_string(_unit_square_atlas()))
+    assert back.has_key(slughorn.Key("rect"))
+
+@skip_serial
+def test_string_roundtrip_shape_metrics():
+    back = slughorn.read_string(slughorn.write_string(_unit_square_atlas()))
+    _check_rect_shape(back.get_shape(slughorn.Key("rect")))
+
+@skip_serial
+def test_string_roundtrip_composite():
+    back = slughorn.read_string(slughorn.write_string(_atlas_with_composite()))
+    cs = back.get_composite_shape(slughorn.Key("AB"))
+    assert cs is not None
+    assert len(cs.layers) == 2
+    assert cs.layers[0].key == slughorn.Key("A")
+    assert cs.layers[1].key == slughorn.Key("B")
+
+@skip_serial
+def test_string_roundtrip_matches_file_roundtrip(tmp_path):
+    """write_string()'s JSON must decode to the same shape as write()'s .slug file."""
+    atlas = _unit_square_atlas()
+    path = str(tmp_path / "a.slug")
+    slughorn.write(atlas, path)
+    from_file = slughorn.read(path).get_shape(slughorn.Key("rect"))
+    from_string = slughorn.read_string(slughorn.write_string(atlas)).get_shape(slughorn.Key("rect"))
+    assert from_file.width      == pytest.approx(from_string.width,      abs=1e-5)
+    assert from_file.height     == pytest.approx(from_string.height,     abs=1e-5)
+    assert from_file.band_max_x == from_string.band_max_x
+    assert from_file.band_max_y == from_string.band_max_y
+
+@skip_serial
+def test_write_string_compact_default():
+    """Default pretty=True should differ from the explicit compact form."""
+    atlas = _unit_square_atlas()
+    pretty = slughorn.write_string(atlas)
+    compact = slughorn.write_string(atlas, False)
+    assert len(compact) < len(pretty)
+
+
+# ---------------------------------------------------------------------------
 # JSON vs binary consistency
 # ---------------------------------------------------------------------------
 
