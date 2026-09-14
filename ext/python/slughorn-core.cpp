@@ -365,6 +365,7 @@ void bind_core(py::module_& m) {
 		.value("DstAtop", slughorn::BlendMode::DstAtop)
 		.value("Xor", slughorn::BlendMode::Xor)
 		.value("Clear", slughorn::BlendMode::Clear)
+		.value("DstOver", slughorn::BlendMode::DstOver)
 		.value("Multiply", slughorn::BlendMode::Multiply)
 		.value("Screen", slughorn::BlendMode::Screen)
 		.value("Overlay", slughorn::BlendMode::Overlay)
