@@ -11,6 +11,7 @@
 #include <sstream>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -554,15 +555,20 @@ enum class BlendMode: uint8_t {
 //
 // Per-layer mask specification. Exactly one of two sources drives shape coverage:
 //
-// - type == MSDF -> frontend samples the MSDF tile baked for key
-// - type != MSDF -> frontend evaluates a closed-form analytical SDF
+// - type == SDFTile -> frontend samples the baked SDF/MSDF tile for key (Atlas::requestSDF(); the
+//   tile carries its own em-space frame - see Atlas::SDF::Tile - so the params only PLACE that
+//   frame in the canvas space the masked layers are evaluated in: params = ox, oy, scale. ox/oy is
+//   the canvas-space position of the shape's em-space origin (Canvas::mask() fills it in); scale
+//   (default 1) grows or shrinks the tile about its own center, which is how a baked mask is
+//   animated cheaply - its geometry is fixed, its placement is not)
+// - type != SDFTile -> frontend evaluates a closed-form analytical SDF
 //
 // Like effectId/effectParam, slughorn stores intent and parameters; the frontend interprets them.
 // An optional gradient modulates coverage multiplicatively (future field; placeholder comment).
 // ================================================================================================
 struct Mask {
 	enum class Type : uint8_t {
-		MSDF = 0, // key must be set; frontend samples the baked MSDF tile
+		SDFTile = 0, // key must be set; frontend samples the baked SDF/MSDF tile; params: ox, oy, scale
 		Circle, // params: cx, cy, r
 		Rect, // params: x, y, w, h
 		Capsule, // params: ax, ay, bx, by, r
@@ -575,14 +581,15 @@ struct Mask {
 	};
 
 	std::optional<Key> key = {};
-	Type type = Type::MSDF;
+	Type type = Type::SDFTile;
 	slug_t params[6] = {};
 	bool invert = false;
 
-	static Mask msdf(Key k, bool inv=false) {
+	static Mask sdfTile(Key k, bool inv=false) {
 		return {
 			.key = std::move(k),
-			.type = Type::MSDF,
+			.type = Type::SDFTile,
+			.params = { 0_cv, 0_cv, 1_cv },
 			.invert = inv,
 		};
 	}
@@ -923,6 +930,127 @@ public:
 		Origin origin = {};
 	};
 
+	// --------------------------------------------------------------------------------------------
+	// Raw texture descriptor returned after build() is called.
+	//
+	// The `bytes` member holds the complete pixel data in row-major order, ready to be uploaded to
+	// a GPU texture (width/height are in texels); `format` tells the graphics backend how to
+	// interpret the bytes:
+	//
+	// RGBA32F - four 32-bit floats per texel (curve texture, default - see setCurveTextureFormat())
+	// RGBA16F - four 16-bit floats per texel (curve texture, opt-in; matches the reference Slug
+	//   format, halves curve-texture memory, real precision tradeoff - see setCurveTextureFormat())
+	// RG16UI - two 16-bit unsigned ints per texel (band texture, current default). B/A are never
+	//   consumed by the shader (indirection entries read only R; headers/curve locations read
+	//   only RG) for any content type, so this is lossless, not a tradeoff like RGBA16F.
+	// RGBA16UI - legacy 4-channel band texture format (2 always-zero trailing channels); no
+	//   longer written by Atlas::packTextures(), kept only to read pre-2026-08-29 .slug/.slugb
+	// RGBA8 - four 8-bit unorm channels per texel (gradient texture)
+	// RGB32F - three 32-bit floats per texel (MSDF tile texture, SDF::Type::MSDF)
+	// R32F - one 32-bit float per texel (SDF tile texture, SDF::Type::SDF)
+	// --------------------------------------------------------------------------------------------
+	struct TextureData {
+		enum class Format { RGBA32F, RGBA16F, RGBA16UI, RG16UI, RGBA8, RGB32F, R32F };
+
+		std::vector<uint8_t> bytes;
+
+		uint32_t width = 0;
+		uint32_t height = 0;
+		uint32_t depth = 0; // >0: array texture (number of layers); 0: 2D texture
+
+		Format format = Format::RGBA32F;
+
+		bool empty() const { return bytes.empty(); }
+
+		static constexpr size_t bytesPerTexel(Format format) {
+			switch(format) {
+				case Format::RGBA32F: return 16;
+				case Format::RGBA16F: return 8;
+				case Format::RGBA16UI: return 8;
+				case Format::RG16UI: return 4;
+				case Format::RGBA8: return 4;
+				case Format::RGB32F: return 12;
+				case Format::R32F: return 4;
+			}
+
+			return 0;
+		}
+	};
+
+	// --------------------------------------------------------------------------------------------
+	// SDF - baked signed-distance-field tiles (authoring intent in, raw data out).
+	//
+	// Opt in per shape with requestSDF() BEFORE build(); build() then bakes every requested shape
+	// into ONE 2D texture (getSDF().texture) and records each shape's tile on Shape::sdf. One
+	// Type per Atlas (setSDF()): mixing kinds would need two texture formats.
+	//
+	// Tile contract - everything a frontend needs to sample a tile, deliberately independent of
+	// the Slug band transform so a tile is usable on its own (e.g. by a generic SDF renderer):
+	//
+	// - texels [x, x + w) x [y, y + h) of the texture. Row 0 is the BOTTOM row (GL/osg::Image
+	//   convention: V = 0 is the bottom of the shape), so no Y flip is ever baked in - flip only
+	//   where a human-facing image needs it.
+	// - ONE uniform scale, `texelsPerEm` (tiles keep the shape's aspect ratio).
+	// - (emOriginX, emOriginY) is the em-space point at the tile's bottom-left corner, so a point
+	//   maps to texel (em - emOrigin) * texelsPerEm within the tile.
+	// - values are clamped to [0, 1]: edge = 0.5, interior > 0.5. A distance of +/- `range` em
+	//   maps onto [0, 1], i.e. the field spans 2 * range * texelsPerEm TEXELS in total (see
+	//   Tile::pixelRange()).
+	//
+	// Type::SDF is a single channel (read .r); Type::MSDF is three (median of .rgb) and keeps the
+	// sharp corners a single-channel field rounds off.
+	// --------------------------------------------------------------------------------------------
+	struct SDF {
+		enum class Type: uint8_t { SDF, MSDF };
+		enum class Coloring: uint8_t { Simple, ByDistance }; // MSDF only
+
+		// Atlas-wide, set once via setSDF() before build(). Type defaults to MSDF so an Atlas that
+		// never configures anything keeps full corner quality.
+		struct Config {
+			Type type = Type::MSDF;
+			uint32_t tileSize = 128; // longest tile axis, in texels
+			uint32_t atlasWidth = 2048; // texels; the atlas grows in height as tiles shelf-pack
+			uint32_t gutter = 2; // texels of exterior kept around every tile
+			slug_t range = 0.1_cv; // default em-space distance range; requestSDF() may override
+			Coloring coloring = Coloring::ByDistance; // MSDF only. ByDistance: fewer corner
+			// artifacts, slightly more CPU work; Simple: faster, prone to artifacts at convex corners.
+		};
+
+		struct Tile {
+			uint32_t x = 0, y = 0, w = 0, h = 0; // texels within SDF::texture, row 0 = bottom
+			slug_t range = 0_cv; // em-space half-range this tile was baked with
+			slug_t texelsPerEm = 0_cv;
+			slug_t emOriginX = 0_cv, emOriginY = 0_cv;
+
+			// Total distance range in texels (the "pixelRange" msdfgen/osgx::SDF speak of).
+			slug_t pixelRange() const { return 2_cv * range * texelsPerEm; }
+		};
+
+		struct Stats {
+			Type type = Type::MSDF;
+			TextureData::Format format = TextureData::Format::RGB32F;
+			uint32_t tileCount = 0; // shapes with a baked tile
+			uint32_t texelsUsed = 0; // sum of every tile's w * h
+			uint32_t texelsPadding = 0; // atlas area not covered by a tile (gutters, shelf slack)
+			uint32_t texelsTotal = 0; // atlas width * height (allocated)
+
+			slug_t utilization() const {
+				return texelsTotal ? cv(texelsUsed) / cv(texelsTotal) : 0.f;
+			}
+
+			slug_t paddingRatio() const {
+				const uint32_t live = texelsUsed + texelsPadding;
+
+				return live ? cv(texelsPadding) / cv(live) : 0.f;
+			}
+
+			size_t bytes() const { return size_t(texelsTotal) * TextureData::bytesPerTexel(format); }
+		};
+
+		Config config;
+		TextureData texture; // empty until build() bakes at least one tile
+	};
+
 	// Everything the renderer needs to draw one shape. Populated by build() and returned by
 	// getShape().
 	struct Shape {
@@ -957,14 +1085,10 @@ public:
 		uint32_t scanlineCurveStart = 0;
 		uint32_t scanlineCurveCount = 0;
 
-		// Layer index in the MSDF Texture2DArray; -1 = no MSDF tile rendered for this shape yet
-		// (either never requested, or requested pre-build and still queued - see
-		// Atlas::requestMSDF()). Set once Atlas::requestMSDF() actually renders the tile.
-		int msdfLayer = -1;
-
-		// Em-space SDF range used when this shape's tile was generated.
-		// Packed alongside msdfLayer into effectData.z for the shader (16 bits per value).
-		slug_t msdfRange = 0_cv;
+		// Baked SDF/MSDF tile for this shape: set by build() when requestSDF() was called for its
+		// key beforehand (and the shape has geometry), empty otherwise. See SDF::Tile for the
+		// sampling contract.
+		std::optional<SDF::Tile> sdf;
 
 		// Original em-space curves, retained post-build and post-load.
 		// Enables canvas::glyphOutline() and strokeText() without re-running font backends.
@@ -1018,36 +1142,6 @@ public:
 	static constexpr uint32_t GRADIENT_STRIP_WIDTH = 256;
 
 	// --------------------------------------------------------------------------------------------
-	// Raw texture descriptor returned after build() is called.
-	//
-	// The `bytes` member holds the complete pixel data in row-major order, ready to be uploaded to
-	// a GPU texture (width/height are in texels); `format` tells the graphics backend how to
-	// interpret the bytes:
-	//
-	// RGBA32F - four 32-bit floats per texel (curve texture, default - see setCurveTextureFormat())
-	// RGBA16F - four 16-bit floats per texel (curve texture, opt-in; matches the reference Slug
-	//   format, halves curve-texture memory, real precision tradeoff - see setCurveTextureFormat())
-	// RG16UI - two 16-bit unsigned ints per texel (band texture, current default). B/A are never
-	//   consumed by the shader (indirection entries read only R; headers/curve locations read
-	//   only RG) for any content type, so this is lossless, not a tradeoff like RGBA16F.
-	// RGBA16UI - legacy 4-channel band texture format (2 always-zero trailing channels); no
-	//   longer written by Atlas::packTextures(), kept only to read pre-2026-08-29 .slug/.slugb
-	// --------------------------------------------------------------------------------------------
-	struct TextureData {
-		enum class Format { RGBA32F, RGBA16F, RGBA16UI, RG16UI, RGBA8, RGB32F };
-
-		std::vector<uint8_t> bytes;
-
-		uint32_t width = 0;
-		uint32_t height = 0;
-		uint32_t depth = 0; // >0: array texture (number of layers); 0: 2D texture
-
-		Format format = Format::RGBA32F;
-
-		bool empty() const { return bytes.empty(); }
-	};
-
-	// --------------------------------------------------------------------------------------------
 	// Packing statistics - populated by build(), valid after isBuilt() == true.
 	//
 	// Tracks texture memory usage and alignment waste introduced by
@@ -1057,34 +1151,6 @@ public:
 	// curveTexelsUsed + curveTexelsPadding <= curveTexelsTotal
 	// (total may exceed their sum due to unused space at the end of the last row)
 	// --------------------------------------------------------------------------------------------
-	// Options for SDF/MSDF atlas rasterization. Pass to setSDFOptions() before build().
-	// msdf=false: single-channel SDF (R replicated to RGB8).
-	// msdf=true: 3-channel MSDF (RGB8, reconstruct with median(r,g,b) in shader).
-	// Both paths require SLUGHORN_MSDF=ON (msdfgen). Without it, rasterizeSDFAtlas() is a no-op.
-	struct SDFOptions {
-		uint32_t tileSize = 128;
-		slug_t range = 0.1_cv;
-		uint32_t atlasWidth = 1024;
-		bool msdf = false;
-	};
-
-	// UV record for one shape tile inside the packed SDF atlas texture.
-	struct SDFRecord {
-		// top-left corner (texels)
-		uint32_t atlasX = 0, atlasY = 0;
-		// tile dimensions (texels)
-		uint32_t tileW = 0, tileH = 0;
-	};
-
-	// Packed SDF/MSDF texture + per-shape UV records.
-	// Populated by build() when setSDFOptions() was called beforehand.
-	struct SDFAtlas {
-		TextureData texture; // RGB8
-		std::unordered_map<Key, SDFRecord, KeyHash> recs;
-
-		bool empty() const { return recs.empty(); }
-	};
-
 	struct PackingStats {
 		// Which format the curve texture was actually packed in - set by packTextures() from
 		// whatever Atlas::setCurveTextureFormat() was called with (RGBA32F by default).
@@ -1121,18 +1187,8 @@ public:
 		uint32_t gradientCount = 0;
 		uint32_t gradientTexelsTotal = 0;
 
-		// Shelf-packed SDF/MSDF atlas (RGBA8, 4 bytes/texel) - populated by rasterizeSDFAtlas()
-		// when setSDFOptions() was called beforehand. All fields stay 0 otherwise.
-		uint32_t sdfTileCount = 0; // number of shapes with a packed tile
-		uint32_t sdfTexelsUsed = 0; // sum of each tile's w * h
-		uint32_t sdfTexelsPadding = 0; // shelf-packing waste (atlas area not covered by a tile)
-		uint32_t sdfTexelsTotal = 0; // atlas width * height (allocated)
-
-		// Per-shape MSDF Texture2DArray (RGB32F, 12 bytes/texel) - updated incrementally by
-		// requestMSDF() as shapes opt in. All fields stay 0 if never called.
-		uint32_t msdfLayerCount = 0; // number of registered layers
-		uint32_t msdfTileSize = 0; // width == height of each layer
-		uint32_t msdfTexelsTotal = 0; // tileSize * tileSize * msdfLayerCount
+		// Baked SDF/MSDF tile texture - see SDF. All zero if requestSDF() was never called.
+		SDF::Stats sdf;
 
 		// Scanline Sweeper curve texture (RGBA32F, same format as curveTexels; no band indirection).
 		// Sequential: 2 texels per monotonic quadratic, no alignment gaps.
@@ -1153,13 +1209,6 @@ public:
 			;
 		}
 
-		slug_t sdfUtilization() const {
-			return sdfTexelsTotal
-				? cv(sdfTexelsUsed) / cv(sdfTexelsTotal)
-				: 0.f
-			;
-		}
-
 		// Fraction of live texels that are padding (not curve data) [0, 1]. High values suggest
 		// band count or shape ordering could be improved.
 		slug_t curvePaddingRatio() const {
@@ -1174,12 +1223,6 @@ public:
 			return live ? cv(bandTexelsPadding) / cv(live) : 0.f;
 		}
 
-		slug_t sdfPaddingRatio() const {
-			const uint32_t live = sdfTexelsUsed + sdfTexelsPadding;
-
-			return live ? cv(sdfTexelsPadding) / cv(live) : 0.f;
-		}
-
 		// GPU bytes allocated per channel, derived from each channel's texture format.
 		size_t curveBytes() const {
 			return size_t(curveTexelsTotal) * (curveFormat == TextureData::Format::RGBA16F ? 8 : 16);
@@ -1188,15 +1231,13 @@ public:
 			return size_t(bandTexelsTotal) * (bandFormat == TextureData::Format::RGBA16UI ? 8 : 4);
 		}
 		size_t gradientBytes() const { return size_t(gradientTexelsTotal) * 4; } // RGBA8
-		size_t sdfBytes() const { return size_t(sdfTexelsTotal) * 4; } // RGBA8
-		size_t msdfBytes() const { return size_t(msdfTexelsTotal) * 12; } // RGB32F
 		size_t scanlineBytes() const { return size_t(scanlineTexelsTotal) * 16; } // RGBA32F
 
 		// Total GPU memory across every channel.
 		size_t totalBytes() const {
 			return
 				curveBytes() + bandBytes() + gradientBytes() +
-				sdfBytes() + msdfBytes() + scanlineBytes()
+				sdf.bytes() + scanlineBytes()
 			;
 		}
 	};
@@ -1300,15 +1341,6 @@ public:
 	// Must be called before build(). Gradients are rasterized into the gradient atlas texture
 	// during build(); adding one after build() has no effect on rendering.
 	uint32_t addGradient(const GradientInfo& info);
-
-	// Opt in to SDF/MSDF atlas generation. Must be called before build().
-	// When set, build() will call rasterizeSDFAtlas() after packTextures(), producing a packed
-	// RGB8 texture retrievable via getSDFAtlasData(). Throws if called after build().
-	void setSDFOptions(const SDFOptions& opts) {
-		if(_built) throw std::runtime_error("Atlas::setSDFOptions: must be called before build()");
-
-		_sdfOptions = opts;
-	}
 
 	// Selects the curve texture's storage format. Must be called before build(); throws after.
 	//
@@ -1446,70 +1478,33 @@ public:
 	const TextureData& getBandTextureData() const { return _bandData; }
 	const TextureData& getGradientTextureData() const { return _gradientData; }
 	const TextureData& getScanlineCurveTextureData() const { return _scanlineCurveData; }
-	const SDFAtlas& getSDFAtlasData() const { return _sdfAtlas; }
 
 	// --------------------------------------------------------------------------------------------
-	// Per-shape MSDF opt-in (requires SLUGHORN_MSDF=ON)
+	// SDF opt-in (authoring time only)
 	//
-	// Call setMSDFTileSize() once before the first requestMSDF() call to set the tile dimensions
-	// for the entire atlas. All layers in a sampler2DArray must be identical - mixing sizes
-	// is a hard GPU constraint. Defaults to 128 if never called.
+	// setSDF() configures the whole Atlas once (any time before build(); optional - the defaults
+	// are SDF::Config's). requestSDF() opts individual shapes in, and must ALSO be called before
+	// build(): build() renders every requested tile (in parallel when built with
+	// SLUGHORN_HAS_PARALLEL), shelf-packs them into one texture, and fills in Shape::sdf and
+	// getSDF(). Requests are idempotent per key (the first range wins); a shape with no geometry
+	// simply gets no tile. `range` is the em-space distance range, defaulting to
+	// SDF::Config::range.
 	//
-	// Call requestMSDF() for each shape whenever it's convenient - authoring time (before
-	// build(), the common case: right after addShape()/Canvas::fill()/Canvas::mask() commits the
-	// shape) or after build(), same as the old registerMSDF() name required. Pre-build calls are
-	// queued and actually rendered inside build() itself (tile rendering needs each shape's final
-	// position in the packed atlas texture, which build() computes); post-build calls render
-	// immediately, same as before. Either way there is no second "remember to come back after
-	// build()" step - requestMSDF() is safe to call exactly once, wherever it's naturally reached
-	// in authoring order.
-	// range controls the em-space spread of the distance gradient (default 0.1).
-	// coloring selects the msdfgen edge-coloring algorithm: ByDistance eliminates corner
-	// spike artifacts at the cost of slightly more CPU work; Simple is faster but prone
-	// to artifacts at convex corners.
+	// Baking needs the msdfgen-backed generator (SLUGHORN_SDF=ON); without it requestSDF() throws.
+	// Reading an already-baked atlas back from disk never needs it.
 	//
-	// getMSDFTextureData() packs registered tiles into a single RGB32F TextureData on first
-	// call (lazy). depth == number of layers; width == height == tileSize.
-	//
-	// Shape::msdfLayer is updated in-place once a tile is actually rendered, so callers can read
-	// it from getShape() without a separate lookup - but note that for a pre-build requestMSDF()
-	// call, that update doesn't happen until build() drains the queue, not at the requestMSDF()
-	// call site itself.
+	// TODO: OPTIMIZE ME LATER! The tile texture is stored as 32-bit floats (R32F / RGB32F, 4 / 12
+	// bytes per texel). 8 or 16 bits per channel would cut that 2-4x and is almost certainly enough
+	// for a distance field, but it is NOT verified yet - and changes what a frontend uploads.
 	// --------------------------------------------------------------------------------------------
+	void setSDF(const SDF::Config& config);
 
-#ifdef SLUGHORN_HAS_MSDF
-	enum class MSDFEdgeColoring { Simple, ByDistance };
+	void requestSDF(Key key, std::optional<slug_t> range={});
+	void requestSDF(const std::vector<Key>& keys, std::optional<slug_t> range={});
 
-	void setMSDFTileSize(uint32_t tileSize);
-	uint32_t getMSDFTileSize() const;
-
-	// Returns the assigned layer index once rendered, or -1 if the call was queued (pre-build)
-	// rather than rendered immediately - read Shape::msdfLayer via getShape() after build() to
-	// recover it in that case.
-	int requestMSDF(
-		Key key,
-		slug_t range=0.1_cv,
-		MSDFEdgeColoring coloring=MSDFEdgeColoring::ByDistance
-	);
-
-	void requestMSDF(
-		const std::vector<Key>& keys,
-		slug_t range=0.1_cv,
-		MSDFEdgeColoring coloring=MSDFEdgeColoring::ByDistance
-	);
-
-	const TextureData& getMSDFTextureData() const;
-#endif
-
-	// Always available; returns -1 when SLUGHORN_MSDF is off or the shape was not registered.
-	int getMSDFLayer(Key key) const {
-#ifdef SLUGHORN_HAS_MSDF
-		auto it = _msdfLayerMap.find(key);
-
-		if(it != _msdfLayerMap.end()) return it->second;
-#endif
-		return -1;
-	}
+	// The baked result: config + texture (empty if nothing was baked). Per-shape tiles are on
+	// Shape::sdf, via getShape()/getShapes().
+	const SDF& getSDF() const { return _sdf; }
 
 	// Gradient list (valid after build() if any gradients were registered).
 	const std::vector<GradientInfo>& getGradients() const { return _gradients; }
@@ -1542,7 +1537,7 @@ public:
 		TextureData curveData;
 		TextureData bandData;
 		TextureData gradientData;
-		TextureData msdfData;
+		SDF sdf;
 		PackingStats packingStats;
 		std::unordered_map<Key, Shape, KeyHash> shapes;
 		std::unordered_map<Key, CompositeShape, KeyHash> composites;
@@ -1563,17 +1558,7 @@ public:
 		_packingStats = sd.packingStats;
 		_shapes = std::move(sd.shapes);
 		_compositeShapes = std::move(sd.composites);
-#ifdef SLUGHORN_HAS_MSDF
-		if(!sd.msdfData.bytes.empty()) {
-			_msdfData = std::move(sd.msdfData);
-			_msdfDirty = false;
-			_msdfTileSize = _packingStats.msdfTileSize;
-
-			for(const auto& [key, shape] : _shapes) {
-				if(shape.msdfLayer >= 0) _msdfLayerMap[key] = shape.msdfLayer;
-			}
-		}
-#endif
+		_sdf = std::move(sd.sdf);
 		_built = true;
 	}
 
@@ -1617,15 +1602,7 @@ private:
 
 	void packTextures();
 	void rasterizeGradients();
-	void rasterizeSDFAtlas();
-
-#ifdef SLUGHORN_HAS_MSDF
-	// Shared core of requestMSDF()'s immediate path and build()'s drain of _pendingMSDF: filters
-	// already-registered keys, renders remaining tiles (parallel when SLUGHORN_HAS_PARALLEL),
-	// commits serially for deterministic layer ordering. Assumes every key already exists in
-	// _shapes - callers are responsible for that check (differs by pre/post-build call site).
-	void _commitMSDF(const std::vector<Key>& keys, slug_t range, MSDFEdgeColoring coloring);
-#endif
+	void bakeSDF();
 
 	// --------------------------------------------------------------------------------------------
 	// Data
@@ -1641,21 +1618,13 @@ private:
 
 	std::vector<GradientInfo> _gradients;
 
-	std::optional<SDFOptions> _sdfOptions;
-	SDFAtlas _sdfAtlas;
+	SDF _sdf;
 
-#ifdef SLUGHORN_HAS_MSDF
-	std::unordered_map<Key, int, KeyHash> _msdfLayerMap;
-	std::vector<std::vector<slug_t>> _msdfTileData; // raw RGB32F floats per registered tile
-	uint32_t _msdfTileSize = 0;
-	mutable TextureData _msdfData; // packed lazily by getMSDFTextureData()
-	mutable bool _msdfDirty = false; // set true once a tile is actually rendered, cleared on pack
-
-	// requestMSDF() calls made before build() - rendered has no valid atlas-texture position for
-	// a shape until build()'s packTextures() runs, so these wait and get drained there instead.
-	struct PendingMSDF { Key key; slug_t range; MSDFEdgeColoring coloring; };
-	std::vector<PendingMSDF> _pendingMSDF;
-#endif
+	// requestSDF() calls, in request order. Baked in build() once every shape's final position is
+	// known (and because tile generation is the expensive part, all at once, in parallel).
+	struct SDFRequest { Key key; std::optional<slug_t> range; };
+	std::vector<SDFRequest> _sdfRequests;
+	std::unordered_set<Key, KeyHash> _sdfRequested;
 
 	PackingStats _packingStats; // populated by packTextures()
 
@@ -2264,14 +2233,12 @@ inline std::ostream& operator<<(std::ostream& os, const Atlas::PackingStats& p) 
 		<< " gradient" << (p.gradientCount != 1 ? "s" : "")
 		<< " (" << Atlas::GRADIENT_STRIP_WIDTH << "x" << p.gradientCount
 		<< " RGBA8, " << p.gradientTexelsTotal << " texels)"
-		<< " | sdf: " << p.sdfTileCount << " tile" << (p.sdfTileCount != 1 ? "s" : "")
-		<< " (" << p.sdfTexelsUsed << " used"
-		<< " + " << p.sdfTexelsPadding << " padding"
-		<< " / " << p.sdfTexelsTotal << " total"
-		<< " RGBA8, " << int(p.sdfUtilization() * 100.f) << "% util)"
-		<< " | msdf: " << p.msdfLayerCount << " layer" << (p.msdfLayerCount != 1 ? "s" : "")
-		<< " (" << p.msdfTileSize << "x" << p.msdfTileSize << " RGB32F, "
-		<< p.msdfTexelsTotal << " texels)"
+		<< " | sdf: " << p.sdf.tileCount << " tile" << (p.sdf.tileCount != 1 ? "s" : "")
+		<< " (" << p.sdf.texelsUsed << " used"
+		<< " + " << p.sdf.texelsPadding << " padding"
+		<< " / " << p.sdf.texelsTotal << " total"
+		<< " " << (p.sdf.type == Atlas::SDF::Type::MSDF ? "MSDF " : "SDF ") << p.sdf.format
+		<< ", " << int(p.sdf.utilization() * 100.f) << "% util)"
 		<< " | scanline: " << p.scanlineTexelsTotal << " texels RGBA32F"
 		<< " | total: " << (static_cast<double>(p.totalBytes()) / 1024.0 / 1024.0) << " MiB"
 		<< ")"
@@ -2286,6 +2253,7 @@ inline std::ostream& operator<<(std::ostream& os, Atlas::TextureData::Format for
 		case Atlas::TextureData::Format::RG16UI: return os << "RG16UI";
 		case Atlas::TextureData::Format::RGBA8: return os << "RGBA8";
 		case Atlas::TextureData::Format::RGB32F: return os << "RGB32F";
+		case Atlas::TextureData::Format::R32F: return os << "R32F";
 	}
 
 	return os << "TextureData::Format(?)";

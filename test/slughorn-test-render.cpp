@@ -163,54 +163,51 @@ static int runInMemory() {
 		assert(center >= 0.5_cv && "triangle center should have high coverage");
 	}
 
-#ifdef SLUGHORN_HAS_MSDF
-	// --- Circle SDF (msdfgen path) ---
-	{
-		auto grid = slughorn::render::renderSDF(atlas, Key("circle"), 64);
+#ifdef SLUGHORN_HAS_SDF
+	// --- Circle SDF / MSDF via render::field (msdfgen path) ---
+	for(const auto type : {slughorn::Atlas::SDF::Type::SDF, slughorn::Atlas::SDF::Type::MSDF}) {
+		const bool msdf = type == slughorn::Atlas::SDF::Type::MSDF;
 
-		assert(grid.width > 0 && grid.height > 0 && "renderSDF returned empty grid");
+		slughorn::Atlas::SDF::Config config;
 
-		const slug_t center = grid.at(grid.height / 2, grid.width / 2);
-		const slug_t corner = grid.at(0, 0);
+		config.type = type;
+		config.tileSize = 64;
 
-		std::cout << "\ncircle SDF (" << grid.width << 'x' << grid.height << "):\n";
-		std::cout << " center=" << center << " corner=" << corner << '\n';
+		const auto field = slughorn::render::field(atlas, Key("circle"), config, config.range);
 
-		assert(center > 0.5_cv && "SDF circle center should be interior (> 0.5)");
-		assert(corner < 0.5_cv && "SDF circle corner should be exterior (< 0.5)");
+		assert(field.width > 0 && field.height > 0 && "render::field returned an empty field");
+		assert(field.channels == (msdf ? 3u : 1u) && "channel count must follow the SDF type");
 
-		std::cout << "Circle SDF checks passed.\n";
-	}
-
-	// --- Circle MSDF (msdfgen path) ---
-	{
-		auto grid = slughorn::render::renderMSDF(atlas, Key("circle"), 64);
-
-		assert(grid.width > 0 && grid.height > 0 && "renderMSDF returned empty grid");
-
-		// Reconstruct signed distance via median(r,g,b) — same as the shader.
+		// Reconstruct the signed distance the way the shader does: .r for SDF, median(r, g, b) for
+		// MSDF.
 		auto median = [](float a, float b, float c) {
 			return std::max(std::min(a, b), std::min(std::max(a, b), c));
 		};
 
-		const float centerSd = median(
-			grid.at(grid.height / 2, grid.width / 2, 0),
-			grid.at(grid.height / 2, grid.width / 2, 1),
-			grid.at(grid.height / 2, grid.width / 2, 2)
+		auto sd = [&](uint32_t row, uint32_t col) {
+			return msdf
+				? median(field.at(row, col, 0), field.at(row, col, 1), field.at(row, col, 2))
+				: field.at(row, col, 0)
+			;
+		};
+
+		const float centerSd = sd(field.height / 2, field.width / 2);
+		const float cornerSd = sd(0, 0);
+
+		std::cout << "\ncircle " << (msdf ? "MSDF" : "SDF") << " (" << field.width << 'x'
+			<< field.height << "): center=" << centerSd << " corner=" << cornerSd << '\n';
+
+		assert(centerSd > 0.5f && "circle center should be interior (> 0.5)");
+		assert(cornerSd < 0.5f && "circle corner should be exterior (< 0.5)");
+
+		// One uniform scale: the tile is (ceil(extent * scale)) texels on each axis.
+		assert(
+			std::max(field.width, field.height) == config.tileSize &&
+			"the longer tile axis must be tileSize"
 		);
-		const float cornerSd = median(
-			grid.at(0, 0, 0),
-			grid.at(0, 0, 1),
-			grid.at(0, 0, 2)
-		);
+		assert(field.texelsPerEm > 0_cv && "texelsPerEm must be set");
 
-		std::cout << "\ncircle MSDF (" << grid.width << 'x' << grid.height << "):\n";
-		std::cout << " center median=" << centerSd << " corner median=" << cornerSd << '\n';
-
-		assert(centerSd > 0.5f && "MSDF circle center median should be interior (> 0.5)");
-		assert(cornerSd < 0.5f && "MSDF circle corner median should be exterior (< 0.5)");
-
-		std::cout << "Circle MSDF checks passed.\n";
+		std::cout << "Circle " << (msdf ? "MSDF" : "SDF") << " checks passed.\n";
 	}
 #endif
 

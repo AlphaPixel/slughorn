@@ -53,12 +53,16 @@
 //       { "byteOffset": 0,    "byteLength": N, "format": "RGBA32F",  "width": 512, "height": H },
 //       { "byteOffset": N,    "byteLength": M, "format": "RG16UI",   "width": 512, "height": H },
 //       { "byteOffset": ...,  "byteLength": P, "format": "RGBA8",    "width": 512, "height": H },  // optional gradient
-//       { "byteOffset": ...,  "byteLength": Q, "format": "RGB32F",   "width": T,   "height": T, "depth": L } // optional MSDF array
+//       { "byteOffset": ...,  "byteLength": Q, "format": "RGB32F",   "width": W,   "height": H }  // optional SDF/MSDF tile atlas (R32F for a single-channel SDF)
 //     ],
 //     "curve_texture": 0,
 //     "band_texture":  1,
 //     "gradient_texture": 2,   // optional
-//     "msdf_texture": 2,       // optional (index depends on whether gradient is present)
+//     "sdf": {                 // optional; only when requestSDF() was used before build()
+//       "texture": 2,          // bufferViews index (depends on whether gradient is present)
+//       "type": "MSDF",        // "SDF" | "MSDF"
+//       "tile_size": 128, "atlas_width": 2048, "gutter": 2, "range": 0.1, "coloring": "by_distance"
+//     },
 //     "shapes": [
 //       {
 //         "key": { "type": "codepoint", "value": 70 },
@@ -68,7 +72,8 @@
 //         "band_offset_x": 0.0, "band_offset_y": 0.0,
 //         "bearing_x": 0.0, "bearing_y": 0.7,
 //         "width": 1.0, "height": 0.7, "advance": 1.0,
-//         "msdf_layer": 0, "msdf_range": 0.1  // optional; only when requestMSDF() was called
+//         "sdf": { "x": 2, "y": 2, "w": 128, "h": 96, "range": 0.1, "texels_per_em": 120.0,
+//                  "em_origin_x": -0.1, "em_origin_y": -0.1 }  // optional; this shape's tile
 //       }
 //     ],
 //     "composites": [
@@ -255,8 +260,25 @@ Atlas::TextureData::Format textureFormatFromString(const std::string& fmt) {
 	if(fmt == "RG16UI") return Atlas::TextureData::Format::RG16UI;
 	if(fmt == "RGBA8") return Atlas::TextureData::Format::RGBA8;
 	if(fmt == "RGB32F") return Atlas::TextureData::Format::RGB32F;
+	if(fmt == "R32F") return Atlas::TextureData::Format::R32F;
 
 	throw std::runtime_error("slughorn-serial: unknown texture format '" + fmt + "'");
+}
+
+const char* sdfTypeToString(Atlas::SDF::Type t) {
+	return t == Atlas::SDF::Type::MSDF ? "MSDF" : "SDF";
+}
+
+Atlas::SDF::Type sdfTypeFromString(const std::string& s) {
+	return s == "SDF" ? Atlas::SDF::Type::SDF : Atlas::SDF::Type::MSDF;
+}
+
+const char* sdfColoringToString(Atlas::SDF::Coloring c) {
+	return c == Atlas::SDF::Coloring::Simple ? "simple" : "by_distance";
+}
+
+Atlas::SDF::Coloring sdfColoringFromString(const std::string& s) {
+	return s == "simple" ? Atlas::SDF::Coloring::Simple : Atlas::SDF::Coloring::ByDistance;
 }
 
 json packingStatsToJson(const Atlas::PackingStats& p) {
@@ -273,13 +295,14 @@ json packingStatsToJson(const Atlas::PackingStats& p) {
 		{"band_max_offset", p.bandMaxOffset},
 		{"gradient_count", p.gradientCount},
 		{"gradient_texels_total", p.gradientTexelsTotal},
-		{"sdf_tile_count", p.sdfTileCount},
-		{"sdf_texels_used", p.sdfTexelsUsed},
-		{"sdf_texels_padding", p.sdfTexelsPadding},
-		{"sdf_texels_total", p.sdfTexelsTotal},
-		{"msdf_layer_count", p.msdfLayerCount},
-		{"msdf_tile_size", p.msdfTileSize},
-		{"msdf_texels_total", p.msdfTexelsTotal}
+		{"sdf", {
+			{"type", sdfTypeToString(p.sdf.type)},
+			{"format", detail::to_sstr(p.sdf.format)},
+			{"tile_count", p.sdf.tileCount},
+			{"texels_used", p.sdf.texelsUsed},
+			{"texels_padding", p.sdf.texelsPadding},
+			{"texels_total", p.sdf.texelsTotal}
+		}}
 	};
 }
 
@@ -298,13 +321,17 @@ Atlas::PackingStats packingStatsFromJson(const json& j) {
 	p.bandMaxOffset = j.value("band_max_offset", 0u);
 	p.gradientCount = j.value("gradient_count", 0u);
 	p.gradientTexelsTotal = j.value("gradient_texels_total", 0u);
-	p.sdfTileCount = j.value("sdf_tile_count", 0u);
-	p.sdfTexelsUsed = j.value("sdf_texels_used", 0u);
-	p.sdfTexelsPadding = j.value("sdf_texels_padding", 0u);
-	p.sdfTexelsTotal = j.value("sdf_texels_total", 0u);
-	p.msdfLayerCount = j.value("msdf_layer_count", 0u);
-	p.msdfTileSize = j.value("msdf_tile_size", 0u);
-	p.msdfTexelsTotal = j.value("msdf_texels_total", 0u);
+
+	if(j.contains("sdf")) {
+		const json& js = j.at("sdf");
+
+		p.sdf.type = sdfTypeFromString(js.value("type", std::string("MSDF")));
+		p.sdf.format = textureFormatFromString(js.value("format", std::string("RGB32F")));
+		p.sdf.tileCount = js.value("tile_count", 0u);
+		p.sdf.texelsUsed = js.value("texels_used", 0u);
+		p.sdf.texelsPadding = js.value("texels_padding", 0u);
+		p.sdf.texelsTotal = js.value("texels_total", 0u);
+	}
 
 	return p;
 }
@@ -341,18 +368,14 @@ json buildJson(
 	uint32_t curveByteOffset=0,
 	uint32_t bandByteOffset=0,
 	uint32_t gradByteOffset=0,
-	uint32_t msdfByteOffset=0
+	uint32_t sdfByteOffset=0
 ) {
 	const Atlas::TextureData& curve = atlas.getCurveTextureData();
 	const Atlas::TextureData& band = atlas.getBandTextureData();
 	const Atlas::TextureData& grad = atlas.getGradientTextureData();
 	const bool hasGradients = !grad.bytes.empty();
-#ifdef SLUGHORN_HAS_MSDF
-	const Atlas::TextureData& msdf = atlas.getMSDFTextureData();
-	const bool hasMSDF = !msdf.bytes.empty();
-#else
-	const bool hasMSDF = false;
-#endif
+	const Atlas::SDF& sdf = atlas.getSDF();
+	const bool hasSDF = !sdf.texture.bytes.empty();
 
 	json j;
 
@@ -414,29 +437,35 @@ json buildJson(
 		j["gradient_texture"] = 2;
 	}
 
-#ifdef SLUGHORN_HAS_MSDF
-	if(hasMSDF) {
-		const size_t msdfBvIdx = bufferViews.size();
+	if(hasSDF) {
+		const size_t sdfBvIdx = bufferViews.size();
 
-		json bvMSDF = {
-			{"byteLength", msdf.bytes.size()},
-			{"format", "RGB32F"},
-			{"width", msdf.width},
-			{"height", msdf.height},
-			{"depth", msdf.depth}
+		json bvSDF = {
+			{"byteLength", sdf.texture.bytes.size()},
+			{"format", detail::to_sstr(sdf.texture.format)},
+			{"width", sdf.texture.width},
+			{"height", sdf.texture.height}
 		};
 
 		if(embedBase64) {
-			bvMSDF["byteOffset"] = 0;
-			bvMSDF["data"] = base64Encode(msdf.bytes);
+			bvSDF["byteOffset"] = 0;
+			bvSDF["data"] = base64Encode(sdf.texture.bytes);
 		}
 
-		else bvMSDF["byteOffset"] = msdfByteOffset;
+		else bvSDF["byteOffset"] = sdfByteOffset;
 
-		bufferViews.push_back(bvMSDF);
-		j["msdf_texture"] = msdfBvIdx;
+		bufferViews.push_back(bvSDF);
+
+		j["sdf"] = {
+			{"texture", sdfBvIdx},
+			{"type", sdfTypeToString(sdf.config.type)},
+			{"tile_size", sdf.config.tileSize},
+			{"atlas_width", sdf.config.atlasWidth},
+			{"gutter", sdf.config.gutter},
+			{"range", sdf.config.range},
+			{"coloring", sdfColoringToString(sdf.config.coloring)}
+		};
 	}
-#endif
 
 	j["bufferViews"] = bufferViews;
 	j["curve_texture"] = 0;
@@ -501,9 +530,17 @@ json buildJson(
 			{"origin", {{"type", originType}, {"x", shape.origin.x}, {"y", shape.origin.y}}}
 		};
 
-		if(shape.msdfLayer >= 0) {
-			jshape["msdf_layer"] = shape.msdfLayer;
-			jshape["msdf_range"] = shape.msdfRange;
+		if(shape.sdf) {
+			jshape["sdf"] = {
+				{"x", shape.sdf->x},
+				{"y", shape.sdf->y},
+				{"w", shape.sdf->w},
+				{"h", shape.sdf->h},
+				{"range", shape.sdf->range},
+				{"texels_per_em", shape.sdf->texelsPerEm},
+				{"em_origin_x", shape.sdf->emOriginX},
+				{"em_origin_y", shape.sdf->emOriginY}
+			};
 		}
 
 		shapes.push_back(std::move(jshape));
@@ -595,7 +632,18 @@ Atlas atlasFromJson(
 	sd.packingStats = packingStatsFromJson(j.at("packing_stats"));
 
 	if(j.contains("gradient_texture")) sd.gradientData = loadTexture(j.at("gradient_texture"));
-	if(j.contains("msdf_texture")) sd.msdfData = loadTexture(j.at("msdf_texture"));
+
+	if(j.contains("sdf")) {
+		const json& jsdf = j.at("sdf");
+
+		sd.sdf.texture = loadTexture(jsdf.at("texture"));
+		sd.sdf.config.type = sdfTypeFromString(jsdf.value("type", std::string("MSDF")));
+		sd.sdf.config.tileSize = jsdf.value("tile_size", sd.sdf.config.tileSize);
+		sd.sdf.config.atlasWidth = jsdf.value("atlas_width", sd.sdf.config.atlasWidth);
+		sd.sdf.config.gutter = jsdf.value("gutter", sd.sdf.config.gutter);
+		sd.sdf.config.range = jsdf.value("range", sd.sdf.config.range);
+		sd.sdf.config.coloring = sdfColoringFromString(jsdf.value("coloring", std::string("by_distance")));
+	}
 
 	if(j.contains("gradients")) {
 		for(const json& jg : j.at("gradients")) {
@@ -648,8 +696,21 @@ Atlas atlasFromJson(
 		shape.advance = js.at("advance");
 		shape.originX = js.value("origin_x", 0_cv);
 		shape.originY = js.value("origin_y", 0_cv);
-		shape.msdfLayer = js.value("msdf_layer", -1);
-		shape.msdfRange = js.value("msdf_range", 0_cv);
+
+		if(js.contains("sdf")) {
+			const json& jt = js.at("sdf");
+
+			shape.sdf = Atlas::SDF::Tile{
+				.x = jt.at("x").get<uint32_t>(),
+				.y = jt.at("y").get<uint32_t>(),
+				.w = jt.at("w").get<uint32_t>(),
+				.h = jt.at("h").get<uint32_t>(),
+				.range = jt.at("range").get<slug_t>(),
+				.texelsPerEm = jt.at("texels_per_em").get<slug_t>(),
+				.emOriginX = jt.at("em_origin_x").get<slug_t>(),
+				.emOriginY = jt.at("em_origin_y").get<slug_t>()
+			};
+		}
 
 		if(js.contains("origin")) {
 			const auto& jo = js.at("origin");
@@ -790,18 +851,15 @@ void writeBinary(const Atlas& atlas, std::ostream& out) {
 
 	if(!grad.bytes.empty()) binData.insert(binData.end(), grad.bytes.begin(), grad.bytes.end());
 
-#ifdef SLUGHORN_HAS_MSDF
-	const Atlas::TextureData& msdfBin = atlas.getMSDFTextureData();
-	const uint32_t msdfByteOffset = static_cast<uint32_t>(binData.size());
-	if(!msdfBin.bytes.empty()) binData.insert(binData.end(), msdfBin.bytes.begin(), msdfBin.bytes.end());
-#else
-	const uint32_t msdfByteOffset = 0;
-#endif
+	const Atlas::TextureData& sdfBin = atlas.getSDF().texture;
+	const uint32_t sdfByteOffset = static_cast<uint32_t>(binData.size());
+
+	if(!sdfBin.bytes.empty()) binData.insert(binData.end(), sdfBin.bytes.begin(), sdfBin.bytes.end());
 
 	padTo4(binData, 0x00);
 
 	// Build JSON chunk
-	const json j = buildJson(atlas, /*embedBase64=*/false, curveByteOffset, bandByteOffset, gradByteOffset, msdfByteOffset);
+	const json j = buildJson(atlas, /*embedBase64=*/false, curveByteOffset, bandByteOffset, gradByteOffset, sdfByteOffset);
 	const std::string jsonStr = j.dump();
 
 	std::vector<uint8_t> jsonData(jsonStr.begin(), jsonStr.end());

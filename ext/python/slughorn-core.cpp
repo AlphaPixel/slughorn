@@ -385,8 +385,8 @@ void bind_core(py::module_& m) {
 	auto mask_ = py::class_<slughorn::Mask>(m, "Mask")
 		.def(py::init<>())
 		.def_readwrite("key", &slughorn::Mask::key,
-			"Key of a shape whose MSDF tile is used as coverage. "
-			"Required when type == Mask.Type.MSDF."
+			"Key of a shape whose baked SDF/MSDF tile is used as coverage. "
+			"Required when type == Mask.Type.SDFTile."
 		)
 		.def_readwrite("type", &slughorn::Mask::type)
 		.def_property(
@@ -411,13 +411,18 @@ void bind_core(py::module_& m) {
 			"  ArcBand: cx, cy, r, angle_start, angle_end, stroke_half_width\n"
 			"  Hexagon: cx, cy, r, rotation\n"
 			"  Octagon: cx, cy, r, rotation\n"
-			"  Star: cx, cy, r, points, inner_ratio, rotation"
+			"  Star: cx, cy, r, points, inner_ratio, rotation\n"
+			"  SDFTile: ox, oy, scale (canvas-space position of the tile shape's em origin; scale about its center)"
 		)
 		.def_readwrite("invert", &slughorn::Mask::invert,
 			"If True, inverts coverage so the outside of the mask shape becomes the inside.")
-		.def_static("msdf", &slughorn::Mask::msdf,
+		.def_static("sdf_tile", &slughorn::Mask::sdfTile,
 			"key"_a, "invert"_a=false,
-			"Construct a baked-MSDF mask. key must be requested with atlas.request_msdf().")
+			"Construct a baked SDF/MSDF tile mask. key must be requested with atlas.request_sdf()\n"
+			"before build(); the tile carries its own em-space frame, so the only params are\n"
+			"params[0..1] = ox, oy, the canvas-space position of the shape's em-space origin\n"
+			"(Canvas.mask() fills these in; default 0, 0) and params[2] = scale about the tile's\n"
+			"own center (default 1) - the cheap way to animate a baked mask.")
 		.def_static("circle", &slughorn::Mask::circle,
 			"cx"_a, "cy"_a, "r"_a, "invert"_a=false,
 			"Analytical circle mask: center (cx, cy), radius r.")
@@ -449,7 +454,7 @@ void bind_core(py::module_& m) {
 	;
 
 	py::enum_<slughorn::Mask::Type>(mask_, "Type")
-		.value("MSDF", slughorn::Mask::Type::MSDF)
+		.value("SDFTile", slughorn::Mask::Type::SDFTile)
 		.value("Circle", slughorn::Mask::Type::Circle)
 		.value("Rect", slughorn::Mask::Type::Rect)
 		.value("Capsule", slughorn::Mask::Type::Capsule)
@@ -801,6 +806,120 @@ void bind_core(py::module_& m) {
 	// ============================================================================================
 	// slughorn.Shape (Atlas::Shape in C++, flat in Python - read-only)
 	// ============================================================================================
+	// ============================================================================================
+	// slughorn.SDF (Atlas::SDF in C++, flat in Python) - baked distance-field tiles
+	// ============================================================================================
+	auto sdf_ = py::class_<slughorn::Atlas::SDF>(m, "SDF",
+		"The Atlas's baked SDF/MSDF tile texture and its Config; see Atlas.set_sdf() and\n"
+		"Atlas.request_sdf(). Each shape's tile lives on Shape.sdf."
+	);
+
+	// Enums first: pybind11 evaluates default argument values at .def() time.
+	py::enum_<slughorn::Atlas::SDF::Type>(sdf_, "Type",
+		"SDF: one channel (read .r). MSDF: three channels (median of .rgb); keeps sharp corners."
+	)
+		.value("SDF", slughorn::Atlas::SDF::Type::SDF)
+		.value("MSDF", slughorn::Atlas::SDF::Type::MSDF)
+	;
+
+	py::enum_<slughorn::Atlas::SDF::Coloring>(sdf_, "Coloring",
+		"MSDF edge-coloring algorithm. ByDistance: fewer corner artifacts, slightly more CPU\n"
+		"work (recommended default). Simple: faster, prone to artifacts at acute convex corners."
+	)
+		.value("Simple", slughorn::Atlas::SDF::Coloring::Simple)
+		.value("ByDistance", slughorn::Atlas::SDF::Coloring::ByDistance)
+	;
+
+	py::class_<slughorn::Atlas::SDF::Config>(sdf_, "Config",
+		"Atlas-wide SDF baking options; pass to Atlas.set_sdf() before build()."
+	)
+		.def(py::init<>())
+		.def(py::init([](
+			slughorn::Atlas::SDF::Type type,
+			uint32_t tileSize,
+			uint32_t atlasWidth,
+			uint32_t gutter,
+			slug_t range,
+			slughorn::Atlas::SDF::Coloring coloring
+		) {
+			slughorn::Atlas::SDF::Config c;
+
+			c.type = type;
+			c.tileSize = tileSize;
+			c.atlasWidth = atlasWidth;
+			c.gutter = gutter;
+			c.range = range;
+			c.coloring = coloring;
+
+			return c;
+		}),
+			"type"_a=slughorn::Atlas::SDF::Type::MSDF,
+			"tile_size"_a=128,
+			"atlas_width"_a=2048,
+			"gutter"_a=2,
+			"range"_a=0.1,
+			"coloring"_a=slughorn::Atlas::SDF::Coloring::ByDistance
+		)
+		.def_readwrite("type", &slughorn::Atlas::SDF::Config::type,
+			"SDF.Type.SDF or SDF.Type.MSDF (default). One kind per Atlas.")
+		.def_readwrite("tile_size", &slughorn::Atlas::SDF::Config::tileSize,
+			"Longest tile axis, in texels (default 128).")
+		.def_readwrite("atlas_width", &slughorn::Atlas::SDF::Config::atlasWidth,
+			"Texture width in texels (default 2048); the atlas grows in height as tiles shelf-pack.")
+		.def_readwrite("gutter", &slughorn::Atlas::SDF::Config::gutter,
+			"Texels of exterior kept around every tile (default 2).")
+		.def_readwrite("range", &slughorn::Atlas::SDF::Config::range,
+			"Default em-space distance range (default 0.1); request_sdf() may override per shape.")
+		.def_readwrite("coloring", &slughorn::Atlas::SDF::Config::coloring,
+			"MSDF only. SDF.Coloring.ByDistance (default) or .Simple.")
+	;
+
+	py::class_<slughorn::Atlas::SDF::Tile>(sdf_, "Tile",
+		"One shape's baked tile: texels [x, x+w) x [y, y+h) of the SDF texture (row 0 = BOTTOM),\n"
+		"a single uniform scale (texels_per_em) and the em-space point at its bottom-left corner.\n"
+		"Values are clamped to [0, 1]: edge = 0.5, interior > 0.5; +/-range em spans [0, 1]."
+	)
+		.def_readonly("x", &slughorn::Atlas::SDF::Tile::x)
+		.def_readonly("y", &slughorn::Atlas::SDF::Tile::y)
+		.def_readonly("w", &slughorn::Atlas::SDF::Tile::w)
+		.def_readonly("h", &slughorn::Atlas::SDF::Tile::h)
+		.def_readonly("range", &slughorn::Atlas::SDF::Tile::range,
+			"Em-space half-range this tile was baked with.")
+		.def_readonly("texels_per_em", &slughorn::Atlas::SDF::Tile::texelsPerEm)
+		.def_property_readonly("em_origin", [](const slughorn::Atlas::SDF::Tile& t) {
+			return py::make_tuple(t.emOriginX, t.emOriginY);
+		}, "Em-space (x, y) at the tile's bottom-left corner.")
+		.def_property_readonly("pixel_range", &slughorn::Atlas::SDF::Tile::pixelRange,
+			"Total distance range in texels (2 * range * texels_per_em) - what osgx::SDF calls pixelRange.")
+		.def("__repr__", [](const slughorn::Atlas::SDF::Tile& t) {
+			return "SDF.Tile(x=" + std::to_string(t.x) + ", y=" + std::to_string(t.y)
+				+ ", w=" + std::to_string(t.w) + ", h=" + std::to_string(t.h) + ")";
+		})
+	;
+
+	py::class_<slughorn::Atlas::SDF::Stats>(sdf_, "Stats")
+		.def_readonly("type", &slughorn::Atlas::SDF::Stats::type)
+		.def_property_readonly("format", [](const slughorn::Atlas::SDF::Stats& st) {
+			return streamRepr(st.format);
+		}, "Texture format string: 'R32F' (SDF) or 'RGB32F' (MSDF).")
+		.def_readonly("tile_count", &slughorn::Atlas::SDF::Stats::tileCount)
+		.def_readonly("texels_used", &slughorn::Atlas::SDF::Stats::texelsUsed)
+		.def_readonly("texels_padding", &slughorn::Atlas::SDF::Stats::texelsPadding)
+		.def_readonly("texels_total", &slughorn::Atlas::SDF::Stats::texelsTotal)
+		.def("utilization", &slughorn::Atlas::SDF::Stats::utilization)
+		.def("padding_ratio", &slughorn::Atlas::SDF::Stats::paddingRatio)
+		.def("bytes", &slughorn::Atlas::SDF::Stats::bytes)
+	;
+
+	sdf_
+		.def_readonly("config", &slughorn::Atlas::SDF::config)
+		.def_readonly("texture", &slughorn::Atlas::SDF::texture,
+			"The tile atlas as a TextureData (R32F for SDF, RGB32F for MSDF). Empty if nothing was baked.")
+		.def_property_readonly("empty", [](const slughorn::Atlas::SDF& sdf) {
+			return sdf.texture.empty();
+		}, "True if no tile has been baked.")
+	;
+
 	py::class_<slughorn::Atlas::Shape>(m, "Shape")
 		.def_readonly("band_tex_x", &slughorn::Atlas::Shape::bandTexX,
 			"X texel coordinate of this shape's band header block."
@@ -836,17 +955,11 @@ void bind_core(py::module_& m) {
 			"Preserved post-build for diagnostics and computeQuad branching."
 		)
 
-#ifdef SLUGHORN_HAS_MSDF
-		.def_readonly("msdf_layer", &slughorn::Atlas::Shape::msdfLayer,
-			"Texture2DArray layer index for this shape's MSDF tile. "
-			"-1 if request_msdf() has not been called for this key, or was called pre-build and "
-			"is still queued (check after build())."
+		.def_property_readonly("sdf", [](const slughorn::Atlas::Shape& shape) {
+			return shape.sdf;
+		}, "This shape's baked SDF.Tile, or None if request_sdf() was never called for it (or it\n"
+			"has no geometry). Valid after build()."
 		)
-		.def_readonly("msdf_range", &slughorn::Atlas::Shape::msdfRange,
-			"Em-space SDF range used when the MSDF tile was generated. "
-			"0.0 if request_msdf() has not rendered a tile for this key yet."
-		)
-#endif
 
 		// Convenience: recover em-space origin and size (mirrors slug_EmToUV logic)
 		.def_property_readonly("em_origin", [](const slughorn::Atlas::Shape& s) {
@@ -907,9 +1020,10 @@ void bind_core(py::module_& m) {
 				case slughorn::Atlas::TextureData::Format::RG16UI: return "RG16UI";
 				case slughorn::Atlas::TextureData::Format::RGBA8: return "RGBA8";
 				case slughorn::Atlas::TextureData::Format::RGB32F: return "RGB32F";
+				case slughorn::Atlas::TextureData::Format::R32F: return "R32F";
 			}
 			return "unknown";
-		}, "String: 'RGBA16F' (curve), 'RG16UI' (band), 'RGBA8' (gradient), 'RGB32F' (MSDF array).")
+		}, "String: 'RGBA16F' (curve), 'RG16UI' (band), 'RGBA8' (gradient), 'R32F'/'RGB32F' (SDF/MSDF tile atlas).")
 		.def_property_readonly("bytes", [](const slughorn::Atlas::TextureData& td) {
 			return bytesView(td.bytes);
 		}, "Zero-copy memoryview of the raw pixel data (row-major). "
@@ -989,29 +1103,18 @@ void bind_core(py::module_& m) {
 			"Number of registered gradients (0 when none).")
 		.def_readonly("gradient_texels_total", &slughorn::Atlas::PackingStats::gradientTexelsTotal,
 			"Total gradient texture texels (GRADIENT_STRIP_WIDTH * gradient_count).")
-		.def_readonly("sdf_tile_count", &slughorn::Atlas::PackingStats::sdfTileCount,
-			"Number of shapes with a packed SDF/MSDF atlas tile (0 unless set_sdf_options() was used).")
-		.def_readonly("sdf_texels_used", &slughorn::Atlas::PackingStats::sdfTexelsUsed)
-		.def_readonly("sdf_texels_padding", &slughorn::Atlas::PackingStats::sdfTexelsPadding)
-		.def_readonly("sdf_texels_total", &slughorn::Atlas::PackingStats::sdfTexelsTotal)
-		.def_readonly("msdf_layer_count", &slughorn::Atlas::PackingStats::msdfLayerCount,
-			"Number of layers registered via request_msdf() (0 unless used).")
-		.def_readonly("msdf_tile_size", &slughorn::Atlas::PackingStats::msdfTileSize)
-		.def_readonly("msdf_texels_total", &slughorn::Atlas::PackingStats::msdfTexelsTotal)
+		.def_readonly("sdf", &slughorn::Atlas::PackingStats::sdf,
+			"SDF.Stats for the baked tile atlas (all zero unless request_sdf() was used).")
 		.def("curve_utilization", &slughorn::Atlas::PackingStats::curveUtilization)
 		.def("band_utilization", &slughorn::Atlas::PackingStats::bandUtilization)
-		.def("sdf_utilization", &slughorn::Atlas::PackingStats::sdfUtilization)
 		.def("curve_padding_ratio", &slughorn::Atlas::PackingStats::curvePaddingRatio)
 		.def("band_padding_ratio", &slughorn::Atlas::PackingStats::bandPaddingRatio)
-		.def("sdf_padding_ratio", &slughorn::Atlas::PackingStats::sdfPaddingRatio)
 		.def("curve_bytes", &slughorn::Atlas::PackingStats::curveBytes)
 		.def("band_bytes", &slughorn::Atlas::PackingStats::bandBytes)
 		.def("gradient_bytes", &slughorn::Atlas::PackingStats::gradientBytes)
-		.def("sdf_bytes", &slughorn::Atlas::PackingStats::sdfBytes)
-		.def("msdf_bytes", &slughorn::Atlas::PackingStats::msdfBytes)
 		.def("total_bytes", &slughorn::Atlas::PackingStats::totalBytes,
 			"Total GPU memory across every channel, in bytes "
-			"(curve + band + gradient + SDF atlas + MSDF array).")
+			"(curve + band + gradient + SDF tile atlas).")
 		.def("__repr__", [](const slughorn::Atlas::PackingStats& p) { return streamRepr(p); })
 	;
 
@@ -1263,133 +1366,40 @@ void bind_core(py::module_& m) {
 		)
 	;
 
-	// The MSDFEdgeColoring enum must be registered on atlas_ BEFORE the MSDF methods below,
-	// because pybind11 evaluates default argument values at .def() call time and needs
-	// MSDFEdgeColoring to be a known Python type before it appears as a default.
-#ifdef SLUGHORN_HAS_MSDF
-	py::enum_<slughorn::Atlas::MSDFEdgeColoring>(atlas_, "MSDFEdgeColoring",
-		"Edge-coloring algorithm used by msdfgen when generating MSDF tiles.\n\n"
-		"ByDistance: assigns edge colors by measuring angles to all contours - eliminates\n"
-		"corner spike artifacts at the cost of slightly more CPU work. Recommended default.\n"
-		"Simple: uses a greedy angle-threshold approach - faster but prone to artifacts at\n"
-		"convex corners with acute angles."
-	)
-		.value("Simple", slughorn::Atlas::MSDFEdgeColoring::Simple)
-		.value("ByDistance", slughorn::Atlas::MSDFEdgeColoring::ByDistance)
-	;
-
 	atlas_
-		.def_property("msdf_tile_size",
-			&slughorn::Atlas::getMSDFTileSize,
-			&slughorn::Atlas::setMSDFTileSize,
-			"Tile size for MSDF tiles (default 128). All layers in a sampler2DArray must be\n"
-			"identical - hard GPU constraint. Read any time; write only before the first MSDF\n"
-			"tile is actually rendered (see request_msdf()). Setting afterward raises RuntimeError."
+		.def("set_sdf", &slughorn::Atlas::setSDF,
+			"config"_a,
+			"Configure SDF baking for the whole Atlas (kind, tile size, atlas width, gutter, default\n"
+			"range, MSDF coloring). Optional -- the SDF.Config defaults apply otherwise. Call any\n"
+			"time before build(); raises RuntimeError afterward."
 		)
 
-		.def("request_msdf",
-			[](
-				slughorn::Atlas& a,
-				slughorn::Key key,
-				slug_t range,
-				slughorn::Atlas::MSDFEdgeColoring coloring
-			) {
-				return a.requestMSDF(key, range, coloring);
+		.def("request_sdf",
+			[](slughorn::Atlas& a, slughorn::Key key, std::optional<slug_t> range) {
+				a.requestSDF(key, range);
 			},
-			"key"_a, "range"_a=0.1, "coloring"_a=slughorn::Atlas::MSDFEdgeColoring::ByDistance,
-			"Opt this shape in to MSDF tile generation. May be called any time -- before build()\n"
-			"(the common case, right after the shape itself is authored: queued, and actually\n"
-			"rendered inside build() once each shape's packed-atlas position is known) or after\n"
-			"build() (rendered immediately, returning the layer index right away).\n"
-			"range: em-space SDF spread; controls gradient depth and tile bbox margin.\n"
-			"coloring: MSDFEdgeColoring.ByDistance (default, fewer artifacts) or .Simple (faster).\n"
-			"Returns the layer index in the resulting Texture2DArray, or -1 if the call was queued\n"
-			"(read Shape.msdf_layer after build() to recover it in that case).\n"
-			"Shape.msdf_layer and .msdf_range are updated in-place once rendered. Idempotent for\n"
-			"repeated keys."
+			"key"_a, "range"_a=py::none(),
+			"Opt this shape in to SDF/MSDF tile baking. Must be called BEFORE build(), which renders\n"
+			"every requested tile and fills in Shape.sdf and Atlas.sdf. range: em-space distance\n"
+			"range, defaulting to SDF.Config.range. Idempotent per key (the first range wins); a\n"
+			"shape with no geometry simply gets no tile. Raises RuntimeError after build() or when\n"
+			"slughorn was built without SLUGHORN_SDF=ON."
 		)
 
-		.def("request_msdf",
-			[](
-				slughorn::Atlas& a,
-				const std::vector<slughorn::Key>& keys,
-				slug_t range,
-				slughorn::Atlas::MSDFEdgeColoring coloring
-			) {
-				a.requestMSDF(keys, range, coloring);
+		.def("request_sdf",
+			[](slughorn::Atlas& a, const std::vector<slughorn::Key>& keys, std::optional<slug_t> range) {
+				a.requestSDF(keys, range);
 			},
-			"keys"_a, "range"_a=0.1, "coloring"_a=slughorn::Atlas::MSDFEdgeColoring::ByDistance,
-			"Batch overload: request MSDF tiles for a list of keys. May be called any time, same\n"
-			"as the single-key overload. Once rendered (either immediately, if already built, or\n"
-			"inside build() if requested earlier), tiles are rendered in parallel (when built with\n"
-			"SLUGHORN_RENDER_PARALLEL=ON), then committed in deterministic order. Idempotent for\n"
-			"already-registered keys."
+			"keys"_a, "range"_a=py::none(),
+			"Batch overload: request tiles for a list of keys. All keys are validated first, so a\n"
+			"bad key leaves nothing half-requested."
 		)
 
-		.def("get_msdf_layer",
-			[](const slughorn::Atlas& a, slughorn::Key key) { return a.getMSDFLayer(key); },
-			"key"_a,
-			"Return the Texture2DArray layer index for key, or -1 if not registered."
-		)
-
-		.def("get_msdf_texture_data",
-			[](const slughorn::Atlas& a) -> py::object {
-				const auto& td = a.getMSDFTextureData();
-
-				if(td.empty()) return py::none();
-
-				return py::memoryview::from_memory(
-					const_cast<uint8_t*>(td.bytes.data()),
-					static_cast<py::ssize_t>(td.bytes.size())
-				);
-			},
-			"Return a zero-copy memoryview over the packed RGB32F MSDF tile data.\n"
-			"Cast to float32 and reshape to (depth, tile_size, tile_size, 3).\n"
-			"Returns None when no shapes are registered."
-		)
-
-		.def("render_sdf",
-			[](const slughorn::Atlas& a, slughorn::Key key, uint32_t tileSize, slug_t range) {
-				return slughorn::render::renderSDF(a, key, tileSize, range);
-			},
-			"key"_a, "tile_size"_a=128, "range"_a=0.1,
-			"Generate a single-channel SDF tile via msdfgen.\n"
-			"Returns a Grid; use memoryview(grid) for a (H, W) float32 view,\n"
-			"or np.asarray(grid) for NumPy. Edge pixels are ~0.5."
-		)
-
-		.def("render_msdf",
-			[](const slughorn::Atlas& a, slughorn::Key key, uint32_t tileSize, slug_t range) {
-				return slughorn::render::renderMSDF(a, key, tileSize, range);
-			},
-			"key"_a, "tile_size"_a=128, "range"_a=0.1,
-			"Generate a multi-channel SDF tile via msdfgen. Aspect-ratio preserving.\n"
-			"Returns an MSDFGrid; use memoryview(grid) for a (H, W, 3) float32 view,\n"
-			"or np.asarray(grid) for NumPy. Reconstruct in shader: median(r, g, b)."
-		)
-
-		.def("render_msdf_tile",
-			[](
-				const slughorn::Atlas& a,
-				slughorn::Key key,
-				uint32_t tileSize,
-				slug_t range,
-				slughorn::Atlas::MSDFEdgeColoring coloring
-			) {
-				return slughorn::render::renderMSDFTile(a, key, tileSize, range, coloring);
-			},
-			"key"_a,
-			"tile_size"_a=128,
-			"range"_a=0.1,
-			"coloring"_a=slughorn::Atlas::MSDFEdgeColoring::ByDistance,
-			"Generate a square tile_size x tile_size MSDF tile for GPU Texture2DArray use.\n"
-			"Uses anisotropic projection: UV [0,1] fills the tile exactly in both axes.\n"
-			"range: em-space SDF spread; also sets the tile bbox margin to prevent ghost fringes.\n"
-			"coloring: MSDFEdgeColoring.ByDistance (default) or .Simple.\n"
-			"Returns an MSDFGrid; use memoryview(grid) for a (H, W, 3) float32 view."
+		.def_property_readonly("sdf", &slughorn::Atlas::getSDF,
+			py::return_value_policy::reference_internal,
+			"The baked SDF result (config + tile texture). Per-shape tiles are on Shape.sdf."
 		)
 	;
-#endif // SLUGHORN_HAS_MSDF
 
 	// ============================================================================================
 	// slughorn.CurveDecomposer

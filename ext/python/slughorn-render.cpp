@@ -25,30 +25,40 @@ void bind_render(py::module_& render) {
 		})
 	;
 
-#ifdef SLUGHORN_HAS_MSDF
-	py::class_<MSDFGrid>(render, "MSDFGrid", py::buffer_protocol())
-		.def_readonly("width", &MSDFGrid::width)
-		.def_readonly("height", &MSDFGrid::height)
-		.def_buffer([](MSDFGrid& g) -> py::buffer_info {
+#ifdef SLUGHORN_HAS_SDF
+	// A baked SDF/MSDF tile straight from the generator (see slughorn.SDF for the tile contract).
+	// memoryview(field) / np.asarray(field) is always (height, width, channels) float32,
+	// row 0 = BOTTOM; channels == 1 for SDF.Type.SDF, 3 for SDF.Type.MSDF.
+	py::class_<Field>(render, "Field", py::buffer_protocol())
+		.def_readonly("width", &Field::width)
+		.def_readonly("height", &Field::height)
+		.def_readonly("channels", &Field::channels)
+		.def_readonly("range", &Field::range)
+		.def_readonly("texels_per_em", &Field::texelsPerEm)
+		.def_property_readonly("em_origin", [](const Field& f) {
+			return py::make_tuple(f.emOriginX, f.emOriginY);
+		})
+		.def_buffer([](Field& f) -> py::buffer_info {
 			return py::buffer_info(
-				g.data.data(),
-				sizeof(slug_t),
-				py::format_descriptor<slug_t>::format(),
+				f.data.data(),
+				sizeof(float),
+				py::format_descriptor<float>::format(),
 				3,
 				{
-					static_cast<py::ssize_t>(g.height),
-					static_cast<py::ssize_t>(g.width),
-					static_cast<py::ssize_t>(3)
+					static_cast<py::ssize_t>(f.height),
+					static_cast<py::ssize_t>(f.width),
+					static_cast<py::ssize_t>(f.channels)
 				},
 				{
-					static_cast<py::ssize_t>(g.width * 3 * sizeof(slug_t)),
-					static_cast<py::ssize_t>(3 * sizeof(slug_t)),
-					static_cast<py::ssize_t>(sizeof(slug_t))
+					static_cast<py::ssize_t>(f.width * f.channels * sizeof(float)),
+					static_cast<py::ssize_t>(f.channels * sizeof(float)),
+					static_cast<py::ssize_t>(sizeof(float))
 				}
 			);
 		})
-		.def("__repr__", [](const MSDFGrid& g) {
-			return "MSDFGrid(" + std::to_string(g.width) + "x" + std::to_string(g.height) + ")";
+		.def("__repr__", [](const Field& f) {
+			return "Field(" + std::to_string(f.width) + "x" + std::to_string(f.height)
+				+ "x" + std::to_string(f.channels) + ")";
 		})
 	;
 #endif
@@ -168,45 +178,23 @@ void bind_render(py::module_& render) {
 		"Decode a built atlas shape into a slughorn.render.Sampler."
 	);
 
-#ifdef SLUGHORN_HAS_MSDF
-	render.def("sdf",
-		[](const slughorn::Atlas& atlas, slughorn::Key key, uint32_t tileSize, slug_t range) {
-			return slughorn::render::renderSDF(atlas, key, tileSize, range);
-		},
-		"atlas"_a, "key"_a, "tile_size"_a=128, "range"_a=0.1,
-		"Generate a single-channel SDF tile. Aspect-ratio preserving.\n"
-		"Returns a Grid with values in [0, 1]; edge pixels are ~0.5."
-	);
-
-	render.def("msdf",
-		[](const slughorn::Atlas& atlas, slughorn::Key key, uint32_t tileSize, slug_t range) {
-			return slughorn::render::renderMSDF(atlas, key, tileSize, range);
-		},
-		"atlas"_a, "key"_a, "tile_size"_a=128, "range"_a=0.1,
-		"Generate a multi-channel SDF tile. Aspect-ratio preserving.\n"
-		"Returns an MSDFGrid; reconstruct signed distance with median(r, g, b)."
-	);
-
-	render.def("msdf_tile",
+#ifdef SLUGHORN_HAS_SDF
+	render.def("field",
 		[](
 			const slughorn::Atlas& atlas,
 			slughorn::Key key,
-			uint32_t tileSize,
-			slug_t range,
-			slughorn::Atlas::MSDFEdgeColoring coloring
+			std::optional<slughorn::Atlas::SDF::Config> config,
+			std::optional<slug_t> range
 		) {
-			return slughorn::render::renderMSDFTile(atlas, key, tileSize, range, coloring);
+			const slughorn::Atlas::SDF::Config& cfg = config ? *config : atlas.getSDF().config;
+
+			return slughorn::render::field(atlas, key, cfg, range.value_or(cfg.range));
 		},
-		"atlas"_a,
-		"key"_a,
-		"tile_size"_a=128,
-		"range"_a=0.1,
-		"coloring"_a=slughorn::Atlas::MSDFEdgeColoring::ByDistance,
-		"Generate a square tile_size x tile_size MSDF tile for GPU Texture2DArray use.\n"
-		"Uses anisotropic projection: UV [0,1] fills the tile exactly in both axes.\n"
-		"range: em-space SDF spread; also sets the tile bbox margin to prevent ghost fringes.\n"
-		"coloring: Atlas.MSDFEdgeColoring.ByDistance (default) or .Simple.\n"
-		"Returns an MSDFGrid; reconstruct signed distance with median(r, g, b)."
+		"atlas"_a, "key"_a, "config"_a=py::none(), "range"_a=py::none(),
+		"Bake one shape into an SDF/MSDF Field without touching the Atlas (the same generator\n"
+		"build() uses for request_sdf()). config defaults to the Atlas's own SDF.Config; range\n"
+		"defaults to config.range. width == 0 means the shape has no geometry.\n"
+		"Row 0 is the BOTTOM row (GPU convention); flip it yourself for a human-facing image."
 	);
 #endif
 }

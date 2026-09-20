@@ -230,8 +230,8 @@ using slughorn::render::Sample;
 using slughorn::render::Sampler;
 using slughorn::render::Grid;
 
-#ifdef SLUGHORN_HAS_MSDF
-using slughorn::render::MSDFGrid;
+#ifdef SLUGHORN_HAS_SDF
+using slughorn::render::Field;
 #endif
 
 namespace slughorn_python {

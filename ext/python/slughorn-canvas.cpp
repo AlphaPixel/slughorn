@@ -660,31 +660,29 @@ void bind_canvas(py::module_& canvas) {
 			"Set the horizontal advance of the composite being built."
 		)
 
-		// MSDF opt-in + mask authoring -------------------------------------
+		// SDF opt-in + mask authoring --------------------------------------
 
-#ifdef SLUGHORN_HAS_MSDF
-		.def("set_msdf",
-			&slughorn::canvas::Canvas::setMSDF,
-			"enabled"_a, "range"_a=0.1, "coloring"_a=slughorn::Atlas::MSDFEdgeColoring::ByDistance,
+		.def("set_sdf",
+			&slughorn::canvas::Canvas::setSDF,
+			"enabled"_a, "range"_a=0.1,
 			"Toggle: when enabled, every subsequent fill()/stroke()/text()/text_on_path()\n"
-			"commit also requests an MSDF tile for the shape it just registered (see\n"
-			"Atlas.request_msdf()) -- no separate post-build registration loop needed.\n"
-			"Persists like fill style, same convention as auto_metrics: applies until\n"
-			"set_msdf(False) or a new set_msdf() call."
+			"commit also requests an SDF/MSDF tile for the shape it just registered (see\n"
+			"Atlas.request_sdf()); build() bakes them. Which KIND of tile, and its size, are\n"
+			"Atlas-wide (Atlas.set_sdf()). Persists like fill style, same convention as\n"
+			"auto_metrics: applies until set_sdf(False) or a new set_sdf() call."
 		)
-		.def_property_readonly("msdf", &slughorn::canvas::Canvas::getMSDF,
-			"Current set_msdf() enabled state."
+		.def_property_readonly("sdf", &slughorn::canvas::Canvas::getSDF,
+			"Current set_sdf() enabled state."
 		)
-#endif
 
-		// mask() - MSDF form: commits the current path as a baked mask shape.
+		// mask() - SDF-tile form: commits the current path as a baked mask shape.
 		.def("mask",
 			py::overload_cast<slug_t, bool>(&slughorn::canvas::Canvas::mask),
 			"range"_a=0.1, "invert"_a=false,
-			"Commit the current path as an MSDF-baked mask and stage it onto the composite\n"
-			"being built (defineShape() semantics -- no Layer pushed). Auto-generates a key,\n"
-			"derives cx/cy/r from the path's own canvas-space bbox, and requests its MSDF\n"
-			"tile itself -- no separate atlas.request_msdf() call needed afterward.\n"
+			"Commit the current path as a baked SDF-tile mask and stage it onto the composite\n"
+			"being built (defineShape() semantics -- no Layer pushed). Auto-generates a key and\n"
+			"requests its tile itself -- no separate atlas.request_sdf() call needed; build()\n"
+			"bakes it. The tile carries its own frame, so there are no cx/cy/r params to derive.\n"
 			"Returns the constructed Mask (an empty Mask if the path was empty)."
 		)
 		// mask() - procedural/explicit form: stage an already-built Mask.

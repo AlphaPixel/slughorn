@@ -12,7 +12,7 @@
 #include "freetype.hpp"
 #endif
 
-#ifdef SLUGHORN_HAS_MSDF
+#ifdef SLUGHORN_HAS_SDF
 #include "render.hpp"
 #endif
 
@@ -492,24 +492,7 @@ void Atlas::build() {
 
 	packTextures();
 	rasterizeGradients();
-	rasterizeSDFAtlas();
-
-#ifdef SLUGHORN_HAS_MSDF
-	// Drain requestMSDF() calls queued during authoring (pre-build). Grouped by (range, coloring)
-	// so same-parameter requests reuse _commitMSDF's parallel batch path, same as an explicit
-	// requestMSDF(vector<Key>, ...) call would get. Must run after packTextures() (tiles need
-	// each shape's final position in the packed atlas texture) and before _built = true (so the
-	// immediate-path branch in requestMSDF() doesn't fire re-entrantly from within _commitMSDF).
-	if(!_pendingMSDF.empty()) {
-		std::map<std::pair<slug_t, MSDFEdgeColoring>, std::vector<Key>> grouped;
-
-		for(const auto& p : _pendingMSDF) grouped[{p.range, p.coloring}].push_back(p.key);
-
-		for(const auto& [params, keys] : grouped) _commitMSDF(keys, params.first, params.second);
-
-		_pendingMSDF.clear();
-	}
-#endif
+	bakeSDF();
 
 	_built = true;
 }
@@ -597,298 +580,183 @@ void Atlas::rasterizeGradients() {
 }
 
 // ================================================================================================
-// Atlas::rasterizeSDFAtlas
+// Atlas::setSDF / requestSDF / bakeSDF
 //
-// Sprite-sheet packer for SDF/MSDF tiles. Mirrors rasterizeGradients() in structure:
-// called at the tail of build(), no-op if _sdfOptions is not set.
-//
-// Two-pass: render all tiles first (actual dimensions vary from tileSize due to aspect
-// ratio), then shelf-pack into a single RGB8 texture and record SDFRecord per key.
-//
-// Requires SLUGHORN_HAS_MSDF - the C++ DT fallback (Path B) is not yet implemented.
+// See Atlas::SDF (slughorn.hpp) for the tile contract. requestSDF() only records intent;
+// build() -> bakeSDF() renders every requested tile (in parallel when SLUGHORN_HAS_PARALLEL -
+// each tile is fully independent, no shared writes inside the parallel region), then packs them
+// serially, so tile placement is deterministic.
 // ================================================================================================
 
-void Atlas::rasterizeSDFAtlas() {
-#ifdef SLUGHORN_HAS_MSDF
-	if(!_sdfOptions) return;
+void Atlas::setSDF(const SDF::Config& config) {
+	if(_built) throw std::runtime_error("Atlas::setSDF: must be called before build()");
 
-	const auto& opts = *_sdfOptions;
+	if(config.tileSize == 0) throw std::invalid_argument("Atlas::setSDF: tileSize must be > 0");
 
-	struct TileEntry {
-		Key key;
+	// Every tile is at most tileSize wide, so this guarantees a tile always fits on a fresh shelf.
+	if(config.atlasWidth < config.tileSize + 2 * config.gutter) throw std::invalid_argument(
+		"Atlas::setSDF: atlasWidth must fit one full tile plus its gutter on each side"
+	);
 
-		uint32_t w, h;
+	_sdf.config = config;
+}
 
-		std::vector<uint8_t> rgb; // packed RGB8, row-major
-	};
+void Atlas::requestSDF(Key key, std::optional<slug_t> range) {
+#ifndef SLUGHORN_HAS_SDF
+	(void)key;
+	(void)range;
 
-	// Pass 1: rasterize every shape with geometry into RGB8 tiles.
-	std::vector<TileEntry> tiles;
+	throw std::runtime_error("Atlas::requestSDF: slughorn was built without SLUGHORN_SDF=ON");
+#else
+	if(_built) throw std::runtime_error("Atlas::requestSDF: must be called before build()");
 
-	for(const auto& [key, shape] : _shapes) {
-		if(shape.curves.empty()) continue;
+	if(_build.find(key) == _build.end()) throw std::out_of_range(
+		"Atlas::requestSDF: key not found in atlas"
+	);
 
-		TileEntry e;
+	// Idempotent: a repeated key keeps its first request (and its range).
+	if(!_sdfRequested.insert(key).second) return;
 
-		e.key = key;
-
-		if(opts.msdf) {
-			const auto grid = render::renderMSDF(*this, key, opts.tileSize, opts.range);
-
-			e.w = grid.width; e.h = grid.height;
-
-			e.rgb.reserve(e.w * e.h * 3);
-
-			for(uint32_t row = 0; row < e.h; row++) {
-				for(uint32_t col = 0; col < e.w; col++) {
-					e.rgb.push_back(static_cast<uint8_t>(std::clamp(
-						grid.at(row, col, 0) * 255.f,
-						0.f,
-						255.f
-					)));
-					e.rgb.push_back(static_cast<uint8_t>(std::clamp(
-						grid.at(row, col, 1) * 255.f,
-						0.f,
-						255.f
-					)));
-					e.rgb.push_back(static_cast<uint8_t>(std::clamp(
-						grid.at(row, col, 2) * 255.f,
-						0.f,
-						255.f
-					)));
-				}
-			}
-		}
-
-		else {
-			const auto grid = render::renderSDF(*this, key, opts.tileSize, opts.range);
-
-			e.w = grid.width; e.h = grid.height;
-			e.rgb.reserve(e.w * e.h * 3);
-
-			for(uint32_t row = 0; row < e.h; row++) {
-				for(uint32_t col = 0; col < e.w; col++) {
-					const uint8_t v = static_cast<uint8_t>(std::clamp(
-						float(grid.at(row, col)) * 255.f,
-						0.f,
-						255.f
-					));
-
-					e.rgb.push_back(v);
-					e.rgb.push_back(v);
-					e.rgb.push_back(v);
-				}
-			}
-		}
-
-		tiles.push_back(std::move(e));
-	}
-
-	if(tiles.empty()) return;
-
-	// Pass 2: shelf-pack tiles and measure total atlas height.
-	const uint32_t atlasW = opts.atlasWidth;
-	uint32_t cx = 0, cy = 0, rowH = 0, atlasH = 0;
-	uint32_t texelsUsed = 0;
-
-	for(const auto& e : tiles) {
-		if(cx + e.w > atlasW) { cy += rowH; cx = 0; rowH = 0; }
-
-		cx += e.w;
-		rowH = std::max(rowH, e.h);
-		texelsUsed += e.w * e.h;
-	}
-
-	atlasH = cy + rowH;
-
-	// Allocate texture.
-	_sdfAtlas.texture.width = atlasW;
-	_sdfAtlas.texture.height = atlasH;
-	_sdfAtlas.texture.format = TextureData::Format::RGBA8;
-
-	_sdfAtlas.texture.bytes.assign(size_t{atlasW} * atlasH * 4, 0);
-
-	_packingStats.sdfTileCount = static_cast<uint32_t>(tiles.size());
-	_packingStats.sdfTexelsUsed = texelsUsed;
-	_packingStats.sdfTexelsTotal = atlasW * atlasH;
-	_packingStats.sdfTexelsPadding = _packingStats.sdfTexelsTotal - texelsUsed;
-
-	// Pass 3: blit tiles and record SDFRecords.
-	cx = 0; cy = 0; rowH = 0;
-
-	for(const auto& e : tiles) {
-		if(cx + e.w > atlasW) { cy += rowH; cx = 0; rowH = 0; }
-
-		for(uint32_t row = 0; row < e.h; row++) {
-			for(uint32_t col = 0; col < e.w; col++) {
-				const size_t src = (size_t{row} * e.w + col) * 3;
-				const size_t dst = (size_t{cy + row} * atlasW + (cx + col)) * 4;
-
-				_sdfAtlas.texture.bytes[dst + 0] = e.rgb[src + 0];
-				_sdfAtlas.texture.bytes[dst + 1] = e.rgb[src + 1];
-				_sdfAtlas.texture.bytes[dst + 2] = e.rgb[src + 2];
-				_sdfAtlas.texture.bytes[dst + 3] = 255;
-			}
-		}
-
-		_sdfAtlas.recs[e.key] = {cx, cy, e.w, e.h};
-
-		cx += e.w;
-		rowH = std::max(rowH, e.h);
-	}
+	_sdfRequests.push_back({key, range});
 #endif
 }
 
-// ================================================================================================
-// Atlas::setMSDFTileSize / requestMSDF / getMSDFTextureData
-//
-// Per-shape opt-in MSDF generation. setMSDFTileSize() locks in the tile dimensions for the
-// atlas; all layers in a sampler2DArray must be identical (hard GPU constraint).
-// requestMSDF() may be called any time - pre-build calls are queued and rendered inside
-// build() itself (see Atlas::build()'s _pendingMSDF drain); post-build calls render immediately.
-//
-// getMSDFTextureData() packs all registered tiles into a single RGB32F TextureData on first
-// call (lazy). depth == number of layers; width == height == tileSize.
-// ================================================================================================
+void Atlas::requestSDF(const std::vector<Key>& keys, std::optional<slug_t> range) {
+#ifndef SLUGHORN_HAS_SDF
+	(void)keys;
+	(void)range;
 
-#ifdef SLUGHORN_HAS_MSDF
-void Atlas::setMSDFTileSize(uint32_t tileSize) {
-	if(!_msdfTileData.empty()) throw std::runtime_error(
-		"Atlas::setMSDFTileSize: cannot change tile size after MSDF tiles have been rendered"
-	);
+	throw std::runtime_error("Atlas::requestSDF: slughorn was built without SLUGHORN_SDF=ON");
+#else
+	if(_built) throw std::runtime_error("Atlas::requestSDF: must be called before build()");
 
-	_msdfTileSize = tileSize;
-}
-
-uint32_t Atlas::getMSDFTileSize() const {
-	return _msdfTileSize != 0 ? _msdfTileSize : 128u;
-}
-
-// Shared core: filters already-registered keys, renders remaining tiles (parallel when
-// SLUGHORN_HAS_PARALLEL, since each tile is fully independent - no atlas writes inside the
-// parallel region), commits serially for deterministic layer ordering. Callers (requestMSDF's
-// two overloads, both the immediate-post-build path and build()'s pre-build drain) are
-// responsible for validating key existence before calling - that check differs by whether the
-// atlas has been built yet (_shapes vs _build), so it can't live here.
-void Atlas::_commitMSDF(const std::vector<Key>& keys, slug_t range, MSDFEdgeColoring coloring) {
-	std::vector<Key> newKeys;
-	newKeys.reserve(keys.size());
-
+	// Validate everything first so a bad key doesn't leave a half-applied batch behind.
 	for(const Key& key : keys) {
-		if(!_msdfLayerMap.count(key)) newKeys.push_back(key);
+		if(_build.find(key) == _build.end()) throw std::out_of_range(
+			"Atlas::requestSDF: key not found in atlas"
+		);
 	}
 
-	if(newKeys.empty()) return;
+	for(const Key& key : keys) requestSDF(key, range);
+#endif
+}
 
-	const uint32_t tileSize = _msdfTileSize != 0 ? _msdfTileSize : 128u;
+void Atlas::bakeSDF() {
+	if(_sdfRequests.empty()) return;
 
-	_msdfTileSize = tileSize;
+#ifdef SLUGHORN_HAS_SDF
+	const SDF::Config& config = _sdf.config;
+	const size_t requestCount = _sdfRequests.size();
 
-	std::vector<render::MSDFGrid> grids(newKeys.size());
+	std::vector<render::Field> fields(requestCount);
 
 #ifdef SLUGHORN_HAS_PARALLEL
 	#pragma omp parallel for schedule(dynamic)
 #endif
-	for(int i = 0; i < static_cast<int>(newKeys.size()); ++i) {
-		grids[static_cast<size_t>(i)] = render::renderMSDFTile(
+	for(int i = 0; i < static_cast<int>(requestCount); ++i) {
+		const auto& request = _sdfRequests[static_cast<size_t>(i)];
+
+		fields[static_cast<size_t>(i)] = render::field(
 			*this,
-			newKeys[static_cast<size_t>(i)],
-			tileSize,
-			range,
-			coloring
+			request.key,
+			config,
+			request.range.value_or(config.range)
 		);
 	}
 
-	// Serial commit - deterministic layer ordering.
-	const int baseLayer = static_cast<int>(_msdfTileData.size());
+	// Shapes with no geometry come back empty and simply get no tile. Tall tiles first (stable, so
+	// ties keep request order) keeps the shelves tight and the result deterministic.
+	std::vector<size_t> order;
 
-	for(size_t i = 0; i < newKeys.size(); ++i) {
-		const int layer = baseLayer + static_cast<int>(i);
-
-		_msdfTileData.push_back(std::move(grids[i].data));
-		_msdfLayerMap[newKeys[i]] = layer;
-
-		auto& shape = _shapes.at(newKeys[i]);
-
-		shape.msdfLayer = layer;
-		shape.msdfRange = range;
+	for(size_t i = 0; i < requestCount; i++) {
+		if(fields[i].width > 0) order.push_back(i);
 	}
 
-	_msdfDirty = true;
+	if(!order.empty()) {
+		std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+			return fields[a].height > fields[b].height;
+		});
 
-	_packingStats.msdfTileSize = tileSize;
-	_packingStats.msdfLayerCount = static_cast<uint32_t>(_msdfTileData.size());
-	_packingStats.msdfTexelsTotal = tileSize * tileSize * _packingStats.msdfLayerCount;
-}
+		// Shelf packing, origin at the bottom-left (row 0 = bottom, see SDF). Every tile keeps
+		// `gutter` texels of clear space around it; the texture starts zeroed, and 0 is "deeply
+		// exterior", so bilinear filtering across a tile edge never picks up a neighbor's data.
+		struct Placement { uint32_t x = 0, y = 0; };
 
-int Atlas::requestMSDF(Key key, slug_t range, MSDFEdgeColoring coloring) {
-	if(_built) {
-		if(_shapes.find(key) == _shapes.end())
-			throw std::out_of_range("Atlas::requestMSDF: key not found in atlas");
+		std::vector<Placement> placements(requestCount);
 
-		_commitMSDF({key}, range, coloring);
+		const uint32_t atlasW = config.atlasWidth;
+		uint32_t cursorX = config.gutter, cursorY = config.gutter, shelfH = 0;
+		uint32_t texelsUsed = 0;
 
-		const auto it = _msdfLayerMap.find(key);
+		for(size_t i : order) {
+			const render::Field& f = fields[i];
 
-		return it != _msdfLayerMap.end() ? it->second : -1;
-	}
+			if(cursorX + f.width + config.gutter > atlasW) {
+				cursorY += shelfH + config.gutter;
+				cursorX = config.gutter;
+				shelfH = 0;
+			}
 
-	// Pre-build: _shapes doesn't exist yet (populated by packTextures()) - validate against the
-	// pre-build working map instead, then queue for build() to render once positions are known.
-	if(_build.find(key) == _build.end()) throw std::out_of_range(
-		"Atlas::requestMSDF: key not found in atlas"
-	);
-
-	_pendingMSDF.push_back({key, range, coloring});
-
-	return -1;
-}
-
-void Atlas::requestMSDF(const std::vector<Key>& keys, slug_t range, MSDFEdgeColoring coloring) {
-	if(_built) {
-		for(const Key& key : keys) {
-			if(_shapes.find(key) == _shapes.end())
-				throw std::out_of_range("Atlas::requestMSDF: key not found in atlas");
+			placements[i] = {cursorX, cursorY};
+			cursorX += f.width + config.gutter;
+			shelfH = std::max(shelfH, f.height);
+			texelsUsed += f.width * f.height;
 		}
 
-		_commitMSDF(keys, range, coloring);
+		const uint32_t atlasH = cursorY + shelfH + config.gutter;
+		const bool msdf = config.type == SDF::Type::MSDF;
+		const uint32_t channels = msdf ? 3u : 1u;
 
-		return;
+		// TODO: OPTIMIZE ME LATER! 32-bit floats per channel (see Atlas::requestSDF()'s note).
+		_sdf.texture.format = msdf ? TextureData::Format::RGB32F : TextureData::Format::R32F;
+		_sdf.texture.width = atlasW;
+		_sdf.texture.height = atlasH;
+		_sdf.texture.depth = 0;
+
+		std::vector<float> texels(size_t{atlasW} * atlasH * channels, 0.f);
+
+		for(size_t i : order) {
+			const render::Field& f = fields[i];
+			const Placement& at = placements[i];
+
+			for(uint32_t row = 0; row < f.height; row++) {
+				std::memcpy(
+					&texels[(size_t{at.y + row} * atlasW + at.x) * channels],
+					&f.data[size_t{row} * f.width * channels],
+					size_t{f.width} * channels * sizeof(float)
+				);
+			}
+
+			_shapes.at(_sdfRequests[i].key).sdf = SDF::Tile{
+				.x = at.x,
+				.y = at.y,
+				.w = f.width,
+				.h = f.height,
+				.range = f.range,
+				.texelsPerEm = f.texelsPerEm,
+				.emOriginX = f.emOriginX,
+				.emOriginY = f.emOriginY
+			};
+		}
+
+		_sdf.texture.bytes.resize(texels.size() * sizeof(float));
+
+		std::memcpy(_sdf.texture.bytes.data(), texels.data(), _sdf.texture.bytes.size());
+
+		_packingStats.sdf = {
+			.type = config.type,
+			.format = _sdf.texture.format,
+			.tileCount = static_cast<uint32_t>(order.size()),
+			.texelsUsed = texelsUsed,
+			.texelsPadding = atlasW * atlasH - texelsUsed,
+			.texelsTotal = atlasW * atlasH
+		};
 	}
 
-	for(const Key& key : keys) {
-		if(_build.find(key) == _build.end())
-			throw std::out_of_range("Atlas::requestMSDF: key not found in atlas");
-
-		_pendingMSDF.push_back({key, range, coloring});
-	}
-}
-
-const Atlas::TextureData& Atlas::getMSDFTextureData() const {
-	if(!_msdfDirty || _msdfTileData.empty()) return _msdfData;
-
-	const uint32_t ts = _msdfTileSize;
-	const uint32_t numLayers = static_cast<uint32_t>(_msdfTileData.size());
-	const size_t floatsPerTile = size_t{ts} * ts * 3;
-
-	_msdfData.format = TextureData::Format::RGB32F;
-	_msdfData.width = ts;
-	_msdfData.height = ts;
-	_msdfData.depth = numLayers;
-	_msdfData.bytes.resize(floatsPerTile * numLayers * sizeof(float));
-
-	auto* dst = reinterpret_cast<float*>(_msdfData.bytes.data());
-
-	for(const auto& tile : _msdfTileData) {
-		std::memcpy(dst, tile.data(), tile.size() * sizeof(float));
-		dst += tile.size();
-	}
-
-	_msdfDirty = false;
-
-	return _msdfData;
-}
+	_sdfRequests.clear();
+	_sdfRequested.clear();
 #endif
+}
 
 // ================================================================================================
 // Atlas::getShape

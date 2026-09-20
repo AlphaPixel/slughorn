@@ -2,8 +2,8 @@
 Tests for slughorn/serial.hpp — slughorn.read / slughorn.write.
 
 Serial I/O is only compiled in when SLUGHORN_SERIAL=ON; every test below
-is skipped automatically when the binding is absent.  MSDF-specific tests
-also require SLUGHORN_MSDF=ON.
+is skipped automatically when the binding is absent.  SDF-specific tests
+also require SLUGHORN_SDF=ON.
 
 Formats:
     .slug   JSON  + base64-encoded texture blobs (human-readable)
@@ -12,7 +12,7 @@ Formats:
 Roundtrip invariants verified:
     - is_built() is True immediately after read()
     - All shapes present with correct band/metric/origin fields
-    - msdf_layer and msdf_range restored per shape
+    - per-shape sdf tiles (x, y, w, h, range, ...) restored
     - MSDF texture data is non-empty and the correct size
     - packing_stats.msdf_tile_size matches what was registered
     - CompositeShape layers (key, color, effectId) preserved
@@ -30,10 +30,10 @@ import slughorn
 # ---------------------------------------------------------------------------
 
 HAS_SERIAL = hasattr(slughorn, "read")
-HAS_MSDF   = hasattr(slughorn.Atlas, "request_msdf")
+HAS_SDF    = hasattr(slughorn.render, "field")
 
 skip_serial = pytest.mark.skipif(not HAS_SERIAL, reason="built without SLUGHORN_SERIAL=ON")
-skip_msdf   = pytest.mark.skipif(not HAS_MSDF,   reason="built without SLUGHORN_MSDF=ON")
+skip_sdf    = pytest.mark.skipif(not HAS_SDF,    reason="built without SLUGHORN_SDF=ON")
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -288,159 +288,103 @@ def test_json_and_binary_shape_metrics_agree(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# MSDF roundtrip (requires SLUGHORN_MSDF=ON)
+# SDF roundtrip (requires SLUGHORN_SDF=ON)
 # ---------------------------------------------------------------------------
 
-def _msdf_atlas(tile_size=64, range_=0.1):
-    """Built atlas with one MSDF-registered shape."""
-    atlas = _unit_square_atlas()
-    atlas.msdf_tile_size = tile_size
-    atlas.request_msdf(slughorn.Key("rect"), range_)
+def _sdf_atlas(type=slughorn.SDF.Type.MSDF, tile_size=64, range_=0.1, only=None):
+    """Built atlas with SDF tiles: every shape by default, or just the keys in `only`."""
+    atlas = slughorn.Atlas()
+    atlas.set_sdf(slughorn.SDF.Config(type=type, tile_size=tile_size, range=range_))
+    for name, pts in [("A", [(0,0),(1,0),(1,1),(0,1)]), ("B", [(0,0),(0.5,0),(0.5,0.5),(0,0.5)])]:
+        d = slughorn.CurveDecomposer()
+        d.move_to(*pts[0])
+        for p in pts[1:]:
+            d.line_to(*p)
+        d.close()
+        info = slughorn.ShapeInfo()
+        info.curves = d.get_curves()
+        atlas.add_shape(slughorn.Key(name), info)
+    atlas.request_sdf([slughorn.Key(k) for k in (only or ("A", "B"))])
+    atlas.build()
     return atlas
 
 
 @skip_serial
-@skip_msdf
-def test_msdf_json_roundtrip_layer(tmp_path):
-    orig  = _msdf_atlas()
-    path  = str(tmp_path / "msdf.slug")
-    slughorn.write(orig, path)
-    back  = slughorn.read(path)
-    shape = back.get_shape(slughorn.Key("rect"))
-    assert shape.msdf_layer == 0
-
-@skip_serial
-@skip_msdf
-def test_msdf_json_roundtrip_range(tmp_path):
-    orig  = _msdf_atlas(range_=0.15)
-    path  = str(tmp_path / "msdf.slug")
-    slughorn.write(orig, path)
-    back  = slughorn.read(path)
-    shape = back.get_shape(slughorn.Key("rect"))
-    assert shape.msdf_range == pytest.approx(0.15, abs=1e-4)
-
-@skip_serial
-@skip_msdf
-def test_msdf_json_roundtrip_get_msdf_layer(tmp_path):
-    orig = _msdf_atlas()
-    path = str(tmp_path / "msdf.slug")
+@skip_sdf
+@pytest.mark.parametrize("ext", ["slug", "slugb"])
+@pytest.mark.parametrize("type", [slughorn.SDF.Type.SDF, slughorn.SDF.Type.MSDF])
+def test_sdf_roundtrip_tiles(tmp_path, ext, type):
+    orig = _sdf_atlas(type=type, range_=0.15)
+    path = str(tmp_path / f"sdf.{ext}")
     slughorn.write(orig, path)
     back = slughorn.read(path)
-    assert back.get_msdf_layer(slughorn.Key("rect")) == 0
+    for name in ("A", "B"):
+        a = orig.get_shape(slughorn.Key(name)).sdf
+        b = back.get_shape(slughorn.Key(name)).sdf
+        assert b is not None
+        assert (b.x, b.y, b.w, b.h) == (a.x, a.y, a.w, a.h)
+        assert b.range == pytest.approx(a.range, abs=1e-5)
+        assert b.texels_per_em == pytest.approx(a.texels_per_em, rel=1e-5)
+        assert b.em_origin == pytest.approx(a.em_origin, abs=1e-5)
 
 @skip_serial
-@skip_msdf
-def test_msdf_json_roundtrip_texture_non_empty(tmp_path):
-    orig = _msdf_atlas(tile_size=32)
-    path = str(tmp_path / "msdf.slug")
+@skip_sdf
+@pytest.mark.parametrize("ext", ["slug", "slugb"])
+@pytest.mark.parametrize("type", [slughorn.SDF.Type.SDF, slughorn.SDF.Type.MSDF])
+def test_sdf_roundtrip_config_and_format(tmp_path, ext, type):
+    orig = _sdf_atlas(type=type, tile_size=48)
+    path = str(tmp_path / f"sdf.{ext}")
     slughorn.write(orig, path)
     back = slughorn.read(path)
-    td = back.get_msdf_texture_data()
-    assert td is not None
-    mv = memoryview(td)
-    assert len(mv) > 0
+    assert back.sdf.config.type == type
+    assert back.sdf.config.tile_size == 48
+    assert back.sdf.texture.format == orig.sdf.texture.format
+    assert (back.sdf.texture.width, back.sdf.texture.height) == (orig.sdf.texture.width, orig.sdf.texture.height)
 
 @skip_serial
-@skip_msdf
-def test_msdf_json_roundtrip_texture_size(tmp_path):
-    tile_size = 32
-    orig = _msdf_atlas(tile_size=tile_size)
-    path = str(tmp_path / "msdf.slug")
+@skip_sdf
+@pytest.mark.parametrize("ext", ["slug", "slugb"])
+@pytest.mark.parametrize("type", [slughorn.SDF.Type.SDF, slughorn.SDF.Type.MSDF])
+def test_sdf_roundtrip_texture_bytes_identical(tmp_path, ext, type):
+    """Raw float texels must survive both containers unchanged."""
+    orig = _sdf_atlas(type=type, tile_size=32)
+    orig_bytes = bytes(memoryview(orig.sdf.texture.bytes))
+    path = str(tmp_path / f"sdf.{ext}")
+    slughorn.write(orig, path)
+    back = slughorn.read(path)  # named variable keeps the Atlas alive during the memoryview read
+    assert bytes(memoryview(back.sdf.texture.bytes)) == orig_bytes
+
+@skip_serial
+@skip_sdf
+@pytest.mark.parametrize("ext", ["slug", "slugb"])
+def test_sdf_roundtrip_packing_stats(tmp_path, ext):
+    orig = _sdf_atlas(tile_size=48)
+    path = str(tmp_path / f"sdf.{ext}")
     slughorn.write(orig, path)
     back = slughorn.read(path)
-    td = back.get_msdf_texture_data()
-    mv = memoryview(td)
-    # RGB32F: tile_size * tile_size * 3 channels * 4 bytes per float, 1 layer
-    expected = tile_size * tile_size * 3 * 4
-    assert len(mv) == expected
+    a, b = orig.packing_stats.sdf, back.packing_stats.sdf
+    assert b.tile_count == a.tile_count == 2
+    assert b.texels_total == a.texels_total
+    assert b.texels_used == a.texels_used
+    assert b.format == a.format
 
 @skip_serial
-@skip_msdf
-def test_msdf_json_roundtrip_packing_stats(tmp_path):
-    tile_size = 48
-    orig = _msdf_atlas(tile_size=tile_size)
-    path = str(tmp_path / "msdf.slug")
-    slughorn.write(orig, path)
-    back = slughorn.read(path)
-    assert back.packing_stats.msdf_tile_size == tile_size
-    assert back.packing_stats.msdf_layer_count == 1
-
-@skip_serial
-@skip_msdf
-def test_msdf_binary_roundtrip_layer(tmp_path):
-    orig = _msdf_atlas()
-    path = str(tmp_path / "msdf.slugb")
-    slughorn.write(orig, path)
-    back = slughorn.read(path)
-    assert back.get_shape(slughorn.Key("rect")).msdf_layer == 0
-
-@skip_serial
-@skip_msdf
-def test_msdf_binary_roundtrip_range(tmp_path):
-    orig = _msdf_atlas(range_=0.2)
-    path = str(tmp_path / "msdf.slugb")
-    slughorn.write(orig, path)
-    back = slughorn.read(path)
-    assert back.get_shape(slughorn.Key("rect")).msdf_range == pytest.approx(0.2, abs=1e-4)
-
-@skip_serial
-@skip_msdf
-def test_msdf_binary_roundtrip_texture_non_empty(tmp_path):
-    orig = _msdf_atlas(tile_size=32)
-    path = str(tmp_path / "msdf.slugb")
-    slughorn.write(orig, path)
-    back = slughorn.read(path)
-    td = back.get_msdf_texture_data()
-    assert td is not None
-    assert len(memoryview(td)) > 0
-
-@skip_serial
-@skip_msdf
-def test_msdf_binary_roundtrip_texture_size(tmp_path):
-    tile_size = 32
-    orig = _msdf_atlas(tile_size=tile_size)
-    path = str(tmp_path / "msdf.slugb")
-    slughorn.write(orig, path)
-    back = slughorn.read(path)
-    td = back.get_msdf_texture_data()
-    expected = tile_size * tile_size * 3 * 4
-    assert len(memoryview(td)) == expected
-
-@skip_serial
-@skip_msdf
-def test_msdf_json_roundtrip_texture_bytes_identical(tmp_path):
-    """Raw RGB32F bytes must survive the .slug base64 roundtrip unchanged."""
-    orig = _msdf_atlas(tile_size=32)
-    # Force packing before write; get_msdf_texture_data() triggers it on first call.
-    orig_bytes = bytes(memoryview(orig.get_msdf_texture_data()))
-    path = str(tmp_path / "msdf.slug")
-    slughorn.write(orig, path)
-    back = slughorn.read(path)  # named variable keeps Atlas alive during memoryview read
-    back_bytes = bytes(memoryview(back.get_msdf_texture_data()))
-    assert orig_bytes == back_bytes
-
-@skip_serial
-@skip_msdf
-def test_msdf_binary_roundtrip_texture_bytes_identical(tmp_path):
-    """Raw RGB32F bytes must survive the .slugb binary roundtrip unchanged."""
-    orig = _msdf_atlas(tile_size=32)
-    orig_bytes = bytes(memoryview(orig.get_msdf_texture_data()))
-    path = str(tmp_path / "msdf.slugb")
-    slughorn.write(orig, path)
-    back = slughorn.read(path)
-    back_bytes = bytes(memoryview(back.get_msdf_texture_data()))
-    assert orig_bytes == back_bytes
-
-@skip_serial
-@skip_msdf
-def test_msdf_shapes_without_msdf_have_negative_layer(tmp_path):
-    """Shapes that weren't registered should still have msdf_layer == -1 after roundtrip."""
-    atlas = _atlas_with_composite()
-    # Register MSDF only for "A", not "B"
-    atlas.msdf_tile_size = 32
-    atlas.request_msdf(slughorn.Key("A"), 0.1)
-    path = str(tmp_path / "partial.slug")
+@skip_sdf
+@pytest.mark.parametrize("ext", ["slug", "slugb"])
+def test_sdf_shapes_without_a_tile_stay_none_after_roundtrip(tmp_path, ext):
+    """Only "A" was requested, so "B" must still have no tile after a roundtrip."""
+    atlas = _sdf_atlas(tile_size=32, only=("A",))
+    path = str(tmp_path / f"partial.{ext}")
     slughorn.write(atlas, path)
     back = slughorn.read(path)
-    assert back.get_shape(slughorn.Key("A")).msdf_layer == 0
-    assert back.get_shape(slughorn.Key("B")).msdf_layer == -1
+    assert back.get_shape(slughorn.Key("A")).sdf is not None
+    assert back.get_shape(slughorn.Key("B")).sdf is None
+
+@skip_serial
+def test_atlas_without_sdf_roundtrips_empty(tmp_path):
+    atlas = _unit_square_atlas()
+    path = str(tmp_path / "plain.slug")
+    slughorn.write(atlas, path)
+    back = slughorn.read(path)
+    assert back.sdf.empty
+    assert back.get_shape(slughorn.Key("rect")).sdf is None

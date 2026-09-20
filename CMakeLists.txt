@@ -43,7 +43,7 @@ endif()
 option(SLUGHORN_SERIAL "Include serialization support (requires nlohmann)" OFF)
 option(SLUGHORN_NANOSVG "Include NanoSVG support (requires nanosvg)" OFF)
 option(SLUGHORN_FREETYPE "Include FreeType support (requires freetype2)" OFF)
-option(SLUGHORN_MSDF "Include MSDF support (requires msdfgen)" OFF)
+option(SLUGHORN_SDF "Include SDF/MSDF tile baking (requires msdfgen)" OFF)
 option(SLUGHORN_TESSELLATE "Include polygon triangulation/extrusion support (requires earcut.hpp)" OFF)
 option(SLUGHORN_BLEND2D "Include Blend2D backend (requires blend2d)" OFF)
 option(SLUGHORN_RENDER_PARALLEL "Enable std::execution parallel pixel rendering (requires TBB on Linux)" OFF)
@@ -154,7 +154,7 @@ if(SLUGHORN_FREETYPE)
 endif()
 
 # https://github.com/Chlumsky/msdfgen.git
-if(SLUGHORN_MSDF)
+if(SLUGHORN_SDF)
 	if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/ext/msdfgen")
 		message(FATAL_ERROR
 			"ext/msdfgen not found. Run:\n"
@@ -183,8 +183,7 @@ if(SLUGHORN_MSDF)
 	add_subdirectory("ext/msdfgen")
 	set_target_properties(msdfgen-core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-	# target_compile_definitions(slughorn PRIVATE SLUGHORN_MSDF_IMPLEMENTATION)
-	target_compile_definitions(slughorn PUBLIC SLUGHORN_HAS_MSDF)
+	target_compile_definitions(slughorn PUBLIC SLUGHORN_HAS_SDF)
 	target_include_directories(slughorn
 		SYSTEM PUBLIC
 			$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/ext/msdfgen>

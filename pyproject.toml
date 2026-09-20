@@ -27,7 +27,7 @@ cmake.args = [
 	"-DSLUGHORN_NANOSVG=ON",
 	"-DSLUGHORN_FREETYPE=ON",
 	"-DSLUGHORN_TESSELLATE=ON",
-	"-DSLUGHORN_MSDF=ON",
+	"-DSLUGHORN_SDF=ON",
 ]
 
 # Pulls the single version of record out of CMakeLists.txt's `project(... VERSION x.y.z ...)`

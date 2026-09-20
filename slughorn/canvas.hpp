@@ -1709,13 +1709,11 @@ public:
 
 			_composite.layers.push_back(layer);
 
-#ifdef SLUGHORN_HAS_MSDF
 			// text() is the one commit verb that does NOT go through _commitFill() - glyph
 			// shapes are pre-registered by the Font loader at codepoint keys, so there's no
-			// addShape() call here for _applyMSDF() to piggyback on the way
+			// addShape() call here for _applySDF() to piggyback on the way
 			// _commitFill()/_commitGradient() do. Call it directly per glyph instead.
-			_applyMSDF(Key(cp, mask));
-#endif
+			_applySDF(Key(cp, mask));
 
 			dx += info ? info->advance : 0.6_cv;
 		}
@@ -1868,37 +1866,27 @@ public:
 	Canvas& setAdvance(slug_t advance) { _composite.advance = advance; return *this; }
 
 	// -------------------------------------------------------------------------
-	// MSDF opt-in state (persists like fillStyle - applies to subsequent commits, same
+	// SDF opt-in state (persists like fillStyle - applies to subsequent commits, same
 	// convention as setSplits()/setAutoMetrics()).
 	//
-	// setMSDF(true, range) - every subsequent fill()/stroke()/text()/textGlyph() commit also
-	// calls Atlas::requestMSDF(key, range) for the shape it just registered. Replaces the
-	// "for(layer : compositeShape.layers) atlas->registerMSDF(layer.key, range)" boilerplate
-	// loop every MSDF-effect example used to need after finalize()+build(). setMSDF(false)
-	// (the default) reverts to no MSDF request at all - unaffected callers pay nothing.
+	// setSDF(true, range) - every subsequent fill()/stroke()/text()/textGlyph() commit also
+	// calls Atlas::requestSDF(key, range) for the shape it just registered. setSDF(false) (the
+	// default) reverts to no request at all - unaffected callers pay nothing. Which KIND of tile
+	// gets baked (SDF or MSDF), its size, and its coloring are Atlas-wide, not per-Canvas: see
+	// Atlas::setSDF().
 	//
-	// requestMSDF() itself (unlike the old registerMSDF()) is safe to call before build() - see
-	// its doc comment in slughorn.hpp - which is what makes this a Canvas-side toggle instead
-	// of a post-build loop the caller has to remember to write: every commit made under
-	// setMSDF(true) just queues its shape's tile request immediately, and build() renders all
-	// of them (batched, in parallel) once it's safe to.
+	// Every commit under setSDF(true) just records its shape's request immediately, and build()
+	// bakes all of them (batched, in parallel) once each shape's final position is known.
 	// -------------------------------------------------------------------------
 
-#ifdef SLUGHORN_HAS_MSDF
-	Canvas& setMSDF(
-		bool enabled,
-		slug_t range=0.1_cv,
-		Atlas::MSDFEdgeColoring coloring=Atlas::MSDFEdgeColoring::ByDistance
-	) {
-		_msdfEnabled = enabled;
-		_msdfRange = range;
-		_msdfColoring = coloring;
+	Canvas& setSDF(bool enabled, slug_t range=0.1_cv) {
+		_sdfEnabled = enabled;
+		_sdfRange = range;
 
 		return *this;
 	}
 
-	bool getMSDF() const { return _msdfEnabled; }
-#endif
+	bool getSDF() const { return _sdfEnabled; }
 
 	// -------------------------------------------------------------------------
 	// Mask authoring
@@ -1906,21 +1894,18 @@ public:
 	// Two forms, both sugar over mechanisms that already exist - neither is new capability,
 	// and direct field access (compositeShape.mask = ...) remains valid unchanged either way.
 	//
-	// mask(range, invert) - commits the Canvas's accumulated internal path as an MSDF-baked
+	// mask(range, invert) - commits the Canvas's accumulated internal path as a baked SDF/MSDF
 	// mask: defineShape() semantics (registers geometry in the Atlas, does NOT push a Layer),
 	// auto-generated key (same convention as fill()/stroke() with no explicit key), then
-	// assigns Mask::msdf(key) to the CompositeShape under construction. cx/cy/r are derived
-	// from the path's own canvas-space bbox at author time - this is different from (and does
-	// NOT contradict) osgSlug::RenderMask deliberately refusing to derive this at render time;
-	// slughorn's Canvas is the authoring layer, so bbox math here is the same kind of thing
-	// _commitFill's origin handling already does, not a render-time inference.
+	// assigns Mask::sdfTile(key) to the CompositeShape under construction. The baked tile carries
+	// its own em-space frame (Atlas::SDF::Tile), so unlike the old MSDF mask there is no
+	// cx/cy/r/range to derive - a non-square path masks correctly. The one thing the tile cannot
+	// know is where the shape sits on the canvas: the shape is localized (bbox min -> em origin)
+	// unless autoMetrics is off, so params[0..1] record that canvas-space origin (params[2] = scale, 1).
 	//
-	// This calls Atlas::requestMSDF(key, range) itself (unconditionally - independent of the
-	// setMSDF() toggle above, which only affects ordinary fill()/text() layers, not masks) --
-	// requestMSDF() is safe to call here even though mask() always runs pre-build, so there's no
-	// separate post-build step for the caller to remember, unlike the old registerMSDF()-based
-	// design (see ai/context-todo-mask.md for the "authoring vs after-build()" sharp edge that
-	// motivated requestMSDF()'s existence).
+	// This calls Atlas::requestSDF(key, range) itself (unconditionally - independent of the
+	// setSDF() toggle above, which only affects ordinary fill()/text() layers, not masks). The
+	// tile is baked by build(), like every other requested tile.
 	//
 	// mask(const Mask&) - procedural types need no atlas registration at all; a one-line field
 	// assignment staged on the Canvas (same pattern as setAdvance()) until finalize() moves it
@@ -1938,26 +1923,20 @@ public:
 
 		slug_t minX = std::numeric_limits<slug_t>::max();
 		slug_t minY = std::numeric_limits<slug_t>::max();
-		slug_t maxX = -std::numeric_limits<slug_t>::max();
-		slug_t maxY = -std::numeric_limits<slug_t>::max();
 
 		for(const auto& c : _path._pendingCurves) {
 			minX = std::min({minX, c.x1, c.x2, c.x3});
 			minY = std::min({minY, c.y1, c.y2, c.y3});
-			maxX = std::max({maxX, c.x1, c.x2, c.x3});
-			maxY = std::max({maxY, c.y1, c.y2, c.y3});
 		}
 
-		Mask m = Mask::msdf(key, invert);
+		Mask m = Mask::sdfTile(key, invert);
 
-		m.params[0] = (minX + maxX) * 0.5_cv;
-		m.params[1] = (minY + maxY) * 0.5_cv;
-		m.params[2] = std::max(maxX - minX, maxY - minY) * 0.5_cv;
-		m.params[3] = range;
+		// With autoMetrics off the curves stay in canvas space (see _commitShape), so em == canvas.
+		m.params[0] = _autoMetrics ? minX : 0_cv;
+		m.params[1] = _autoMetrics ? minY : 0_cv;
+		// params[2] (scale) keeps sdfTile()'s default of 1.
 
-#ifdef SLUGHORN_HAS_MSDF
-		_atlas.requestMSDF(key, range);
-#endif
+		_atlas.requestSDF(key, range);
 
 		_composite.mask = m;
 
@@ -2028,11 +2007,9 @@ private:
 
 			_composite.layers.push_back(layer);
 
-#ifdef SLUGHORN_HAS_MSDF
-			// See text()'s own comment: this bypasses _commitFill(), so _applyMSDF() has no
+			// See text()'s own comment: this bypasses _commitFill(), so _applySDF() has no
 			// addShape() call to piggyback on and must be called directly.
-			_applyMSDF(Key(cp, mask));
-#endif
+			_applySDF(Key(cp, mask));
 
 			return layer;
 		}
@@ -2167,9 +2144,7 @@ private:
 
 		_atlas.addShape(key, info);
 
-#ifdef SLUGHORN_HAS_MSDF
-		_applyMSDF(key);
-#endif
+		_applySDF(key);
 
 		Layer layer{ .key = key, .color = color };
 
@@ -2323,9 +2298,7 @@ private:
 		_applySplits(info);
 		_atlas.addShape(key, info);
 
-#ifdef SLUGHORN_HAS_MSDF
-		_applyMSDF(key);
-#endif
+		_applySDF(key);
 
 		Layer layer{
 			.key = key,
@@ -2450,19 +2423,16 @@ private:
 	Atlas::SplitStrategy _splitStrategy;
 	bool _autoMetrics = true;
 
-#ifdef SLUGHORN_HAS_MSDF
-	// setMSDF() state - see its doc comment above. Applied by _applyMSDF(), called from every
+	// setSDF() state - see its doc comment above. Applied by _applySDF(), called from every
 	// layer-producing commit (_commitFill, _commitGradient, text()) - same shape as
 	// _applySplits() above: persisted per-Canvas toggle state, applied unconditionally at each
 	// commit site, branching internally.
-	bool _msdfEnabled = false;
-	slug_t _msdfRange = 0.1_cv;
-	Atlas::MSDFEdgeColoring _msdfColoring = Atlas::MSDFEdgeColoring::ByDistance;
+	bool _sdfEnabled = false;
+	slug_t _sdfRange = 0.1_cv;
 
-	void _applyMSDF(Key key) {
-		if(_msdfEnabled) _atlas.requestMSDF(key, _msdfRange, _msdfColoring);
+	void _applySDF(Key key) {
+		if(_sdfEnabled) _atlas.requestSDF(key, _sdfRange);
 	}
-#endif
 };
 
 // ================================================================================================
