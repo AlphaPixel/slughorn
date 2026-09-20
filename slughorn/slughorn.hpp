@@ -956,7 +956,9 @@ public:
 
 		uint32_t width = 0;
 		uint32_t height = 0;
-		uint32_t depth = 0; // >0: array texture (number of layers); 0: 2D texture
+
+		// >0: array texture (number of layers); 0: 2D texture
+		uint32_t depth = 0;
 
 		Format format = Format::RGBA32F;
 
@@ -1002,37 +1004,60 @@ public:
 	// --------------------------------------------------------------------------------------------
 	struct SDF {
 		enum class Type: uint8_t { SDF, MSDF };
-		enum class Coloring: uint8_t { Simple, ByDistance }; // MSDF only
+		enum class Coloring: uint8_t { Simple, ByDistance };
 
 		// Atlas-wide, set once via setSDF() before build(). Type defaults to MSDF so an Atlas that
 		// never configures anything keeps full corner quality.
 		struct Config {
 			Type type = Type::MSDF;
-			uint32_t tileSize = 128; // longest tile axis, in texels
-			uint32_t atlasWidth = 2048; // texels; the atlas grows in height as tiles shelf-pack
-			uint32_t gutter = 2; // texels of exterior kept around every tile
-			slug_t range = 0.1_cv; // default em-space distance range; requestSDF() may override
-			Coloring coloring = Coloring::ByDistance; // MSDF only. ByDistance: fewer corner
-			// artifacts, slightly more CPU work; Simple: faster, prone to artifacts at convex corners.
+
+			// longest tile axis, in texels
+			uint32_t tileSize = 128;
+
+			// texels; the atlas grows in height as tiles shelf-pack
+			uint32_t atlasWidth = 2048;
+
+			// texels of exterior kept around every tile
+			uint32_t gutter = 2;
+
+			// default em-space distance range; requestSDF() may override
+			slug_t range = 0.1_cv;
+
+			// MSDF only. ByDistance: fewer corner artifacts, slightly more CPU work; Simple:
+			// faster, prone to artifacts at convex corners.
+			Coloring coloring = Coloring::ByDistance;
+
 		};
 
 		struct Tile {
-			uint32_t x = 0, y = 0, w = 0, h = 0; // texels within SDF::texture, row 0 = bottom
-			slug_t range = 0_cv; // em-space half-range this tile was baked with
+			// texels within SDF::texture, row 0 = bottom
+			uint32_t x = 0, y = 0, w = 0, h = 0;
+
+			// em-space half-range this tile was baked with
+			slug_t range = 0_cv;
+
 			slug_t texelsPerEm = 0_cv;
 			slug_t emOriginX = 0_cv, emOriginY = 0_cv;
 
-			// Total distance range in texels (the "pixelRange" msdfgen/osgx::SDF speak of).
+			// Total distance range in texels (the "pixelRange" msdfgen speaks of).
 			slug_t pixelRange() const { return 2_cv * range * texelsPerEm; }
 		};
 
 		struct Stats {
 			Type type = Type::MSDF;
 			TextureData::Format format = TextureData::Format::RGB32F;
-			uint32_t tileCount = 0; // shapes with a baked tile
-			uint32_t texelsUsed = 0; // sum of every tile's w * h
-			uint32_t texelsPadding = 0; // atlas area not covered by a tile (gutters, shelf slack)
-			uint32_t texelsTotal = 0; // atlas width * height (allocated)
+
+			// shapes with a baked tile
+			uint32_t tileCount = 0;
+
+			// sum of every tile's w * h
+			uint32_t texelsUsed = 0;
+
+			// atlas area not covered by a tile (gutters, shelf slack)
+			uint32_t texelsPadding = 0;
+
+			// atlas width * height (allocated)
+			uint32_t texelsTotal = 0;
 
 			slug_t utilization() const {
 				return texelsTotal ? cv(texelsUsed) / cv(texelsTotal) : 0.f;

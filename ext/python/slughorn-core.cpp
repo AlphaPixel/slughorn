@@ -890,7 +890,7 @@ void bind_core(py::module_& m) {
 			return py::make_tuple(t.emOriginX, t.emOriginY);
 		}, "Em-space (x, y) at the tile's bottom-left corner.")
 		.def_property_readonly("pixel_range", &slughorn::Atlas::SDF::Tile::pixelRange,
-			"Total distance range in texels (2 * range * texels_per_em) - what osgx::SDF calls pixelRange.")
+			"Total distance range in texels (2 * range * texels_per_em) - msdfgen calls pixelRange.")
 		.def("__repr__", [](const slughorn::Atlas::SDF::Tile& t) {
 			return "SDF.Tile(x=" + std::to_string(t.x) + ", y=" + std::to_string(t.y)
 				+ ", w=" + std::to_string(t.w) + ", h=" + std::to_string(t.h) + ")";
