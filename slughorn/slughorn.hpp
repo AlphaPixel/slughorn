@@ -1671,7 +1671,7 @@ private:
 // t = m.xx * emX + m.xy * emY + m.dx
 //
 // The result should be stored in GradientInfo::transform and is consumed directly by the
-// a_gradientXform vertex attribute (x=m.xx, y=m.xy, z=m.dx).
+// a_gradientTransform vertex attribute (x=m.xx, y=m.xy, z=m.dx).
 //
 // Returns Matrix::identity() for degenerate (zero-length) inputs.
 // ================================================================================================

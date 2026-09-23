@@ -62,7 +62,7 @@ static const char* k_VertSrc = R"(
 layout(location = 0) in vec3 a_position;
 layout(location = 1) in vec4 a_color;
 layout(location = 2) in vec4 a_emCoord;
-layout(location = 3) in vec4 a_bandXform; // bandScaleX/Y, bandOffsetX/Y
+layout(location = 3) in vec4 a_bandTransform; // bandScaleX/Y, bandOffsetX/Y
 layout(location = 4) in vec4 a_shapeData; // bandTexX/Y, bandMaxX/Y
 layout(location = 5) in float a_effectId; // unused in this demo, carried through
 
@@ -73,14 +73,14 @@ out vec2 v_emCoord;
 out vec2 v_uv;
 out vec4 v_color;
 
-flat out vec4 v_bandXform;
+flat out vec4 v_bandTransform;
 flat out vec4 v_shapeData;
 
 void main() {
 	v_emCoord = a_emCoord.xy;
 	v_uv = a_emCoord.zw;
 	v_color = a_color;
-	v_bandXform = a_bandXform;
+	v_bandTransform = a_bandTransform;
 	v_shapeData = a_shapeData;
 
 	gl_Position = u_mvp * vec4(a_position, 1.0);
@@ -97,7 +97,7 @@ in vec2 v_emCoord;
 in vec2 v_uv;
 in vec4 v_color;
 
-flat in vec4 v_bandXform; // bandScaleX/Y, bandOffsetX/Y
+flat in vec4 v_bandTransform; // bandScaleX/Y, bandOffsetX/Y
 flat in vec4 v_shapeData; // bandTexX/Y, bandMaxX/Y
 
 uniform sampler2D u_curveTexture;
@@ -261,7 +261,7 @@ void main() {
 	ivec2 glyphLoc = ivec2(v_shapeData.xy);
 	ivec2 bandMax = ivec2(v_shapeData.zw);
 
-	float fill = slug_Render(v_emCoord, v_bandXform, glyphLoc, bandMax);
+	float fill = slug_Render(v_emCoord, v_bandTransform, glyphLoc, bandMax);
 
 	if(fill < 0.001) discard;
 
@@ -525,7 +525,7 @@ static Vec3 orbitCameraPosition(const ViewState& view) {
 // location 0: position vec3
 // location 1: color vec4
 // location 2: emCoord vec4 (.xy = em-space, .zw = true [0,1] UV)
-// location 3: bandXform vec4 (bandScaleX/Y, bandOffsetX/Y)
+// location 3: bandTransform vec4 (bandScaleX/Y, bandOffsetX/Y)
 // location 4: shapeData vec4 (bandTexX/Y, bandMaxX/Y)
 // location 5: effectId float (unused here, carried for forward-compat)
 // ============================================================================
@@ -533,7 +533,7 @@ struct Vertex {
 	float position[3];
 	float color[4];
 	float emCoord[4];
-	float bandXform[4];
+	float bandTransform[4];
 	float shapeData[4];
 	float effectId;
 };
@@ -606,7 +606,7 @@ static void buildMesh(
 			std::memcpy(v.position, positions[i], sizeof(v.position));
 			std::memcpy(v.color, col, sizeof(v.color));
 			std::memcpy(v.emCoord, emCoords[i], sizeof(v.emCoord));
-			std::memcpy(v.bandXform, bx, sizeof(v.bandXform));
+			std::memcpy(v.bandTransform, bx, sizeof(v.bandTransform));
 			std::memcpy(v.shapeData, sd, sizeof(v.shapeData));
 			v.effectId = eid;
 			outVerts.push_back(v);
@@ -949,10 +949,10 @@ int main(int argc, char** argv) {
 	glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, stride,
 		(void*)offsetof(Vertex, emCoord));
 
-	// location 3: bandXform (vec4)
+	// location 3: bandTransform (vec4)
 	glEnableVertexAttribArray(3);
 	glVertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE, stride,
-		(void*)offsetof(Vertex, bandXform));
+		(void*)offsetof(Vertex, bandTransform));
 
 	// location 4: shapeData (vec4)
 	glEnableVertexAttribArray(4);
