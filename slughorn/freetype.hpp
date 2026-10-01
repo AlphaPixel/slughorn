@@ -18,7 +18,7 @@
 // TODO: POTENTIALLY INCLUDE THIS IN OTHER BACKENDS!
 // OPTIONAL: inject a log callback before calling any function
 //
-// slughorn::freetype::setLogCallback([](int level, const std::string& msg) {
+// slughorn::freetype::setLogCallback([](int level, std::string_view msg) {
 //     if(level >= slughorn::freetype::LOG_WARN) std::cerr << msg << "\n";
 // });
 //
@@ -53,7 +53,7 @@ namespace freetype {
 // Configuration
 // =============================================================================
 
-using LogCallback = std::function<void(int level, const std::string& msg)>;
+using LogCallback = std::function<void(int level, std::string_view msg)>;
 
 static constexpr int LOG_INFO = 0;
 static constexpr int LOG_NOTICE = 1;
@@ -109,7 +109,7 @@ slughorn::FontMetrics readFontMetrics(FT_Face face);
 
 // Open the font at fontPath, read its metrics, and close it. Returns nullopt
 // if the font cannot be opened.
-std::optional<slughorn::FontMetrics> loadFontMetrics(const std::string& fontPath);
+std::optional<slughorn::FontMetrics> loadFontMetrics(std::string_view fontPath);
 
 // =============================================================================
 // Core decomposition
@@ -219,14 +219,14 @@ size_t loadColorGlyphs(
 // Load printable ASCII (codepoints 32-126) from @p fontPath into @p atlas. Creates and destroys an
 // FT_Library / FT_Face internally. Returns false if the font cannot be opened.
 bool loadAsciiFont(
-	const std::string& fontPath,
+	std::string_view fontPath,
 	Atlas& atlas,
 	LoadConfig* config=nullptr);
 
 // Load an explicit list of codepoints from @p fontPath into @p atlas. Creates and destroys an
 // FT_Library / FT_Face internally. Returns the number of glyphs successfully added.
 size_t loadFontGlyphs(
-	const std::string& fontPath,
+	std::string_view fontPath,
 	const std::vector<uint32_t>& codepoints,
 	Atlas& atlas,
 	LoadConfig* config=nullptr
@@ -235,7 +235,7 @@ size_t loadFontGlyphs(
 // Load every mapped codepoint from @p fontPath into @p atlas. Creates and destroys an
 // FT_Library / FT_Face internally. Returns the number of glyphs successfully added.
 size_t loadAllFontGlyphs(
-	const std::string& fontPath,
+	std::string_view fontPath,
 	Atlas& atlas,
 	LoadConfig* config=nullptr
 );
@@ -243,7 +243,7 @@ size_t loadAllFontGlyphs(
 // Load COLR emoji from @p fontPath for the given codepoints. Creates and destroys an FT_Library /
 // FT_Face internally. Returns false if the font cannot be opened.
 bool loadEmojiFont(
-	const std::string& fontPath,
+	std::string_view fontPath,
 	const std::vector<uint32_t>& codepoints,
 	Atlas& atlas,
 	std::map<uint32_t, CompositeShape>& colorGlyphs,
@@ -300,7 +300,7 @@ struct FaceHandle {
 		if(value) FT_Done_Face(value);
 	}
 
-	bool open(FT_Library library, const std::string& fontPath, const char* caller, const LogCallback& log) {
+	bool open(FT_Library library, std::string_view fontPath, const char* caller, const LogCallback& log) {
 		if(FT_New_Face(library, fontPath.c_str(), 0, &value)) {
 			doLog(log, LOG_WARN, caller, ": failed to open font: ", fontPath);
 
@@ -313,7 +313,7 @@ struct FaceHandle {
 
 template<typename Result, typename F>
 static Result withFace(
-	const std::string& fontPath,
+	std::string_view fontPath,
 	const char* caller,
 	Result failureValue,
 	LoadConfig* config,
@@ -1196,7 +1196,7 @@ slughorn::FontMetrics readFontMetrics(FT_Face face) {
 	return m;
 }
 
-std::optional<slughorn::FontMetrics> loadFontMetrics(const std::string& fontPath) {
+std::optional<slughorn::FontMetrics> loadFontMetrics(std::string_view fontPath) {
 	return detail::withFace(
 		fontPath,
 		"loadFontMetrics",
@@ -1577,7 +1577,7 @@ size_t loadColorGlyphs(
 }
 
 bool loadAsciiFont(
-	const std::string& fontPath,
+	std::string_view fontPath,
 	Atlas& atlas,
 	LoadConfig* config
 ) {
@@ -1589,7 +1589,7 @@ bool loadAsciiFont(
 }
 
 size_t loadFontGlyphs(
-	const std::string& fontPath,
+	std::string_view fontPath,
 	const std::vector<uint32_t>& codepoints,
 	Atlas& atlas,
 	LoadConfig* config
@@ -1605,7 +1605,7 @@ size_t loadFontGlyphs(
 }
 
 size_t loadAllFontGlyphs(
-	const std::string& fontPath,
+	std::string_view fontPath,
 	Atlas& atlas,
 	LoadConfig* config
 ) {
@@ -1620,7 +1620,7 @@ size_t loadAllFontGlyphs(
 }
 
 bool loadEmojiFont(
-	const std::string& fontPath,
+	std::string_view fontPath,
 	const std::vector<uint32_t>& codepoints,
 	Atlas& atlas,
 	std::map<uint32_t, CompositeShape>& colorGlyphs,

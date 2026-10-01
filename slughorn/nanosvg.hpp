@@ -94,7 +94,7 @@ namespace nanosvg {
 // ================================================================================================
 // LogCallback / LoadConfig
 // ================================================================================================
-using LogCallback = std::function<void(int level, const std::string& msg)>;
+using LogCallback = std::function<void(int level, std::string_view msg)>;
 
 // Controls how a matched ShapeRule overrides default load behavior.
 enum class ShapePolicy : uint32_t {
@@ -249,7 +249,7 @@ CompositeShape loadImage(
 // loadFile / loadString - convenience wrappers
 // ================================================================================================
 CompositeShape loadFile(
-	const std::string& path,
+	std::string_view path,
 	Atlas& atlas,
 	KeyIterator& keys,
 	slug_t dpi=96_cv,
@@ -257,7 +257,7 @@ CompositeShape loadFile(
 );
 
 CompositeShape loadString(
-	const std::string& svg,
+	std::string_view svg,
 	Atlas& atlas,
 	KeyIterator& keys,
 	slug_t dpi=96_cv,
@@ -673,7 +673,7 @@ CompositeShape loadImage(
 }
 
 CompositeShape loadFile(
-	const std::string& path,
+	std::string_view path,
 	Atlas& atlas,
 	KeyIterator& keys,
 	slug_t dpi,
@@ -698,7 +698,7 @@ CompositeShape loadFile(
 }
 
 CompositeShape loadString(
-	const std::string& svg,
+	std::string_view svg,
 	Atlas& atlas,
 	KeyIterator& keys,
 	slug_t dpi,

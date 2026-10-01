@@ -124,11 +124,11 @@ inline std::string versionString() {
 using slug_t = float;
 
 namespace literals {
-	constexpr slug_t operator"" _cv(long double v) {
+	constexpr slug_t operator""_cv(long double v) {
 		return static_cast<slug_t>(v);
 	}
 
-	constexpr slug_t operator"" _cv(unsigned long long v) {
+	constexpr slug_t operator""_cv(unsigned long long v) {
 		return static_cast<slug_t>(v);
 	}
 
@@ -375,7 +375,7 @@ class Atlas;
 // Discriminated union identifying a shape or composite shape in the Atlas. Two flavors:
 //
 // Key(uint32_t cp) - a Unicode codepoint (or any uint32_t ID).
-// Key(const std::string&) - a named shape / composite ("logo", "axolotl", ...)
+// Key(std::string_view) - a named shape / composite ("logo", "axolotl", ...)
 // Key(const char*) - string-literal convenience overload.
 //
 // The hash is computed once at construction and stored; KeyHash just returns it. operator== uses
@@ -410,8 +410,8 @@ struct Key {
 		_hash(_hashCp((cp & CODEPOINT_MASK) | (uint32_t(mask) << MASK_SHIFT)))
 	{}
 
-	Key(const std::string& name): _type(Type::Name), _name(name), _hash(_hashStr(name)) {}
-	Key(const char* name): _type(Type::Name), _name(name), _hash(_hashStr(name)) {}
+	Key(std::string name): _type(Type::Name), _name(std::move(name)), _hash(_hashStr(name)) {}
+	Key(const char* name): Key(std::string(name)) {}
 
 	// Accessors
 
@@ -428,7 +428,7 @@ struct Key {
 	uint8_t mask() const { return uint8_t((_codepoint & MASK_MASK) >> MASK_SHIFT); }
 
 	// Only valid when type() == Name.
-	const std::string& name() const { return _name; }
+	std::string_view name() const { return _name; }
 
 	size_t hash() const { return _hash; }
 
@@ -454,8 +454,8 @@ private:
 		return h;
 	}
 
-	static size_t _hashStr(const std::string& s) {
-		size_t h = std::hash<std::string>{}(s);
+	static size_t _hashStr(std::string_view s) {
+		size_t h = std::hash<std::string_view>{}(s);
 
 		h ^= std::hash<size_t>{}(1) + 0x9e3779b9 + (h << 6) + (h >> 2);
 
@@ -1440,7 +1440,7 @@ public:
 	//
 	// Composite shapes are copied too, with every Layer::key remapped through the same mask/prefix
 	// so they still resolve to the correct re-keyed shape after the merge.
-	void append(const Atlas& source, uint8_t mask=0, const std::string& namePrefix="");
+	void append(const Atlas& source, uint8_t mask=0, std::string_view namePrefix="");
 
 	// Force all shapes in @p keys to share the same em-space bounding box.
 	//

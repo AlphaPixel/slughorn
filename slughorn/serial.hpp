@@ -135,7 +135,7 @@ void writeBinary(const Atlas& atlas, std::ostream& out);
 // Convenience: write to file path.
 // Extension determines format: .slug -> JSON, .slugb -> binary.
 // Throws std::runtime_error if the file cannot be opened.
-void write(const Atlas& atlas, const std::string& path);
+void write(const Atlas& atlas, std::string_view path);
 
 // Read either format - auto-detected ('{' -> JSON, 'S' -> binary).
 // Returns a fully-built Atlas (is_built() == true).
@@ -144,7 +144,7 @@ Atlas read(std::istream& in);
 
 // Convenience: read from file path.
 // Throws std::runtime_error if the file cannot be opened.
-Atlas read(const std::string& path);
+Atlas read(std::string_view path);
 
 // =============================================================================
 // Implementation
@@ -190,7 +190,7 @@ std::string base64Encode(const std::vector<uint8_t>& data) {
 	return out;
 }
 
-std::vector<uint8_t> base64Decode(const std::string& s) {
+std::vector<uint8_t> base64Decode(std::string_view s) {
 	// Build reverse lookup table
 	static uint8_t lut[256] = {};
 	static bool lutReady = false;
@@ -253,7 +253,7 @@ Key keyFromJson(const json& j) {
 	throw std::runtime_error("slughorn-serial: unknown key type '" + type + "'");
 }
 
-Atlas::TextureData::Format textureFormatFromString(const std::string& fmt) {
+Atlas::TextureData::Format textureFormatFromString(std::string_view fmt) {
 	if(fmt == "RGBA32F") return Atlas::TextureData::Format::RGBA32F;
 	if(fmt == "RGBA16F") return Atlas::TextureData::Format::RGBA16F;
 	if(fmt == "RGBA16UI") return Atlas::TextureData::Format::RGBA16UI;
@@ -269,7 +269,7 @@ const char* sdfTypeToString(Atlas::SDF::Type t) {
 	return t == Atlas::SDF::Type::MSDF ? "MSDF" : "SDF";
 }
 
-Atlas::SDF::Type sdfTypeFromString(const std::string& s) {
+Atlas::SDF::Type sdfTypeFromString(std::string_view s) {
 	return s == "SDF" ? Atlas::SDF::Type::SDF : Atlas::SDF::Type::MSDF;
 }
 
@@ -277,7 +277,7 @@ const char* sdfColoringToString(Atlas::SDF::Coloring c) {
 	return c == Atlas::SDF::Coloring::Simple ? "simple" : "by_distance";
 }
 
-Atlas::SDF::Coloring sdfColoringFromString(const std::string& s) {
+Atlas::SDF::Coloring sdfColoringFromString(std::string_view s) {
 	return s == "simple" ? Atlas::SDF::Coloring::Simple : Atlas::SDF::Coloring::ByDistance;
 }
 
@@ -354,7 +354,7 @@ json gradientTypeToString(GradientInfo::Type t) {
 	return "linear";
 }
 
-GradientInfo::Type gradientTypeFromString(const std::string& s) {
+GradientInfo::Type gradientTypeFromString(std::string_view s) {
 	if(s == "radial")        return GradientInfo::Type::Radial;
 	if(s == "sweep")         return GradientInfo::Type::Sweep;
 	if(s == "affine_radial") return GradientInfo::Type::AffineRadial;
@@ -898,7 +898,7 @@ void writeBinary(const Atlas& atlas, std::ostream& out) {
 // write (path, format inferred from extension)
 // =============================================================================
 
-void write(const Atlas& atlas, const std::string& path) {
+void write(const Atlas& atlas, std::string_view path) {
 	const bool binary =
 		path.size() >= 6 &&
 		path.substr(path.size() - 6) == ".slugb"
@@ -990,7 +990,7 @@ Atlas read(std::istream& in) {
 // read (path)
 // =============================================================================
 
-Atlas read(const std::string& path) {
+Atlas read(std::string_view path) {
 	const bool binary =
 		path.size() >= 6 &&
 		path.substr(path.size() - 6) == ".slugb"
