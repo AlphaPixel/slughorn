@@ -1487,7 +1487,7 @@ void bind_core(py::module_& m) {
 	// ============================================================================================
 #ifdef SLUGHORN_HAS_SERIAL
 	m.def("read",
-		[](const std::string& path) {
+		[](const std::filesystem::path& path) {
 			// serial::read() returns Atlas by value; move into a shared_ptr so
 			// Python's ref-counting and C++'s shared_ptr cooperate correctly.
 			// return std::make_shared<slughorn::Atlas>(slughorn::serial::read(path));
@@ -1502,7 +1502,7 @@ void bind_core(py::module_& m) {
 	);
 
 	m.def("write",
-		[](const slughorn::Atlas& atlas, const std::string& path) {
+		[](const slughorn::Atlas& atlas, const std::filesystem::path& path) {
 			slughorn::serial::write(atlas, path);
 		},
 		"atlas"_a, "path"_a,

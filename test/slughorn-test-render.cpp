@@ -216,7 +216,7 @@ static int runInMemory() {
 	return 0;
 }
 
-static int runFromFile(const std::string& path) {
+static int runFromFile(const std::filesystem::path& path) {
 	std::cout << "Loading: " << path << "\n\n";
 
 	Atlas atlas = slughorn::serial::read(path);

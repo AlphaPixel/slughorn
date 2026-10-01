@@ -89,7 +89,7 @@ void bind_freetype(py::module_& freetype) {
 	);
 
 	freetype.def("load_emoji_font", [](
-		const std::string& fontPath,
+		const std::filesystem::path& fontPath,
 		const std::vector<uint32_t>& codepoints,
 		slughorn::Atlas& atlas,
 		slughorn::freetype::LoadConfig* config
@@ -118,7 +118,7 @@ void bind_freetype(py::module_& freetype) {
 	);
 
 	freetype.def("load_font_metrics",
-		[](const std::string& fontPath) -> std::optional<slughorn::FontMetrics> {
+		[](const std::filesystem::path& fontPath) -> std::optional<slughorn::FontMetrics> {
 			return slughorn::freetype::loadFontMetrics(fontPath);
 		},
 		"font_path"_a,

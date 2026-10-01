@@ -10,6 +10,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -124,11 +125,11 @@ inline std::string versionString() {
 using slug_t = float;
 
 namespace literals {
-	constexpr slug_t operator"" _cv(long double v) {
+	constexpr slug_t operator""_cv(long double v) {
 		return static_cast<slug_t>(v);
 	}
 
-	constexpr slug_t operator"" _cv(unsigned long long v) {
+	constexpr slug_t operator""_cv(unsigned long long v) {
 		return static_cast<slug_t>(v);
 	}
 
@@ -306,18 +307,18 @@ struct Scene {
 	slug_t pixelsPerEm() const { return std::min(pixelsPerEmX, pixelsPerEmY); }
 
 	// Em-space value equivalent to n pixels (isotropic).
-	template<Numeric T = slug_t>
+	template<Numeric T=slug_t>
 	slug_t pixels(T n = T{1}) const { return cv(n) / pixelsPerEm(); }
 
 	// Em-space halfWidth for a stroke of widthPx pixels total.
-	template<Numeric T = slug_t>
+	template<Numeric T=slug_t>
 	slug_t halfWidth(T widthPx = T{1}) const { return cv(widthPx) * 0.5_cv / pixelsPerEm(); }
 
 	// Em-space halfWidth per axis - for oriented stamps or elliptical brushes.
-	template<Numeric T = slug_t>
+	template<Numeric T=slug_t>
 	slug_t halfWidthX(T widthPx = T{1}) const { return cv(widthPx) * 0.5_cv / pixelsPerEmX; }
 
-	template<Numeric T = slug_t>
+	template<Numeric T=slug_t>
 	slug_t halfWidthY(T widthPx = T{1}) const { return cv(widthPx) * 0.5_cv / pixelsPerEmY; }
 
 	// Layer::scale that makes an em-space extent occupy targetPx pixels (single axis).
@@ -342,7 +343,7 @@ struct Scene {
 
 	// Em-size so cap-height glyphs render capHeightPx screen pixels tall at the current
 	// pixelsPerEm rate. capHeightRatio comes from FontMetrics.
-	template<Numeric T = slug_t>
+	template<Numeric T=slug_t>
 	slug_t fromCapHeight(T capHeightPx, slug_t capHeightRatio) const {
 		return pixels(capHeightPx) / capHeightRatio;
 	}
@@ -375,7 +376,7 @@ class Atlas;
 // Discriminated union identifying a shape or composite shape in the Atlas. Two flavors:
 //
 // Key(uint32_t cp) - a Unicode codepoint (or any uint32_t ID).
-// Key(const std::string&) - a named shape / composite ("logo", "axolotl", ...)
+// Key(std::string) - a named shape / composite ("logo", "axolotl", ...)
 // Key(const char*) - string-literal convenience overload.
 //
 // The hash is computed once at construction and stored; KeyHash just returns it. operator== uses
@@ -410,8 +411,8 @@ struct Key {
 		_hash(_hashCp((cp & CODEPOINT_MASK) | (uint32_t(mask) << MASK_SHIFT)))
 	{}
 
-	Key(const std::string& name): _type(Type::Name), _name(name), _hash(_hashStr(name)) {}
-	Key(const char* name): _type(Type::Name), _name(name), _hash(_hashStr(name)) {}
+	Key(std::string name): _type(Type::Name), _name(std::move(name)), _hash(_hashStr(_name)) {}
+	Key(const char* name): Key(std::string(name)) {}
 
 	// Accessors
 
@@ -767,20 +768,20 @@ struct CompositeShape {
 	// --------------------------------------------------------------------------------------------
 	// Future ideas (deferred until we have real use cases):
 	//
-	// TODO: merge(const CompositeShape&) - append another composite's layers into this one;
-	//       useful for assembling scenes from independently-authored parts.
+	// TODO: merge(const CompositeShape&) - append another composite's layers into this one; useful
+	// for assembling scenes from independently-authored parts.
 	//
-	// TODO: filter(pred) -> CompositeShape - return a view/copy containing only layers that
-	//       match a predicate; e.g. all layers with effectId != 0.
+	// TODO: filter(pred) -> CompositeShape - return a view/copy containing only layers that match a
+	// predicate; e.g. all layers with effectId != 0.
 	//
-	// TODO: reorder(std::span<Key>) - reorder layers by key list for z-order adjustment
-	//       without rebuilding; only safe when shapes don't overlap significantly.
+	// TODO: reorder(std::span<Key>) - reorder layers by key list for z-order adjustment without
+	// rebuilding; only safe when shapes don't overlap significantly.
 	//
-	// TODO: hasLayer(Key) -> bool - safe pre-check before layer(Key) when existence is
-	//       uncertain (optional clock hands, conditional HUD elements, etc.)
+	// TODO: hasLayer(Key) -> bool - safe pre-check before layer(Key) when existence is uncertain
+	// (optional clock hands, conditional HUD elements, etc.)
 	//
-	// TODO: setEffectId(Key, uint32_t) / setColor(Key, Color) - convenience setters that
-	//       combine the layer() lookup + field assignment into one call.
+	// TODO: setEffectId(Key, uint32_t) / setColor(Key, Color) - convenience setters that combine
+	// the layer() lookup + field assignment into one call.
 	// --------------------------------------------------------------------------------------------
 };
 
@@ -938,15 +939,21 @@ public:
 	// interpret the bytes:
 	//
 	// RGBA32F - four 32-bit floats per texel (curve texture, default - see setCurveTextureFormat())
+	//
 	// RGBA16F - four 16-bit floats per texel (curve texture, opt-in; matches the reference Slug
-	//   format, halves curve-texture memory, real precision tradeoff - see setCurveTextureFormat())
+	// format, halves curve-texture memory, real precision tradeoff - see setCurveTextureFormat())
+	//
 	// RG16UI - two 16-bit unsigned ints per texel (band texture, current default). B/A are never
-	//   consumed by the shader (indirection entries read only R; headers/curve locations read
-	//   only RG) for any content type, so this is lossless, not a tradeoff like RGBA16F.
+	// consumed by the shader (indirection entries read only R; headers/curve locations read
+	// only RG) for any content type, so this is lossless, not a tradeoff like RGBA16F.
+	//
 	// RGBA16UI - legacy 4-channel band texture format (2 always-zero trailing channels); no
-	//   longer written by Atlas::packTextures(), kept only to read pre-2026-08-29 .slug/.slugb
+	// longer written by Atlas::packTextures(), kept only to read pre-2026-08-29 .slug/.slugb
+	//
 	// RGBA8 - four 8-bit unorm channels per texel (gradient texture)
+	//
 	// RGB32F - three 32-bit floats per texel (MSDF tile texture, SDF::Type::MSDF)
+	//
 	// R32F - one 32-bit float per texel (SDF tile texture, SDF::Type::SDF)
 	// --------------------------------------------------------------------------------------------
 	struct TextureData {
@@ -990,14 +997,17 @@ public:
 	// the Slug band transform so a tile is usable on its own (e.g. by a generic SDF renderer):
 	//
 	// - texels [x, x + w) x [y, y + h) of the texture. Row 0 is the BOTTOM row (GL/osg::Image
-	//   convention: V = 0 is the bottom of the shape), so no Y flip is ever baked in - flip only
-	//   where a human-facing image needs it.
+	// convention: V = 0 is the bottom of the shape), so no Y flip is ever baked in - flip only
+	// where a human-facing image needs it.
+	//
 	// - ONE uniform scale, `texelsPerEm` (tiles keep the shape's aspect ratio).
+	//
 	// - (emOriginX, emOriginY) is the em-space point at the tile's bottom-left corner, so a point
-	//   maps to texel (em - emOrigin) * texelsPerEm within the tile.
+	// maps to texel (em - emOrigin) * texelsPerEm within the tile.
+	//
 	// - values are clamped to [0, 1]: edge = 0.5, interior > 0.5. A distance of +/- `range` em
-	//   maps onto [0, 1], i.e. the field spans 2 * range * texelsPerEm TEXELS in total (see
-	//   Tile::pixelRange()).
+	// maps onto [0, 1], i.e. the field spans 2 * range * texelsPerEm TEXELS in total (see
+	// Tile::pixelRange()).
 	//
 	// Type::SDF is a single channel (read .r); Type::MSDF is three (median of .rgb) and keeps the
 	// sharp corners a single-channel field rounds off.
@@ -1440,7 +1450,7 @@ public:
 	//
 	// Composite shapes are copied too, with every Layer::key remapped through the same mask/prefix
 	// so they still resolve to the correct re-keyed shape after the merge.
-	void append(const Atlas& source, uint8_t mask=0, const std::string& namePrefix="");
+	void append(const Atlas& source, uint8_t mask=0, std::string_view namePrefix="");
 
 	// Force all shapes in @p keys to share the same em-space bounding box.
 	//

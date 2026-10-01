@@ -190,13 +190,19 @@ uint32_t alignCursorForSpan(uint32_t cursor, uint32_t width, uint32_t span) {
 
 // Re-keys @p key for Atlas::append(): Codepoint keys get their mask field replaced (the real
 // codepoint and any AUTO_KEY_START marker bits pass through untouched); Name keys get prefixed.
-slughorn::Key remapAppendKey(const slughorn::Key& key, uint8_t mask, const std::string& namePrefix) {
+slughorn::Key remapAppendKey(const slughorn::Key& key, uint8_t mask, std::string_view namePrefix) {
 	using slughorn::Key;
 
 	if(key.type() == Key::Type::Name) {
 		if(namePrefix.empty()) return key;
 
-		return Key(namePrefix + ":" + key.name());
+		// TODO: Should we support some kind of Redis-like "arbitrary key" syntax?
+		std::string name{namePrefix};
+
+		name += ':';
+		name += key.name();
+
+		return Key(std::move(name));
 	}
 
 	const uint32_t raw = (key.codepoint() & ~Key::MASK_MASK) | (uint32_t(mask) << Key::MASK_SHIFT);
@@ -340,7 +346,7 @@ void Atlas::addCompositeShape(Key key, CompositeShape composite) {
 // Atlas::append
 // ================================================================================================
 
-void Atlas::append(const Atlas& source, uint8_t mask, const std::string& namePrefix) {
+void Atlas::append(const Atlas& source, uint8_t mask, std::string_view namePrefix) {
 	if(_built) return;
 
 	for(const auto& [key, shape] : source.getShapes()) {

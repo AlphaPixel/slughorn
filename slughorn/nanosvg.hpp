@@ -53,6 +53,8 @@
 
 #include "slughorn.hpp"
 
+#include <filesystem>
+
 #ifdef SLUGHORN_NANOSVG_IMPLEMENTATION
 #define NANOSVG_IMPLEMENTATION
 #endif
@@ -94,7 +96,8 @@ namespace nanosvg {
 // ================================================================================================
 // LogCallback / LoadConfig
 // ================================================================================================
-using LogCallback = std::function<void(int level, const std::string& msg)>;
+// The message is valid only for the duration of the callback.
+using LogCallback = std::function<void(int level, std::string_view msg)>;
 
 // Controls how a matched ShapeRule overrides default load behavior.
 enum class ShapePolicy : uint32_t {
@@ -249,7 +252,7 @@ CompositeShape loadImage(
 // loadFile / loadString - convenience wrappers
 // ================================================================================================
 CompositeShape loadFile(
-	const std::string& path,
+	const std::filesystem::path& path,
 	Atlas& atlas,
 	KeyIterator& keys,
 	slug_t dpi=96_cv,
@@ -257,7 +260,7 @@ CompositeShape loadFile(
 );
 
 CompositeShape loadString(
-	const std::string& svg,
+	std::string_view svg,
 	Atlas& atlas,
 	KeyIterator& keys,
 	slug_t dpi=96_cv,
@@ -673,7 +676,7 @@ CompositeShape loadImage(
 }
 
 CompositeShape loadFile(
-	const std::string& path,
+	const std::filesystem::path& path,
 	Atlas& atlas,
 	KeyIterator& keys,
 	slug_t dpi,
@@ -682,10 +685,11 @@ CompositeShape loadFile(
 	static const LoadConfig dflt{};
 	const LoadConfig& cfg = config ? *config : dflt;
 
-	NSVGimage* image = nsvgParseFromFile(path.c_str(), "px", dpi);
+	const std::string pathString = path.string();
+	NSVGimage* image = nsvgParseFromFile(pathString.c_str(), "px", dpi);
 
 	if(!image) {
-		warn(cfg, 2, "loadFile: failed to parse '", path, "'");
+		warn(cfg, 2, "loadFile: failed to parse '", pathString, "'");
 
 		return {};
 	}
@@ -698,7 +702,7 @@ CompositeShape loadFile(
 }
 
 CompositeShape loadString(
-	const std::string& svg,
+	std::string_view svg,
 	Atlas& atlas,
 	KeyIterator& keys,
 	slug_t dpi,
@@ -707,7 +711,7 @@ CompositeShape loadString(
 	static const LoadConfig dflt{};
 	const LoadConfig& cfg = config ? *config : dflt;
 
-	std::string buf = svg;
+	std::string buf{svg};
 
 	NSVGimage* image = nsvgParse(buf.data(), "px", dpi);
 

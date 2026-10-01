@@ -266,7 +266,7 @@ void test_Shape() {
 // =============================================================================
 
 void test_Gradients() {
-	auto testGradient = [](const char* label, const std::string& svg, auto&& checks) {
+	auto testGradient = [](const char* label, std::string_view svg, auto&& checks) {
 		std::cout << "\n=== test_Gradients (" << label << ") ===" << std::endl;
 
 		slughorn::Atlas atlas;
@@ -461,7 +461,7 @@ void test_CompositeShape() {
 // layout in one shot. Warnings about skipped shapes go to stderr as usual.
 // =============================================================================
 
-void dumpSVGFile(const std::string& path) {
+void dumpSVGFile(const std::filesystem::path& path) {
 	std::cerr << "=== SVG dump: " << path << " ===" << std::endl;
 
 	slughorn::Atlas atlas;
