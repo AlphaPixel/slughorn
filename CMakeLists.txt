@@ -486,9 +486,9 @@ if(SLUGHORN_BUILD_TESTS)
 
 	# Benchmark, not a correctness test - timing varies by machine, so it is built but not
 	# registered via add_test(); run it directly to compare renderSample vs renderSampleBanded.
-	add_executable(slughorn-test-render-bench "test/slughorn-test-render-bench.cpp")
-	target_link_libraries(slughorn-test-render-bench PRIVATE slughorn)
-	target_compile_options(slughorn-test-render-bench PRIVATE ${SLUGHORN_COMPILE_OPTIONS})
+	# add_executable(slughorn-test-render-bench "test/slughorn-test-render-bench.cpp")
+	# target_link_libraries(slughorn-test-render-bench PRIVATE slughorn)
+	# target_compile_options(slughorn-test-render-bench PRIVATE ${SLUGHORN_COMPILE_OPTIONS})
 endif()
 
 # Let's be honest... I mostly care about the frontends I care about! So, these
