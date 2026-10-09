@@ -8,6 +8,7 @@
 // - Software rendering / visual validation without a GPU
 // - SDF/MSDF tile baking (render::field(), see Atlas::SDF)
 // - Post-build curve access for strokeText / glyphOutline
+// - CPU, GL-free hit testing (Sampler::pick(), authored-space only - see its own comment)
 //
 // Usage:
 //
@@ -17,6 +18,10 @@
 //
 // decode() reads the packed curve/band textures produced by Atlas::build() and
 // Atlas::packTextures(). It can be called any time after packTextures() returns.
+//
+// For a one-shot pick against a single Shape, skip decode() entirely:
+//
+// bool hit = slughorn::render::Sampler(shape).pick(transform, scale, worldX, worldY);
 //
 // No GPU, no Python, no external dependencies beyond slughorn.hpp.
 // ================================================================================================
@@ -71,8 +76,31 @@ struct Grid {
 // Sampler - holds a decoded shape and provides coverage evaluation
 // ================================================================================================
 
+struct Sampler;
+
+// Forward-declared here so Sampler's atlas+key ctor below can call it from a complete-class
+// context; defined after Sampler, next to its 3-arg sibling (see decode()'s own section).
+inline Sampler decode(const Atlas& atlas, Key key);
+
 struct Sampler {
+	// shape.curves is always left empty here, deliberately - whichever ctor built this Sampler
+	// already moved/reconstructed the real curve data into `curves` below, and nothing in Sampler
+	// ever reads shape.curves. Keeping it populated would just be a second live copy of the same
+	// (or, on the decode() path, DIFFERENT - see curves' own comment) data for free.
 	Atlas::Shape shape;
+
+	// The curve list renderSample()/renderSampleBanded()/pick() actually walk. What's IN here
+	// depends entirely on which ctor built this Sampler - the two are not interchangeable:
+	//
+	// - Sampler(shape) (cheap ctor): moved straight out of Shape::curves - same values, same
+	//   order, full original precision. No decode() call.
+	// - Sampler(atlas, key) (via decode()): reconstructed from the atlas's PACKED curve/band
+	//   textures - a different representation, not just a copy. May be half-float-rounded (if
+	//   the curve texture is RGBA16F), is reordered/deduped by packed texel address rather than
+	//   authoring order, and - critically - hbandIndices/vbandIndices are remapped to point at
+	//   THIS specific reconstruction. This is intentional: decode() exists to mirror exactly what
+	//   the GPU shader reads off its own textures, packing/precision effects included, not to
+	//   hand back the original authored curves a second time.
 	Atlas::Curves curves;
 
 	std::vector<uint32_t> hbandOffsets;
@@ -81,6 +109,20 @@ struct Sampler {
 	std::vector<uint32_t> vbandIndices;
 	std::array<uint8_t, Atlas::INDIRECTION_SIZE> indirY{};
 	std::array<uint8_t, Atlas::INDIRECTION_SIZE> indirX{};
+
+	Sampler() = default;
+
+	// Cheap path - curves moved straight off Shape::curves, no decode(). shape.curves is cleared
+	// right after so there is exactly one live copy of the data, not two (shape_ taken by value
+	// so an rvalue caller gets a free move instead of a copy). pick() stays on the unbanded scan
+	// below (hbandOffsets/vbandOffsets stay empty).
+	explicit Sampler(Atlas::Shape shape_) : curves(std::move(shape_.curves)) {
+		shape = std::move(shape_);
+	}
+
+	// Full path - reconstructs bands via decode(). pick() switches to the banded scan once this
+	// ctor runs (hbandOffsets.size() >= 2 is the tell, see pick() below).
+	Sampler(const Atlas& atlas, Key key) { *this = decode(atlas, key); }
 
 	// -------------------------------------------------------------------------
 	// Em-space helpers
@@ -257,6 +299,44 @@ struct Sampler {
 		out.fill = _calcCoverage(out.xcov, out.ycov, out.xwgt, out.ywgt);
 
 		return out;
+	}
+
+	// CPU-side, GL-free hit test against this Sampler's analytic fill - answers "does this
+	// world-space point land inside the shape's real fill" without a GPU, a camera, or an FBO
+	// readback. Coverage-exact (same Slug math the GPU fragment shader runs), not a bbox
+	// approximation. transform/scale are the same placement args as Shape::computeQuad() - the
+	// inverse of that function's own mapping.
+	//
+	// This is an AUTHORED-space query: it tests the shape exactly as it was built. It does not
+	// know about anything a shader could have done to it (VertexHook deformation, masks, fragment
+	// discards) - that is a rendered-space question, answered by a GPU id-buffer pick instead.
+	//
+	// Dispatches on hbandOffsets.size() >= 2, which doubles as proof of which ctor built this
+	// Sampler - no separate stored flag needed. The cheap Sampler(shape) ctor never pays for
+	// decode(), so there is no caching question on that path either.
+	bool pick(const Transform& transform, slug_t scale, slug_t worldX, slug_t worldY) const {
+		if(curves.empty() || scale == 0_cv) return false;
+
+		const slug_t localX = worldX / scale - transform.x + shape.originX;
+		const slug_t localY = worldY / scale - transform.y + shape.originY;
+
+		// Cheap bbox pre-test in local space, mirroring computeQuad()'s own authored bounds - skips
+		// the curve walk for the overwhelmingly common "nowhere near this layer" case.
+		if(
+			localX < shape.bearingX || localX > shape.bearingX + shape.width ||
+			localY < shape.bearingY - shape.height || localY > shape.bearingY
+		) return false;
+
+		// No AA ramp wanted for a hit test - a huge "pixels per em" collapses the 1-pixel AA ramp
+		// to a sharp inside/outside step. The 0.5 threshold is edge-exact either way.
+		constexpr slug_t INFINITE_PPE = 1e6_cv;
+
+		const auto result = hbandOffsets.size() >= 2
+			? renderSampleBanded(localX, localY, INFINITE_PPE, INFINITE_PPE)
+			: renderSample(localX, localY, INFINITE_PPE, INFINITE_PPE)
+		;
+
+		return result.fill >= 0.5_cv;
 	}
 
 	Grid renderGrid(
@@ -438,6 +518,7 @@ inline Sampler decode(
 	Sampler out;
 
 	out.shape = shape;
+	out.shape.curves.clear(); // see Sampler::shape's own comment - never read, never kept live here
 
 	if(shape.bandScaleX == 0_cv || shape.bandScaleY == 0_cv) {
 		out.hbandOffsets = {0, 0};
