@@ -5,7 +5,7 @@
 // No SLUGHORN_SERIAL dependency: everything here is in-memory, built straight from canvas::Canvas.
 //
 // WIP: there is deliberately no multi-layer CompositeShape hit test here yet - dropped pending a
-// future CompositeSampler (see slughorn/ai/todo-picking.md), not an oversight.
+// future CompositeSampler; not an oversight.
 
 #include "slughorn/canvas.hpp"
 #include "slughorn/render.hpp"

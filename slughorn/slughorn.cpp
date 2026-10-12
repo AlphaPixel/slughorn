@@ -1002,7 +1002,7 @@ void Atlas::buildShapeBands(
 	// examples/python/pyosgslug-glyph.py, both knobs): a 100000x SPAN change produced no
 	// observable difference at matched zoom, while a 100000-unit OFFSET destroyed the same shape
 	// outright, before any zoom at all. The old span test therefore fired on the harmless case and
-	// stayed completely silent on the fatal one. See osgSlug's ai/context-todo-em-normalization.md.
+	// stayed completely silent on the fatal one.
 	//
 	// Every backend already satisfies this by construction - Canvas::_toLocalOrigin() (autoMetrics,
 	// the default), freetype.hpp's 1/units_per_EM, nanosvg.hpp's 1/image->width - so in practice
