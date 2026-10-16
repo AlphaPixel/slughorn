@@ -720,8 +720,11 @@ public:
 			// shared point, so a fixed 1:1-with-pts index no longer holds.
 			Atlas::Curves lwall, rwall;
 
+			// Straight edges duplicate the endpoint as the control point, the same convention as
+			// CurveDecomposer::lineTo() - a midpoint control point leaves the quadratic
+			// coefficient at rounding noise rather than robustly non-zero.
 			auto pushWallSegment = [](Atlas::Curves& wall, slug_t x0, slug_t y0, slug_t x2, slug_t y2) {
-				wall.push_back({x0, y0, (x0 + x2) * 0.5_cv, (y0 + y2) * 0.5_cv, x2, y2});
+				wall.push_back({x0, y0, x2, y2, x2, y2});
 			};
 
 			for(size_t i = 0; i < numSegs; i++) {
@@ -796,6 +799,8 @@ public:
 
 				rwall.back().x3 += h * dNx; rwall.back().y3 += h * dNy;
 				lwall.back().x3 += h * dNx; lwall.back().y3 += h * dNy;
+				rwall.back().x2 = rwall.back().x3; rwall.back().y2 = rwall.back().y3;
+				lwall.back().x2 = lwall.back().x3; lwall.back().y2 = lwall.back().y3;
 				lwall.front().x1 -= h * d0x; lwall.front().y1 -= h * d0y;
 				rwall.front().x1 -= h * d0x; rwall.front().y1 -= h * d0y;
 			}
@@ -815,7 +820,7 @@ public:
 				const slug_t ax = rwall.back().x3, ay = rwall.back().y3;
 				const slug_t bx = lwall.back().x3, by = lwall.back().y3;
 
-				outline.push_back({ax, ay, (ax + bx) * 0.5_cv, (ay + by) * 0.5_cv, bx, by});
+				outline.push_back({ax, ay, bx, by, bx, by});
 			}
 
 			for(size_t i = lwall.size(); i-- > 0;) {
@@ -835,7 +840,7 @@ public:
 				const slug_t ax = lwall.front().x1, ay = lwall.front().y1;
 				const slug_t bx = rwall.front().x1, by = rwall.front().y1;
 
-				outline.push_back({ax, ay, (ax + bx) * 0.5_cv, (ay + by) * 0.5_cv, bx, by});
+				outline.push_back({ax, ay, bx, by, bx, by});
 			}
 
 			const size_t outlineStart = _pendingCurves.size();

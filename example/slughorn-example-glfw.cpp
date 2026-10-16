@@ -128,14 +128,23 @@ uint slug_CalcRootCode(float y1, float y2, float y3) {
 	return ((0x2E74u >> shift) & 0x0101u);
 }
 
+// Cancellation-free roots of a*t^2 - 2*b*t + c - see slughorn::render::Sampler::_solveRoots().
+vec2 slug_SolveRoots(float a, float b, float c) {
+	float disc = b * b - a * c;
+	float d = sqrt(max(disc, 0.0));
+	float q = b >= 0.0 ? b + d : b - d;
+	float tFar = q / a;
+	float tNear = disc > 0.0 ? c / q : tFar;
+	return b >= 0.0 ? vec2(tNear, tFar) : vec2(tFar, tNear);
+}
+
 vec2 slug_SolveHorizPoly(vec4 p12, vec2 p3) {
 	vec2 a = p12.xy - p12.zw * 2.0 + p3;
 	vec2 b = p12.xy - p12.zw;
-	float ra = 1.0 / a.y;
 	float rb = 0.5 / b.y;
-	float d = sqrt(max(b.y * b.y - a.y * p12.y, 0.0));
-	float t1 = (b.y - d) * ra;
-	float t2 = (b.y + d) * ra;
+	vec2 t = slug_SolveRoots(a.y, b.y, p12.y);
+	float t1 = t.x;
+	float t2 = t.y;
 	if(abs(a.y) < 1.0 / 65536.0) { t1 = p12.y * rb; t2 = t1; }
 	return vec2(
 		(a.x * t1 - b.x * 2.0) * t1 + p12.x,
@@ -146,11 +155,10 @@ vec2 slug_SolveHorizPoly(vec4 p12, vec2 p3) {
 vec2 slug_SolveVertPoly(vec4 p12, vec2 p3) {
 	vec2 a = p12.xy - p12.zw * 2.0 + p3;
 	vec2 b = p12.xy - p12.zw;
-	float ra = 1.0 / a.x;
 	float rb = 0.5 / b.x;
-	float d = sqrt(max(b.x * b.x - a.x * p12.x, 0.0));
-	float t1 = (b.x - d) * ra;
-	float t2 = (b.x + d) * ra;
+	vec2 t = slug_SolveRoots(a.x, b.x, p12.x);
+	float t1 = t.x;
+	float t2 = t.y;
 	if(abs(a.x) < 1.0 / 65536.0) { t1 = p12.x * rb; t2 = t1; }
 	return vec2(
 		(a.y * t1 - b.y * 2.0) * t1 + p12.y,

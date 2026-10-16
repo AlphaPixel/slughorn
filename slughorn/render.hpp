@@ -357,8 +357,8 @@ struct Sampler {
 
 		Grid grid{width, height, std::vector<slug_t>(width * height, 0_cv)};
 
-		const slug_t ppeX = cv(width);
-		const slug_t ppeY = cv(height);
+		const slug_t ppeX = cv(width) / sx;
+		const slug_t ppeY = cv(height) / sy;
 
 		auto renderRow = [&](uint32_t j) {
 			for(uint32_t i = 0; i < width; i++) {
@@ -412,6 +412,25 @@ private:
 		return (0x2E74u >> shift) & 0x0101u;
 	}
 
+	// Roots t1 = (b - d) / a and t2 = (b + d) / a of a*t^2 - 2*b*t + c, for |a| >= EPS. Computed
+	// directly, the root whose numerator subtracts nearly equal values loses every significant
+	// digit once |a| is small next to |b| - a nearly straight curve, or a straight edge whose
+	// float32 midpoint control point leaves a at one ulp of the coordinate magnitude (2^-16 at
+	// 128). That root is taken in its equal form c / (b + d) or c / (b - d) instead, whichever
+	// denominator adds like signs: q = b + sign(b) * d never cancels, so the roots are c / q and
+	// q / a. The result is continuous across the EPS linear fallback, where c / q -> c / (2b).
+	// A clamped (negative) discriminant keeps both roots at b / a so a grazing curve's paired
+	// contributions still cancel.
+	static std::pair<slug_t, slug_t> _solveRoots(slug_t a, slug_t b, slug_t c) {
+		const slug_t disc = b * b - a * c;
+		const slug_t d = std::sqrt(std::max(disc, 0_cv));
+		const slug_t q = b >= 0_cv ? b + d : b - d;
+		const slug_t tFar = q / a;
+		const slug_t tNear = disc > 0_cv ? c / q : tFar;
+
+		return b >= 0_cv ? std::pair{tNear, tFar} : std::pair{tFar, tNear};
+	}
+
 	static std::pair<slug_t, slug_t> _solveHorizPoly(
 		slug_t x1, slug_t y1,
 		slug_t x2, slug_t y2,
@@ -427,8 +446,7 @@ private:
 			return {x, x};
 		}
 
-		const slug_t d = std::sqrt(std::max(by * by - ay * y1, 0_cv));
-		const slug_t t1 = (by - d) / ay, t2 = (by + d) / ay;
+		const auto [t1, t2] = _solveRoots(ay, by, y1);
 
 		return {(ax * t1 - 2_cv * bx) * t1 + x1, (ax * t2 - 2_cv * bx) * t2 + x1};
 	}
@@ -448,8 +466,7 @@ private:
 			return {y, y};
 		}
 
-		const slug_t d = std::sqrt(std::max(bx * bx - ax * x1, 0_cv));
-		const slug_t t1 = (bx - d) / ax, t2 = (bx + d) / ax;
+		const auto [t1, t2] = _solveRoots(ax, bx, x1);
 
 		return {(ay * t1 - 2_cv * by) * t1 + y1, (ay * t2 - 2_cv * by) * t2 + y1};
 	}
