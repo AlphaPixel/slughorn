@@ -582,16 +582,21 @@ public:
 		enum class CornerKind { Miter, Bevel, Round };
 
 		// Per-corner join data. innerNx/innerNy is the offset factor applied symmetrically
-		// (+h on the left wall, -h on the right wall) exactly like the original single `pn`
-		// value did - correct on its own for Miter (both walls share one point), but for
-		// Bevel/Round it's only correct for the INNER wall (unit bisector, never miter-scaled;
-		// concave corners never need more, they undershoot by construction). The OUTER wall at
-		// a Bevel/Round corner ignores innerNx/innerNy entirely and instead gets two raw
-		// segN-offset points joined by an explicit bevel edge or arc - see the per-segment loop.
+		// (+h on the left wall, -h on the right wall): the miter-scaled bisector, which puts the
+		// point where the two adjacent offset edges intersect. A Miter corner shares that point
+		// between both walls. A Bevel/Round corner uses it for the INNER wall only - the inner
+		// side of a joint is the same for every join style - while the OUTER wall gets two raw
+		// segN-offset points joined by an explicit bevel edge or arc (see the per-segment loop).
+		//
+		// innerPivot marks a Bevel/Round corner whose inner intersection lies beyond the end of
+		// an adjacent segment (a very sharp turn or a short segment). Its inner wall instead runs
+		// from the raw incoming offset point through the corner point itself to the raw outgoing
+		// offset point; the overlap that creates is covered twice, which nonzero filling absorbs.
 		struct Corner {
 			CornerKind kind = CornerKind::Miter;
 			bool outerIsLeft = true;
 			slug_t innerNx = 0_cv, innerNy = 0_cv;
+			bool innerPivot = false;
 		};
 
 		bool any = false;
@@ -627,11 +632,14 @@ public:
 
 			// Pass 2a: per-segment perpendicular normals (left-hand: +90 deg from travel direction).
 			std::vector<std::pair<slug_t, slug_t>> segN(numSegs);
+			std::vector<slug_t> segLen(numSegs);
 
 			for(size_t i = 0; i < numSegs; i++) {
 				const slug_t dx = pts[i + 1].first - pts[i].first;
 				const slug_t dy = pts[i + 1].second - pts[i].second;
 				const slug_t len = std::sqrt(dx * dx + dy * dy);
+
+				segLen[i] = len;
 
 				segN[i] = len > 1e-9_cv
 					? std::pair{-dy / len, dx / len}
@@ -676,17 +684,27 @@ public:
 					slug_t m = 1_cv;
 					bool exceeded = false;
 
+					// d <= 1e-3 is a turn within ~0.1 deg of a full reversal: its miter ratio
+					// exceeds any limit.
 					if(d > 1e-3_cv) {
 						m = 1_cv / d;
 						exceeded = m > miterLimit;
 					}
 
+					else exceeded = true;
+
 					c.kind = (join == LineJoin::Miter && !exceeded) ? CornerKind::Miter
 						: (join == LineJoin::Round ? CornerKind::Round : CornerKind::Bevel)
 					;
 
-					if(c.kind == CornerKind::Miter) { c.innerNx = bx * m; c.innerNy = by * m; }
-					else { c.innerNx = bx; c.innerNy = by; } // unit bisector, no miter scaling
+					c.innerNx = bx * m;
+					c.innerNy = by * m;
+
+					// h * sqrt(m^2 - 1) is how far the inner intersection sits along each
+					// adjacent segment, measured from the corner.
+					if(c.kind != CornerKind::Miter) c.innerPivot = d <= 1e-3_cv
+						|| h * std::sqrt(std::max(m * m - 1_cv, 0_cv)) > std::min(segLen[prev], segLen[cur])
+					;
 				}
 
 				// Near-180-degree reversal: bisector degenerates, no real corner to bevel/round --
@@ -739,18 +757,18 @@ public:
 				// A Bevel/Round corner's OUTER side ignores the shared inner-wall point and
 				// starts this segment at the raw, un-mitered pt + h*segN[i] instead - matching
 				// exactly where the join geometry (emitted below, while closing out the
-				// PREVIOUS segment) left off.
+				// PREVIOUS segment) left off. An innerPivot corner does the same on its inner side.
 				if(c0.kind != CornerKind::Miter) {
-					if(c0.outerIsLeft) { l0x = p0x + h * segN[i].first; l0y = p0y + h * segN[i].second; }
-					else { r0x = p0x - h * segN[i].first; r0y = p0y - h * segN[i].second; }
+					if(c0.outerIsLeft || c0.innerPivot) { l0x = p0x + h * segN[i].first; l0y = p0y + h * segN[i].second; }
+					if(!c0.outerIsLeft || c0.innerPivot) { r0x = p0x - h * segN[i].first; r0y = p0y - h * segN[i].second; }
 				}
 
 				slug_t l2x = p2x + h * c1.innerNx, l2y = p2y + h * c1.innerNy;
 				slug_t r2x = p2x - h * c1.innerNx, r2y = p2y - h * c1.innerNy;
 
 				if(c1.kind != CornerKind::Miter) {
-					if(c1.outerIsLeft) { l2x = p2x + h * segN[i].first; l2y = p2y + h * segN[i].second; }
-					else { r2x = p2x - h * segN[i].first; r2y = p2y - h * segN[i].second; }
+					if(c1.outerIsLeft || c1.innerPivot) { l2x = p2x + h * segN[i].first; l2y = p2y + h * segN[i].second; }
+					if(!c1.outerIsLeft || c1.innerPivot) { r2x = p2x - h * segN[i].first; r2y = p2y - h * segN[i].second; }
 				}
 
 				pushWallSegment(lwall, l0x, l0y, l2x, l2y);
@@ -782,6 +800,22 @@ public:
 						const slug_t sweep = std::atan2(std::sin(a1 - a0), std::cos(a1 - a0));
 
 						_appendArcChunks(outerWall, p2x, p2y, h, a0, sweep);
+					}
+
+					if(c1.innerPivot) {
+						Atlas::Curves& innerWall = c1.outerIsLeft ? rwall : lwall;
+
+						pushWallSegment(
+							innerWall,
+							p2x - h * sign * segN[i].first, p2y - h * sign * segN[i].second,
+							p2x, p2y
+						);
+
+						pushWallSegment(
+							innerWall,
+							p2x, p2y,
+							p2x - h * sign * segN[nextSeg].first, p2y - h * sign * segN[nextSeg].second
+						);
 					}
 				}
 			}
