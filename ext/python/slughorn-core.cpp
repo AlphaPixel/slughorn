@@ -212,6 +212,9 @@ void bind_core(py::module_& m) {
 		.def("is_identity", &slughorn::Matrix::isIdentity,
 			"Return True if this matrix is (approximately) the identity."
 		)
+		.def("inverse", &slughorn::Matrix::inverse,
+			"Return the inverse matrix, or None if this matrix is singular."
+		)
 		.def("apply", [](const slughorn::Matrix& mat, slug_t x, slug_t y) {
 			slug_t ox, oy;
 
@@ -312,6 +315,69 @@ void bind_core(py::module_& m) {
 		"Store the result in GradientInfo.transform.\n"
 		"Returns Matrix.identity() for degenerate (zero-length) inputs."
 	);
+
+	// ============================================================================================
+	// slughorn.PatternInfo
+	// ============================================================================================
+	auto patinfo_ = py::class_<slughorn::PatternInfo>(m, "PatternInfo");
+
+	// Bound before patinfo_'s .def() chain, for the same default-value reason as GradientInfo.Type.
+	py::enum_<slughorn::PatternInfo::Repeat>(patinfo_, "Repeat")
+		.value("Repeat", slughorn::PatternInfo::Repeat::Repeat)
+		.value("Reflect", slughorn::PatternInfo::Repeat::Reflect)
+	;
+
+	patinfo_
+		.def(py::init<>(), "Default: no tile, unit cell, identity transform, repeat on both axes.")
+		.def(
+			py::init([](
+				py::object tile,
+				slug_t cellX,
+				slug_t cellY,
+				slug_t cellWidth,
+				slug_t cellHeight,
+				slughorn::Matrix transform,
+				slughorn::PatternInfo::Repeat repeatX,
+				slughorn::PatternInfo::Repeat repeatY
+			) {
+				slughorn::PatternInfo info;
+
+				if(py::isinstance<py::str>(tile)) info.tile = slughorn::Key(py::cast<std::string>(tile));
+
+				else info.tile = py::cast<slughorn::Key>(tile);
+
+				info.cellX = cellX;
+				info.cellY = cellY;
+				info.cellWidth = cellWidth;
+				info.cellHeight = cellHeight;
+				info.transform = transform;
+				info.repeatX = repeatX;
+				info.repeatY = repeatY;
+
+				return info;
+			}),
+			"tile"_a,
+			"cell_x"_a=0_cv,
+			"cell_y"_a=0_cv,
+			"cell_width"_a=1_cv,
+			"cell_height"_a=1_cv,
+			"transform"_a=slughorn::Matrix{},
+			"repeat_x"_a=slughorn::PatternInfo::Repeat::Repeat,
+			"repeat_y"_a=slughorn::PatternInfo::Repeat::Repeat,
+			"Construct with optional field=value kwargs, e.g. PatternInfo(tile=key, cell_width=2.0)."
+		)
+		.def_readwrite("tile", &slughorn::PatternInfo::tile, "Key of the Shape repeated in every cell.")
+		.def_readwrite("cell_x", &slughorn::PatternInfo::cellX, "Cell x, in the tile Shape's em-space.")
+		.def_readwrite("cell_y", &slughorn::PatternInfo::cellY, "Cell y, in the tile Shape's em-space.")
+		.def_readwrite("cell_width", &slughorn::PatternInfo::cellWidth, "Cell width (the X repeat period).")
+		.def_readwrite("cell_height", &slughorn::PatternInfo::cellHeight, "Cell height (the Y repeat period).")
+		.def_readwrite("transform", &slughorn::PatternInfo::transform,
+			"Affine matrix mapping the region's em-space to pattern (tile em) space."
+		)
+		.def_readwrite("repeat_x", &slughorn::PatternInfo::repeatX)
+		.def_readwrite("repeat_y", &slughorn::PatternInfo::repeatY)
+		.def("__repr__", [](const slughorn::PatternInfo& p) { return streamRepr(p); })
+	;
 
 	// ============================================================================================
 	// slughorn.Quad
@@ -482,6 +548,7 @@ void bind_core(py::module_& m) {
 				uint32_t effectId,
 				slug_t effectParam,
 				uint32_t gradientId,
+				uint32_t patternId,
 				slug_t bleed,
 				slughorn::DrawMode drawMode,
 				slughorn::BlendMode blendMode
@@ -501,6 +568,7 @@ void bind_core(py::module_& m) {
 				layer.effectId = effectId;
 				layer.effectParam = effectParam;
 				layer.gradientId = gradientId;
+				layer.patternId = patternId;
 				layer.bleed = bleed;
 				layer.drawMode = drawMode;
 				layer.blendMode = blendMode;
@@ -514,6 +582,7 @@ void bind_core(py::module_& m) {
 			"effectId"_a=0,
 			"effectParam"_a=0_cv,
 			"gradientId"_a=0,
+			"patternId"_a=0,
 			"bleed"_a=0_cv,
 			"drawMode"_a=slughorn::DrawMode::Visible,
 			"blendMode"_a=slughorn::BlendMode::SrcOver
@@ -545,6 +614,10 @@ void bind_core(py::module_& m) {
 			"Non-zero = 1-based index into the atlas gradient list "
 			"(registered via Atlas.add_gradient()). "
 			"When non-zero, layer.color.rgb is ignored; layer.color.a is a global opacity multiplier.")
+		.def_readwrite("patternId", &slughorn::Layer::patternId,
+			"Pattern fill ID. 0 = none. "
+			"Non-zero = 1-based index into the atlas pattern list "
+			"(registered via Atlas.add_pattern()). Mutually exclusive with gradientId.")
 		.def_readwrite("bleed", &slughorn::Layer::bleed,
 			"Extra em-space CONTENT margin on each side of the quad (default 0), for effects "
 			"that intentionally draw outside the shape's true bounds (outer glow, drop shadow, "
@@ -1310,6 +1383,21 @@ void bind_core(py::module_& m) {
 				return a.getGradients();
 			},
 			"Return a copy of the registered GradientInfo list (valid after build())."
+		)
+
+		.def("add_pattern",
+			&slughorn::Atlas::addPattern,
+			"info"_a,
+			"Register a pattern. Returns a 1-based ID (0 = error / atlas already built).\n"
+			"Store the ID in Layer.patternId to activate the pattern for that layer.\n"
+			"Must be called before build(); the tile shape must be added before build() too."
+		)
+
+		.def("get_patterns",
+			[](const slughorn::Atlas& a) {
+				return a.getPatterns();
+			},
+			"Return a copy of the registered PatternInfo list, in add_pattern() order."
 		)
 
 		.def("decode",

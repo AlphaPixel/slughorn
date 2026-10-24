@@ -68,6 +68,24 @@ void bind_canvas(py::module_& canvas) {
 		})
 	;
 
+	py::class_<slughorn::canvas::Canvas::PatternHandle>(canvas, "PatternHandle",
+		"Pattern descriptor returned by Canvas.define_pattern(): the tile shape, its cell (in the\n"
+		"tile's em-space) and repeat modes. Pass it to Canvas.fill_pattern() to fill the current\n"
+		"path with the pattern. transform is HTML Canvas's CanvasPattern.setTransform(): it maps\n"
+		"pattern space to canvas space and must be invertible.")
+		.def_readwrite("info", &slughorn::canvas::Canvas::PatternHandle::info,
+			"PatternInfo: tile, cell and repeat modes (its transform is set by fill_pattern())."
+		)
+		.def_readwrite("tile_offset_x", &slughorn::canvas::Canvas::PatternHandle::tileOffsetX)
+		.def_readwrite("tile_offset_y", &slughorn::canvas::Canvas::PatternHandle::tileOffsetY)
+		.def_readwrite("transform", &slughorn::canvas::Canvas::PatternHandle::transform,
+			"Pattern space -> canvas space (default identity)."
+		)
+		.def("__repr__", [](const slughorn::canvas::Canvas::PatternHandle& h) {
+			return "Canvas.PatternHandle(" + streamRepr(h.info) + ")";
+		})
+	;
+
 	// Path class ----------------------------------------------------------
 
 	{
@@ -214,8 +232,13 @@ void bind_canvas(py::module_& canvas) {
 
 	// Canvas class --------------------------------------------------------
 
+	// Canvas holds a raw Atlas&, so keep_alive<1, 2> ties the Atlas's Python lifetime to the
+	// Canvas's; without it, Canvas(slughorn.Atlas()) writes into a freed Atlas.
+	//
+	// TODO: Revisit this later with pybind11x.hpp
 	py::class_<slughorn::canvas::Canvas>(canvas, "Canvas")
 		.def(py::init<slughorn::Atlas&, slughorn::KeyIterator>(),
+			py::keep_alive<1, 2>(),
 			"atlas"_a, "key_iterator"_a=slughorn::KeyIterator(),
 			"Construct a Canvas writing into atlas, using key_iterator for auto-generated keys."
 		)
@@ -600,6 +623,44 @@ void bind_canvas(py::module_& canvas) {
 			},
 			"handle"_a, "scale"_a, "key"_a, "origin"_a=slughorn::Atlas::ShapeInfo::Origin{},
 			"Commit the current path as a gradient-filled Layer, registering under key."
+		)
+		.def("define_pattern",
+			&slughorn::canvas::Canvas::definePattern,
+			"x"_a, "y"_a, "w"_a, "h"_a,
+			"repeat_x"_a=slughorn::PatternInfo::Repeat::Repeat,
+			"repeat_y"_a=slughorn::PatternInfo::Repeat::Repeat,
+			"Commit the current path as a pattern tile shape (define_shape() semantics - no Layer,\n"
+			"path not cleared) with cell (x, y, w, h) in path coordinates, and return a\n"
+			"PatternHandle. The cell is converted to the tile's em-space, honoring auto_metrics."
+		)
+		// fill_pattern() - auto-key
+		.def("fill_pattern",
+			[](
+				slughorn::canvas::Canvas& c,
+				const slughorn::canvas::Canvas::PatternHandle& handle,
+				slughorn::Color color,
+				slug_t scale,
+				slughorn::Atlas::ShapeInfo::Origin origin
+			) {
+				return c.fillPattern(handle, color, scale, origin);
+			},
+			"handle"_a, "color"_a, "scale"_a=1_cv, "origin"_a=slughorn::Atlas::ShapeInfo::Origin{},
+			"Commit the current path as a Layer filled with the handle's pattern, drawn in color."
+		)
+		// fill_pattern() - named-key
+		.def("fill_pattern",
+			[](
+				slughorn::canvas::Canvas& c,
+				const slughorn::canvas::Canvas::PatternHandle& handle,
+				slughorn::Color color,
+				slug_t scale,
+				slughorn::Key key,
+				slughorn::Atlas::ShapeInfo::Origin origin
+			) {
+				return c.fillPattern(handle, color, scale, key, origin);
+			},
+			"handle"_a, "color"_a, "scale"_a, "key"_a, "origin"_a=slughorn::Atlas::ShapeInfo::Origin{},
+			"Commit the current path as a pattern-filled Layer, registering under key."
 		)
 		// stroke_gradient() - auto-key
 		.def("stroke_gradient",

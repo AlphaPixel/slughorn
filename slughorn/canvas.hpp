@@ -1468,6 +1468,83 @@ public:
 	}
 
 	// -------------------------------------------------------------------------
+	// Patterns
+	//
+	// definePattern() commits the current path as a pattern's tile Shape (defineShape()
+	// semantics - registers geometry, pushes no Layer, does not clear the path) together with
+	// its cell: the (x, y, w, h) rectangle, in the same coordinates as the path, that repeats.
+	// The cell is converted into the tile's em-space here, while the tile's autoMetrics
+	// re-origin offset is still known - see PatternInfo. With the default identity transform, the
+	// pattern lines up with where the tile was drawn on the canvas.
+	//
+	// fillPattern() fills the current path (the "region") with a handle's pattern: one
+	// addPattern() per fill, its PatternInfo::transform mapping the region's em-space back to the
+	// tile's. The tile is drawn in `color`.
+	//
+	// PatternHandle::transform is HTML Canvas's CanvasPattern.setTransform(): it maps pattern
+	// space to canvas space. It must be invertible, or fillPattern() fails.
+	// -------------------------------------------------------------------------
+
+	struct PatternHandle {
+		// tile, cell (tile em-space) and repeat modes; transform is filled in by fillPattern().
+		PatternInfo info = {};
+
+		// The tile's canvas-space -> em-space offset (its autoMetrics re-origin; 0 when off).
+		slug_t tileOffsetX = 0_cv;
+		slug_t tileOffsetY = 0_cv;
+
+		Matrix transform = {};
+	};
+
+	PatternHandle definePattern(
+		slug_t x,
+		slug_t y,
+		slug_t w,
+		slug_t h,
+		PatternInfo::Repeat repeatX=PatternInfo::Repeat::Repeat,
+		PatternInfo::Repeat repeatY=PatternInfo::Repeat::Repeat
+	) {
+		_consolidate();
+
+		if(_path._pendingCurves.empty()) return PatternHandle{};
+
+		const Key key = _key.next();
+
+		if(!_commitShape(_path._pendingCurves, key, 1_cv, {}, _path.pendingContourStarts())) return PatternHandle{};
+
+		slug_t minX = std::numeric_limits<slug_t>::max();
+		slug_t minY = std::numeric_limits<slug_t>::max();
+
+		for(const auto& c : _path._pendingCurves) {
+			minX = std::min({minX, c.x1, c.x2, c.x3});
+			minY = std::min({minY, c.y1, c.y2, c.y3});
+		}
+
+		// The path's curves already carry the path CTM; the cell gets the same treatment. Only
+		// its translation/scale survive - a rotated cell is not a rectangle.
+		slug_t x0, y0, x1, y1;
+
+		_path._ctm.apply(x, y, x0, y0);
+		_path._ctm.apply(x + w, y + h, x1, y1);
+
+		PatternHandle handle;
+
+		// With autoMetrics off the curves stay in canvas space (see _commitShape), so em == canvas.
+		handle.tileOffsetX = _autoMetrics ? minX : 0_cv;
+		handle.tileOffsetY = _autoMetrics ? minY : 0_cv;
+
+		handle.info.tile = key;
+		handle.info.cellX = std::min(x0, x1) - handle.tileOffsetX;
+		handle.info.cellY = std::min(y0, y1) - handle.tileOffsetY;
+		handle.info.cellWidth = std::abs(x1 - x0);
+		handle.info.cellHeight = std::abs(y1 - y0);
+		handle.info.repeatX = repeatX;
+		handle.info.repeatY = repeatY;
+
+		return handle;
+	}
+
+	// -------------------------------------------------------------------------
 	// Band split state (persists like fillStyle - applies to subsequent commits)
 	//
 	// setSplits() - explicit normalized [0,1] fractions; clears any strategy
@@ -1615,6 +1692,67 @@ public:
 		_path._pendingCurves.clear();
 		_path._pendingSubpathStarts.clear();
 		_path._pendingSubpathsUntracked = false;
+
+		return layer;
+	}
+
+	Layer fillPattern(const PatternHandle& handle, Color color, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={}) {
+		return fillPattern(handle, color, scale, _key.next(), origin);
+	}
+
+	Layer fillPattern(
+		const PatternHandle& handle,
+		Color color,
+		slug_t scale,
+		Key key,
+		Atlas::ShapeInfo::Origin origin={}
+	) {
+		_consolidate();
+
+		if(_path._pendingCurves.empty() || handle.info.tile == Key(0u)) return Layer{};
+
+		const auto inverse = handle.transform.inverse();
+
+		if(!inverse) return Layer{};
+
+		// The region's own re-origin offset, mirroring _commitFill(): its curves are scaled, then
+		// (autoMetrics on) moved so their bbox minimum is the em origin.
+		slug_t minX = 0_cv;
+		slug_t minY = 0_cv;
+
+		if(_autoMetrics) {
+			minX = std::numeric_limits<slug_t>::max();
+			minY = std::numeric_limits<slug_t>::max();
+
+			for(const auto& c : _path._pendingCurves) {
+				minX = std::min({minX, c.x1, c.x2, c.x3});
+				minY = std::min({minY, c.y1, c.y2, c.y3});
+			}
+
+			minX *= scale;
+			minY *= scale;
+		}
+
+		// region em -> canvas: (em + min) / scale; canvas -> pattern space: inverse;
+		// pattern space -> tile em: minus the tile's own offset.
+		PatternInfo info = handle.info;
+
+		info.transform =
+			Matrix::translate(-handle.tileOffsetX, -handle.tileOffsetY) *
+			*inverse *
+			Matrix::scale(1_cv / scale, 1_cv / scale) *
+			Matrix::translate(minX, minY)
+		;
+
+		Layer layer = _commitFill(_path._pendingCurves, color, scale, key, origin, Matrix::identity(), _path.pendingContourStarts());
+
+		if(layer.key == Key(0u)) return layer;
+
+		const uint32_t pid = _atlas.addPattern(info);
+
+		layer.patternId = pid;
+
+		_composite.layers.back().patternId = pid;
 
 		return layer;
 	}

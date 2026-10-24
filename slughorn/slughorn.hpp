@@ -212,6 +212,28 @@ struct Matrix {
 		yo = yx * x + yy * y + dy;
 	}
 
+	// The inverse transform, or std::nullopt when the matrix is singular.
+	std::optional<Matrix> inverse() const {
+		// `det` is the matrix "determinant."
+		const slug_t det = xx * yy - xy * yx;
+
+		if(std::abs(det) < 1e-12_cv) return std::nullopt;
+
+		const slug_t inv = 1_cv / det;
+
+		Matrix m{
+			.xx = yy * inv,
+			.yx = -yx * inv,
+			.xy = -xy * inv,
+			.yy = xx * inv
+		};
+
+		m.dx = -(m.xx * dx + m.xy * dy);
+		m.dy = -(m.yx * dx + m.yy * dy);
+
+		return m;
+	}
+
 	// Concatenate: returns (this * rhs), i.e. rhs is applied first.
 	Matrix operator*(const Matrix& rhs) const {
 		return {
@@ -665,6 +687,60 @@ struct Mask {
 };
 
 // ================================================================================================
+// PatternInfo
+//
+// Describes a fill pattern: one tile Shape repeated across a layer's own shape (the "region").
+// PatternInfo is registered with Atlas via addPattern() before build(); the returned ID is stored
+// in Layer::patternId to activate the pattern for that layer. Like GradientInfo, slughorn only
+// describes the pattern - the frontend evaluates it.
+//
+// A frontend evaluates a fragment at region em-coordinate `em` as:
+//
+//   p = transform * em            (region em-space -> pattern space)
+//   q = p - (cellX, cellY)
+//   per axis: Repeat  -> q = mod(q, cellW/H)
+//             Reflect -> q = mod(q, cellW/H), mirrored on every other cell
+//   tileEm = (cellX, cellY) + q   (sample the tile Shape here)
+//
+// and multiplies the region's coverage by the tile's coverage at tileEm. The tile is drawn in the
+// layer's color.
+//
+// The cell is in the TILE shape's em-space, which is why it is stored explicitly rather than
+// assumed to be the tile's 0..1 box: with autoMetrics on, the tile's curves are re-origined to
+// their tight bounding box and its em-space no longer contains the authored cell's padding.
+// Canvas::definePattern() computes the cell for either case.
+//
+// The tile is sampled only inside its cell, so tile ink outside the cell is clipped (SVG's
+// overflow: hidden). A shape straddling a cell edge therefore joins up with its own other half
+// from the neighboring cell: a staggered (honeycomb/brick) layout is one cell two rows tall, with
+// full shapes drawn across the left and right edges. What a single sample cannot do is show ink
+// that a NEIGHBORING cell's tile spills into this one (PDF's overlapping tiles).
+//
+// v1 limits: a single-Shape tile (no CompositeShape tiles).
+// ================================================================================================
+struct PatternInfo {
+	// Repeat follows HTML Canvas's "repeat"; Reflect follows Cairo's mirrored CAIRO_EXTEND_REFLECT.
+	// There is no "no-repeat": the region shape already clips the pattern, so a single row or
+	// column is a narrow region, and a single tile is just a Layer.
+	enum class Repeat { Repeat, Reflect };
+
+	// The Shape repeated in every cell.
+	Key tile = Key(0u);
+
+	// The tile's cell (x, y, width, height) in the tile Shape's em-space.
+	slug_t cellX = 0_cv;
+	slug_t cellY = 0_cv;
+	slug_t cellWidth = 1_cv;
+	slug_t cellHeight = 1_cv;
+
+	// Region em-space -> pattern space; same convention as GradientInfo::transform.
+	Matrix transform = {};
+
+	Repeat repeatX = Repeat::Repeat;
+	Repeat repeatY = Repeat::Repeat;
+};
+
+// ================================================================================================
 // Layer
 //
 // Represents the "state" of a single `Shape` instance, and includes all of the information the
@@ -694,6 +770,11 @@ struct Layer {
 	// gradient list (registered via addGradient()). When non-zero, layer.color.rgb is ignored and
 	// layer.color.a acts as a global opacity multiplier.
 	uint32_t gradientId = 0;
+
+	// Pattern fill; 0 = none. Non-zero = 1-based index into the atlas pattern list (registered via
+	// addPattern()). Mutually exclusive with gradientId - a layer has one paint; a frontend may
+	// treat a layer with both set as an error.
+	uint32_t patternId = 0;
 
 	// Extra em-space CONTENT margin on each side of the quad, for effects that intentionally
 	// draw outside the shape's true bounds (outer glow, drop shadow, MSDF spread). Named after
@@ -1377,6 +1458,11 @@ public:
 	// during build(); adding one after build() has no effect on rendering.
 	uint32_t addGradient(const GradientInfo& info);
 
+	// Register a pattern. Returns a 1-based ID (0 = error / atlas already built).
+	// The ID is stored in Layer::patternId to activate the pattern for that layer.
+	// Must be called before build(). The tile Shape must also be added before build().
+	uint32_t addPattern(const PatternInfo& info);
+
 	// Selects the curve texture's storage format. Must be called before build(); throws after.
 	//
 	// RGBA32F (default): full float precision. Safe for arbitrary authored coordinate ranges --
@@ -1544,6 +1630,9 @@ public:
 	// Gradient list (valid after build() if any gradients were registered).
 	const std::vector<GradientInfo>& getGradients() const { return _gradients; }
 
+	// Pattern list, in addPattern() order (Layer::patternId - 1 indexes it).
+	const std::vector<PatternInfo>& getPatterns() const { return _patterns; }
+
 	// Valid after build(). Reports texture utilization and alignment padding waste.
 	// See PackingStats for field documentation.
 	const PackingStats& getPackingStats() const { return _packingStats; }
@@ -1577,6 +1666,7 @@ public:
 		std::unordered_map<Key, Shape, KeyHash> shapes;
 		std::unordered_map<Key, CompositeShape, KeyHash> composites;
 		std::vector<GradientInfo> gradients;
+		std::vector<PatternInfo> patterns;
 	};
 
 	void loadFromSerial(SerialData&& sd) {
@@ -1590,6 +1680,7 @@ public:
 		_bandData = std::move(sd.bandData);
 		_gradientData = std::move(sd.gradientData);
 		_gradients = std::move(sd.gradients);
+		_patterns = std::move(sd.patterns);
 		_packingStats = sd.packingStats;
 		_shapes = std::move(sd.shapes);
 		_compositeShapes = std::move(sd.composites);
@@ -1652,6 +1743,7 @@ private:
 	TextureData _scanlineCurveData;
 
 	std::vector<GradientInfo> _gradients;
+	std::vector<PatternInfo> _patterns;
 
 	SDF _sdf;
 
@@ -2171,6 +2263,25 @@ inline std::ostream& operator<<(std::ostream& os, const GradientInfo& g) {
 	;
 }
 
+inline std::ostream& operator<<(std::ostream& os, PatternInfo::Repeat repeat) {
+	switch(repeat) {
+		case PatternInfo::Repeat::Repeat: return os << "Repeat";
+		case PatternInfo::Repeat::Reflect: return os << "Reflect";
+	}
+
+	return os << "PatternInfo::Repeat(?)";
+}
+
+inline std::ostream& operator<<(std::ostream& os, const PatternInfo& p) {
+	return os
+		<< "PatternInfo(tile=" << p.tile
+		<< " cell=(" << p.cellX << "," << p.cellY << "," << p.cellWidth << "," << p.cellHeight << ")"
+		<< " transform=" << p.transform
+		<< " repeatX=" << p.repeatX
+		<< " repeatY=" << p.repeatY << ")"
+	;
+}
+
 inline std::ostream& operator<<(std::ostream& os, const KeyIterator& k) {
 	return os << "KeyIterator(prefix=\"" << k.prefix << "\" counter=" << k.counter << ")";
 }
@@ -2193,6 +2304,7 @@ inline std::ostream& operator<<(std::ostream& os, const Layer& l) {
 		<< " scale=" << l.scale
 		<< " effectId=" << l.effectId
 		<< " gradientId=" << l.gradientId
+		<< " patternId=" << l.patternId
 		<< " bleed=" << l.bleed
 		<< " drawMode=" << static_cast<int>(l.drawMode)
 		<< " blendMode=" << static_cast<int>(l.blendMode) << ")"

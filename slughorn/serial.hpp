@@ -366,6 +366,21 @@ GradientInfo::Type gradientTypeFromString(std::string_view s) {
 	return GradientInfo::Type::Linear;
 }
 
+json patternRepeatToString(PatternInfo::Repeat r) {
+	switch(r) {
+		case PatternInfo::Repeat::Repeat: return "repeat";
+		case PatternInfo::Repeat::Reflect: return "reflect";
+	}
+
+	return "repeat";
+}
+
+PatternInfo::Repeat patternRepeatFromString(std::string_view s) {
+	if(s == "reflect") return PatternInfo::Repeat::Reflect;
+
+	return PatternInfo::Repeat::Repeat;
+}
+
 json buildJson(
 	const Atlas& atlas,
 	bool embedBase64,
@@ -508,6 +523,29 @@ json buildJson(
 		j["gradients"] = gradients;
 	}
 
+	// Pattern metadata (no texture of its own - the tile is an ordinary shape)
+	if(!atlas.getPatterns().empty()) {
+		json patterns = json::array();
+
+		for(const auto& pi : atlas.getPatterns()) {
+			json jpi;
+
+			jpi["tile"] = keyToJson(pi.tile);
+			jpi["cell"] = json::array({pi.cellX, pi.cellY, pi.cellWidth, pi.cellHeight});
+			jpi["transform"] = json::array({
+				pi.transform.xx, pi.transform.yx,
+				pi.transform.xy, pi.transform.yy,
+				pi.transform.dx, pi.transform.dy
+			});
+			jpi["repeat_x"] = patternRepeatToString(pi.repeatX);
+			jpi["repeat_y"] = patternRepeatToString(pi.repeatY);
+
+			patterns.push_back(jpi);
+		}
+
+		j["patterns"] = patterns;
+	}
+
 	// Shapes
 	json shapes = json::array();
 
@@ -566,6 +604,7 @@ json buildJson(
 				{"effect_id", layer.effectId},
 				{"effect_param", static_cast<float>(layer.effectParam)},
 				{"gradient_id", layer.gradientId},
+				{"pattern_id", layer.patternId},
 				{"draw_mode", static_cast<uint8_t>(layer.drawMode)},
 				{"blend_mode", static_cast<uint8_t>(layer.blendMode)}
 			});
@@ -679,6 +718,33 @@ Atlas atlasFromJson(
 		}
 	}
 
+	if(j.contains("patterns")) {
+		for(const json& jp : j.at("patterns")) {
+			PatternInfo pi;
+
+			pi.tile = keyFromJson(jp.at("tile"));
+			pi.repeatX = patternRepeatFromString(jp.value("repeat_x", "repeat"));
+			pi.repeatY = patternRepeatFromString(jp.value("repeat_y", "repeat"));
+
+			if(jp.contains("cell")) {
+				const auto& jc = jp.at("cell");
+				pi.cellX = jc[0];
+				pi.cellY = jc[1];
+				pi.cellWidth = jc[2];
+				pi.cellHeight = jc[3];
+			}
+
+			if(jp.contains("transform")) {
+				const auto& jt = jp.at("transform");
+				pi.transform = {
+					jt[0], jt[1], jt[2], jt[3], jt[4], jt[5]
+				};
+			}
+
+			sd.patterns.push_back(pi);
+		}
+	}
+
 	// Shapes
 	for(const json& js : j.at("shapes")) {
 		Key key = keyFromJson(js.at("key"));
@@ -753,6 +819,7 @@ Atlas atlasFromJson(
 			layer.effectId = jl.at("effect_id");
 			layer.effectParam = jl.value("effect_param", 0.0f);
 			layer.gradientId = jl.value("gradient_id", 0u);
+			layer.patternId = jl.value("pattern_id", 0u);
 			layer.drawMode = static_cast<DrawMode>(jl.value("draw_mode", uint8_t(0)));
 			layer.blendMode = static_cast<BlendMode>(jl.value("blend_mode", uint8_t(0)));
 
