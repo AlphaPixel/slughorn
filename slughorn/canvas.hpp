@@ -1070,6 +1070,31 @@ public:
 		return { x, y, angle };
 	}
 
+	// Samples spaced `spacing` apart by arc length, the first `phase` along the path: the placement
+	// for repeating a shape along the path, with each sample's angle as that copy's rotation.
+	// phase wraps into [0, spacing). Empty when spacing <= 0 or the path has no length.
+	std::vector<Sample> resample(slug_t spacing, slug_t phase=0_cv) const {
+		std::vector<Sample> out;
+
+		const slug_t length = arcLength();
+
+		if(spacing <= 0_cv || length <= 0_cv) return out;
+
+		phase = std::fmod(phase, spacing);
+
+		if(phase < 0_cv) phase += spacing;
+
+		for(size_t k = 0;; k++) {
+			const slug_t s = phase + static_cast<slug_t>(k) * spacing;
+
+			if(s > length) break;
+
+			out.push_back(sample(s / length));
+		}
+
+		return out;
+	}
+
 private:
 	friend class Canvas;
 

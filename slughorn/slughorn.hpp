@@ -77,9 +77,9 @@ inline float halfToFloat(uint16_t half) {
 	uint32_t bits;
 
 	if(exponent == 0) {
-		if(mantissa == 0) {
-			bits = sign;
-		} else {
+		if(!mantissa) bits = sign;
+
+		else {
 			exponent = 127 - 15 + 1;
 
 			while((mantissa & 0x400u) == 0) {
@@ -90,11 +90,11 @@ inline float halfToFloat(uint16_t half) {
 			mantissa &= 0x3FFu;
 			bits = sign | (exponent << 23) | (mantissa << 13);
 		}
-	} else if(exponent == 0x1Fu) {
-		bits = sign | 0x7F800000u | (mantissa << 13);
-	} else {
-		bits = sign | ((exponent - 15 + 127) << 23) | (mantissa << 13);
 	}
+
+	else if(exponent == 0x1Fu) bits = sign | 0x7F800000u | (mantissa << 13);
+
+	else bits = sign | ((exponent - 15 + 127) << 23) | (mantissa << 13);
 
 	float value;
 

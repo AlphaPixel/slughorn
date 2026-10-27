@@ -226,6 +226,9 @@ void bind_canvas(py::module_& canvas) {
 			.def("sample", &Path::sample, "t"_a,
 				"Sample position and tangent at normalized arc-length t in [0,1].\n"
 				"Returns a Path.Sample(x, y, angle).")
+			.def("resample", &Path::resample, "spacing"_a, "phase"_a=0.0f,
+				"Samples spaced `spacing` apart by arc length, the first `phase` along the path.\n"
+				"Returns a list of Path.Sample(x, y, angle); phase wraps into [0, spacing).")
 			.def("__repr__", [](const Path& p) { return streamRepr(p); })
 		;
 	}

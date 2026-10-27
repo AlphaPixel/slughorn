@@ -560,7 +560,9 @@ inline Sampler decode(
 			const auto* p = reinterpret_cast<const uint16_t*>(curveBytes) + size_t{texelIndex} * 4;
 
 			for(size_t i = 0; i < 4; i++) v[i] = detail::halfToFloat(p[i]);
-		} else {
+		}
+
+		else {
 			const auto* p = reinterpret_cast<const float*>(curveBytes) + size_t{texelIndex} * 4;
 
 			for(size_t i = 0; i < 4; i++) v[i] = p[i];

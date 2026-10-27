@@ -725,3 +725,36 @@ def test_text_align_x_values():
 	assert hasattr(ta, "LEFT")
 	assert hasattr(ta, "CENTER")
 	assert hasattr(ta, "RIGHT")
+
+# ---------------------------------------------------------------------------
+# canvas.Path.resample
+# ---------------------------------------------------------------------------
+
+def _l_path():
+	p = slughorn.canvas.Path()
+	p.move_to(0.0, 0.0)
+	p.line_to(4.0, 0.0)
+	p.line_to(4.0, 3.0)
+	return p
+
+def test_path_resample_spacing_and_angles():
+	samples = _l_path().resample(1.0)
+
+	assert len(samples) == 8
+	assert (samples[2].x, samples[2].y) == pytest.approx((2.0, 0.0), abs=1e-5)
+	assert samples[2].angle == pytest.approx(0.0, abs=1e-5)
+	assert (samples[6].x, samples[6].y) == pytest.approx((4.0, 2.0), abs=1e-5)
+	assert samples[6].angle == pytest.approx(math.pi / 2.0, abs=1e-5)
+
+def test_path_resample_phase_wraps():
+	a = _l_path().resample(1.0, 0.25)
+	b = _l_path().resample(1.0, 2.25)
+	c = _l_path().resample(1.0, -0.75)
+
+	assert a[0].x == pytest.approx(0.25, abs=1e-5)
+	assert [s.x for s in a] == pytest.approx([s.x for s in b])
+	assert [s.x for s in a] == pytest.approx([s.x for s in c])
+
+def test_path_resample_degenerate():
+	assert _l_path().resample(0.0) == []
+	assert slughorn.canvas.Path().resample(1.0) == []
