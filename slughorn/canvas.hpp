@@ -29,7 +29,7 @@
 //
 // PATH SAMPLING:
 //
-// auto s = p.sample(0.5); // Sample { x, y, angle } at arc-length midpoint
+// auto s = p.sample(0.5); // Sample { x, y, angle, arcLength } at arc-length midpoint
 // auto snap = canvas.path(); // copy of internal path; sample or continue building
 //
 // SCALE CONTRACT
@@ -102,7 +102,9 @@ class Canvas;
 
 class Path {
 public:
-	struct Sample { slug_t x, y, angle; };
+	// angle: the path's tangent direction in radians. arcLength: distance traveled along the path
+	// to this point, from its subpath's start.
+	struct Sample { slug_t x, y, angle, arcLength; };
 
 	friend std::ostream& operator<<(std::ostream& os, const Sample& s);
 	friend std::ostream& operator<<(std::ostream& os, const Path& p);
@@ -1034,6 +1036,7 @@ public:
 	//
 	// sample(t) returns the position and tangent direction at normalized arc-length
 	// t in the range [0, 1]. The LUT is rebuilt lazily whenever the path geometry changes.
+	// Arc length runs over every subpath in order, skipping the jumps between them.
 	// -------------------------------------------------------------------------
 
 	slug_t arcLength() const {
@@ -1047,49 +1050,83 @@ public:
 
 		if(_pts.size() < 2) return {};
 
-		const slug_t s = std::max(0_cv, std::min(1_cv, t)) * _totalLength;
-
-		auto it = std::lower_bound(_lut.begin(), _lut.end(), s);
-		size_t i = static_cast<size_t>(std::distance(_lut.begin(), it));
-
-		i = std::min(i, _pts.size() - 1);
-
-		if(!i) i = 1;
-
-		const slug_t segLen = _lut[i] - _lut[i-1];
-		const slug_t frac = segLen > 1e-12_cv ? (s - _lut[i-1]) / segLen : 0_cv;
-
-		const slug_t x = _pts[i - 1].first + frac * (_pts[i].first - _pts[i - 1].first);
-		const slug_t y = _pts[i - 1].second + frac * (_pts[i].second - _pts[i - 1].second);
-
-		const slug_t angle = std::atan2(
-			_pts[i].second - _pts[i - 1].second,
-			_pts[i].first - _pts[i - 1].first
-		);
-
-		return { x, y, angle };
+		return _sampleAt(std::max(0_cv, std::min(1_cv, t)) * _totalLength, 0, _pts.size());
 	}
 
-	// Samples spaced `spacing` apart by arc length, the first `phase` along the path: the placement
-	// for repeating a shape along the path, with each sample's angle as that copy's rotation.
+	// Samples spaced `spacing` apart by arc length, the first `phase` along each subpath: the
+	// placement for repeating a shape along the path, with each sample's angle as that copy's
+	// rotation. Every subpath starts over at phase, and none spans the jump between two subpaths.
 	// phase wraps into [0, spacing). Empty when spacing <= 0 or the path has no length.
 	std::vector<Sample> resample(slug_t spacing, slug_t phase=0_cv) const {
 		std::vector<Sample> out;
 
-		const slug_t length = arcLength();
-
-		if(spacing <= 0_cv || length <= 0_cv) return out;
+		if(spacing <= 0_cv || arcLength() <= 0_cv) return out;
 
 		phase = std::fmod(phase, spacing);
 
 		if(phase < 0_cv) phase += spacing;
 
-		for(size_t k = 0;; k++) {
-			const slug_t s = phase + static_cast<slug_t>(k) * spacing;
+		for(size_t k = 0; k < _ptStarts.size(); k++) {
+			const size_t lo = _ptStarts[k];
+			const size_t hi = k + 1 < _ptStarts.size() ? _ptStarts[k + 1] : _pts.size();
 
-			if(s > length) break;
+			if(hi - lo < 2) continue;
 
-			out.push_back(sample(s / length));
+			const slug_t length = _lut[hi - 1] - _lut[lo];
+
+			if(length <= 0_cv) continue;
+
+			for(size_t j = 0;; j++) {
+				const slug_t s = phase + static_cast<slug_t>(j) * spacing;
+
+				if(s > length) break;
+
+				out.push_back(_sampleAt(_lut[lo] + s, lo, hi));
+			}
+		}
+
+		return out;
+	}
+
+	// Each subpath as a polyline of evenly spaced points, at most `step` apart and including both
+	// of its ends. arcLength is summed along the polyline itself (restarting at 0 per subpath),
+	// not along the curves it approximates: a renderer measuring along the polyline's straight
+	// segments then agrees with it exactly. Empty when step <= 0; subpaths with no length are
+	// skipped.
+	std::vector<std::vector<Sample>> polylines(slug_t step) const {
+		std::vector<std::vector<Sample>> out;
+
+		if(step <= 0_cv || arcLength() <= 0_cv) return out;
+
+		for(size_t k = 0; k < _ptStarts.size(); k++) {
+			const size_t lo = _ptStarts[k];
+			const size_t hi = k + 1 < _ptStarts.size() ? _ptStarts[k + 1] : _pts.size();
+
+			if(hi - lo < 2) continue;
+
+			const slug_t length = _lut[hi - 1] - _lut[lo];
+
+			if(length <= 0_cv) continue;
+
+			const size_t n = static_cast<size_t>(std::ceil(length / step));
+			const slug_t spacing = length / static_cast<slug_t>(n);
+
+			std::vector<Sample> line;
+
+			line.reserve(n + 1);
+
+			for(size_t j = 0; j <= n; j++) {
+				Sample p = _sampleAt(_lut[lo] + static_cast<slug_t>(j) * spacing, lo, hi);
+
+				p.arcLength = line.empty()
+					? 0_cv
+					: line.back().arcLength + std::hypot(p.x - line.back().x, p.y - line.back().y)
+				;
+
+				line.push_back(p);
+			}
+
+			out.push_back(std::move(line));
 		}
 
 		return out;
@@ -1225,9 +1262,12 @@ private:
 		}
 	}
 
+	// The jump from one subpath's end to the next one's start adds no length: _lut holds the same
+	// value at both points, so arc length is the sum of the subpaths' own lengths.
 	void _rebuildLUT() const {
 		_pts.clear();
 		_lut.clear();
+		_ptStarts.clear();
 
 		_totalLength = 0_cv;
 
@@ -1236,20 +1276,55 @@ private:
 		for(const auto& c : _activeCurves) all.push_back(c);
 
 		if(!all.empty()) {
-			_pts.push_back({all.front().x1, all.front().y1});
+			std::vector<size_t> starts = mergedContourStarts();
 
-			for(const auto& c : all) detail::flattenCurve(
-				c.x1, c.y1,
-				c.x2, c.y2,
-				c.x3, c.y3,
-				TOLERANCE_BALANCED,
-				0,
-				_pts
-			);
+			// Untracked boundaries: the same coordinate-gap fallback as strokePath().
+			if(starts.empty()) {
+				starts.push_back(0);
+
+				for(size_t i = 1; i < all.size(); i++) {
+					if(
+						std::abs(all[i].x1 - all[i - 1].x3) > 1e-6_cv ||
+						std::abs(all[i].y1 - all[i - 1].y3) > 1e-6_cv
+					) starts.push_back(i);
+				}
+			}
+
+			size_t next = 0;
+
+			for(size_t i = 0; i < all.size(); i++) {
+				const auto& c = all[i];
+
+				if(next < starts.size() && starts[next] == i) {
+					_ptStarts.push_back(_pts.size());
+					_pts.push_back({c.x1, c.y1});
+
+					next++;
+				}
+
+				detail::flattenCurve(
+					c.x1, c.y1,
+					c.x2, c.y2,
+					c.x3, c.y3,
+					TOLERANCE_BALANCED,
+					0,
+					_pts
+				);
+			}
 
 			_lut.resize(_pts.size(), 0_cv);
 
+			next = 1;
+
 			for(size_t i = 1; i < _pts.size(); i++) {
+				if(next < _ptStarts.size() && _ptStarts[next] == i) {
+					_lut[i] = _lut[i - 1];
+
+					next++;
+
+					continue;
+				}
+
 				const slug_t dx = _pts[i].first - _pts[i - 1].first;
 				const slug_t dy = _pts[i].second - _pts[i - 1].second;
 
@@ -1260,6 +1335,36 @@ private:
 		}
 
 		_lutDirty = false;
+	}
+
+	// The sample at arc length s within the _pts range [lo, hi) (at least two points), clamped to
+	// it. Never lands on a jump between subpaths: those add no length, so lower_bound() always
+	// finds a real segment.
+	Sample _sampleAt(slug_t s, size_t lo, size_t hi) const {
+		auto it = std::lower_bound(
+			_lut.begin() + static_cast<std::ptrdiff_t>(lo),
+			_lut.begin() + static_cast<std::ptrdiff_t>(hi),
+			s
+		);
+		size_t i = static_cast<size_t>(std::distance(_lut.begin(), it));
+
+		i = std::max(lo + 1, std::min(i, hi - 1));
+
+		const slug_t segLen = _lut[i] - _lut[i-1];
+		const slug_t frac = segLen > 1e-12_cv ? std::max(0_cv, std::min(1_cv, (s - _lut[i-1]) / segLen)) : 0_cv;
+
+		const slug_t x = _pts[i - 1].first + frac * (_pts[i].first - _pts[i - 1].first);
+		const slug_t y = _pts[i - 1].second + frac * (_pts[i].second - _pts[i - 1].second);
+
+		const slug_t angle = std::atan2(
+			_pts[i].second - _pts[i - 1].second,
+			_pts[i].first - _pts[i - 1].first
+		);
+
+		// The subpath holding segment (i - 1, i): the last one starting at or before i - 1.
+		const auto sub = std::upper_bound(_ptStarts.begin(), _ptStarts.end(), i - 1) - 1;
+
+		return { x, y, angle, s - _lut[*sub] };
 	}
 
 	// _activeCurves MUST be declared before _decomposer (reference binding order).
@@ -1288,6 +1393,7 @@ private:
 
 	mutable std::vector<std::pair<slug_t, slug_t>> _pts;
 	mutable std::vector<slug_t> _lut;
+	mutable std::vector<size_t> _ptStarts; // _pts index of each subpath's first point
 	mutable slug_t _totalLength = 0_cv;
 	mutable bool _lutDirty = true;
 };
@@ -2642,7 +2748,7 @@ private:
 // ================================================================================================
 
 inline std::ostream& operator<<(std::ostream& os, const Path::Sample& s) {
-	return os << "Sample(x=" << s.x << " y=" << s.y << " angle=" << s.angle << ")";
+	return os << "Sample(x=" << s.x << " y=" << s.y << " angle=" << s.angle << " arcLength=" << s.arcLength << ")";
 }
 
 inline std::ostream& operator<<(std::ostream& os, const Path& p) {

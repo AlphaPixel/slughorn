@@ -104,12 +104,14 @@ void bind_canvas(py::module_& canvas) {
 		);
 
 		py::class_<PathSample>(path, "Sample",
-			"Position and tangent direction at a normalized arc-length parameter t.\n"
-			"Returned by Path.sample(t). Fields are read-only."
+			"Position, tangent direction and arc length at a point on the path.\n"
+			"Returned by Path.sample(), resample() and polylines(). Fields are read-only."
 		)
 			.def_readonly("x", &PathSample::x, "X coordinate.")
 			.def_readonly("y", &PathSample::y, "Y coordinate.")
 			.def_readonly("angle", &PathSample::angle, "Tangent angle in radians.")
+			.def_readonly("arc_length", &PathSample::arcLength,
+				"Distance traveled along the path to this point, from its subpath's start.")
 			.def("__repr__", [](const PathSample& s) { return streamRepr(s, "Path"); })
 		;
 
@@ -225,10 +227,14 @@ void bind_canvas(py::module_& canvas) {
 				"Total arc length of the path. Triggers LUT rebuild if geometry changed.")
 			.def("sample", &Path::sample, "t"_a,
 				"Sample position and tangent at normalized arc-length t in [0,1].\n"
-				"Returns a Path.Sample(x, y, angle).")
+				"Returns a Path.Sample(x, y, angle, arc_length).")
 			.def("resample", &Path::resample, "spacing"_a, "phase"_a=0.0f,
-				"Samples spaced `spacing` apart by arc length, the first `phase` along the path.\n"
-				"Returns a list of Path.Sample(x, y, angle); phase wraps into [0, spacing).")
+				"Samples spaced `spacing` apart by arc length, the first `phase` along each subpath.\n"
+				"Returns a list of Path.Sample(x, y, angle, arc_length); phase wraps into [0, spacing).")
+			.def("polylines", &Path::polylines, "step"_a,
+				"Each subpath as a list of evenly spaced Path.Sample, at most `step` apart and\n"
+				"including both ends; arc_length is summed along the polyline itself, restarting\n"
+				"at 0 per subpath.")
 			.def("__repr__", [](const Path& p) { return streamRepr(p); })
 		;
 	}

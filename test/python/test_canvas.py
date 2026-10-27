@@ -758,3 +758,67 @@ def test_path_resample_phase_wraps():
 def test_path_resample_degenerate():
 	assert _l_path().resample(0.0) == []
 	assert slughorn.canvas.Path().resample(1.0) == []
+
+def _two_subpaths():
+	p = slughorn.canvas.Path()
+	p.move_to(0.0, 0.0)
+	p.line_to(3.0, 0.0)
+	p.move_to(10.0, 5.0)
+	p.line_to(10.0, 7.5)
+	return p
+
+def test_path_arc_length_skips_subpath_jumps():
+	p = _two_subpaths()
+
+	assert p.arc_length() == pytest.approx(5.5)
+
+	s = p.sample(4.0 / 5.5)
+
+	assert (s.x, s.y) == pytest.approx((10.0, 6.0), abs=1e-5)
+	assert s.angle == pytest.approx(math.pi / 2.0, abs=1e-5)
+
+def test_path_resample_restarts_per_subpath():
+	samples = _two_subpaths().resample(1.0, 0.5)
+
+	assert [(s.x, s.y) for s in samples] == pytest.approx(
+		[(0.5, 0.0), (1.5, 0.0), (2.5, 0.0), (10.0, 5.5), (10.0, 6.5), (10.0, 7.5)],
+		abs=1e-5
+	)
+	assert [s.angle for s in samples[3:]] == pytest.approx([math.pi / 2.0] * 3, abs=1e-5)
+
+def test_path_sample_arc_length_per_subpath():
+	p = _two_subpaths()
+
+	assert p.sample(0.5).arc_length == pytest.approx(2.75)
+	assert p.sample(4.0 / 5.5).arc_length == pytest.approx(1.0)
+	assert [s.arc_length for s in p.resample(1.0, 0.5)] == pytest.approx([0.5, 1.5, 2.5, 0.5, 1.5, 2.5])
+	assert "arcLength=" in repr(p.sample(0.5))
+
+def test_path_polylines_even_spacing_and_ends():
+	lines = _two_subpaths().polylines(0.4)
+
+	assert len(lines) == 2
+
+	# 3.0 / 0.4 -> 8 segments of 0.375; 2.5 / 0.4 -> 7 segments of 2.5 / 7.
+	assert len(lines[0]) == 9
+	assert len(lines[1]) == 8
+	assert (lines[0][-1].x, lines[0][-1].y) == pytest.approx((3.0, 0.0), abs=1e-5)
+	assert (lines[1][0].x, lines[1][0].y) == pytest.approx((10.0, 5.0), abs=1e-5)
+	assert (lines[1][-1].x, lines[1][-1].y) == pytest.approx((10.0, 7.5), abs=1e-5)
+	assert [s.arc_length for s in lines[0]] == pytest.approx([k * 0.375 for k in range(9)], abs=1e-5)
+	assert lines[1][-1].arc_length == pytest.approx(2.5, abs=1e-5)
+
+def test_path_polylines_arc_length_is_chord_sum():
+	p = slughorn.canvas.Path()
+	p.arc(0.0, 0.0, 10.0, 0.0, math.pi)
+
+	line = p.polylines(5.0)[0]
+
+	chords = sum(math.hypot(b.x - a.x, b.y - a.y) for a, b in zip(line, line[1:]))
+
+	assert line[-1].arc_length == pytest.approx(chords)
+	assert line[-1].arc_length < p.arc_length()
+
+def test_path_polylines_degenerate():
+	assert _two_subpaths().polylines(0.0) == []
+	assert slughorn.canvas.Path().polylines(1.0) == []
