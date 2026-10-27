@@ -795,7 +795,7 @@ def test_path_sample_arc_length_per_subpath():
 	assert "arcLength=" in repr(p.sample(0.5))
 
 def test_path_polylines_even_spacing_and_ends():
-	lines = _two_subpaths().polylines(0.4)
+	lines = [points for points, _ in _two_subpaths().polylines(0.4)]
 
 	assert len(lines) == 2
 
@@ -812,7 +812,7 @@ def test_path_polylines_arc_length_is_chord_sum():
 	p = slughorn.canvas.Path()
 	p.arc(0.0, 0.0, 10.0, 0.0, math.pi)
 
-	line = p.polylines(5.0)[0]
+	line = p.polylines(5.0)[0].points
 
 	chords = sum(math.hypot(b.x - a.x, b.y - a.y) for a, b in zip(line, line[1:]))
 
@@ -822,3 +822,121 @@ def test_path_polylines_arc_length_is_chord_sum():
 def test_path_polylines_degenerate():
 	assert _two_subpaths().polylines(0.0) == []
 	assert slughorn.canvas.Path().polylines(1.0) == []
+
+def _triangle(close):
+	p = slughorn.canvas.Path()
+	p.move_to(0.0, 0.0)
+	p.line_to(4.0, 0.0)
+	p.line_to(2.0, 3.0)
+	if close:
+		p.close_path()
+	else:
+		p.line_to(0.0, 0.0)
+	return p
+
+def test_path_polylines_closed_only_by_close_path():
+	closed = _triangle(True).polylines(0.5)
+	returned = _triangle(False).polylines(0.5)
+
+	assert [l.closed for l in closed] == [True]
+	assert [l.closed for l in returned] == [False]
+
+	# Both still end on a repeat of their first point.
+	for points, _ in closed + returned:
+		assert (points[-1].x, points[-1].y) == pytest.approx((points[0].x, points[0].y), abs=1e-5)
+
+	assert "closed=true" in repr(closed[0])
+
+def test_path_polylines_closed_per_subpath():
+	p = slughorn.canvas.Path()
+	p.move_to(0.0, 0.0)
+	p.line_to(3.0, 0.0)
+	p.rect(10.0, 0.0, 2.0, 2.0)
+	p.move_to(20.0, 0.0)
+	p.line_to(20.0, 4.0)
+
+	assert [l.closed for l in p.polylines(0.5)] == [False, True, False]
+
+def test_path_polylines_closed_survives_add_path():
+	src = _triangle(True)
+	src.move_to(10.0, 0.0)
+	src.line_to(12.0, 0.0)
+
+	dst = slughorn.canvas.Path()
+	dst.rect(-5.0, 0.0, 1.0, 1.0)
+	dst.add_path(src)
+	dst.add_path(src, slughorn.Matrix.translate(0.0, 10.0))
+
+	assert [l.closed for l in dst.polylines(0.5)] == [True, True, False, True, False]
+
+def test_path_polylines_raw_curves_closed_when_ends_meet():
+	atlas = slughorn.Atlas()
+	canvas = slughorn.canvas.Canvas(atlas)
+
+	canvas.begin_path()
+	canvas.rect(0.0, 0.0, 1.0, 1.0)
+	canvas.rect(0.25, 0.25, 0.5, 0.5)
+	canvas.fill(slughorn.Color(1, 1, 1, 1), 1.0, slughorn.Key("rects"))
+
+	path = slughorn.canvas.Path(atlas.get_shape(slughorn.Key("rects")).curves)
+
+	assert [l.closed for l in path.polylines(0.1)] == [True, True]
+
+def test_path_stroke_ends_only_on_unclosed_subpaths():
+	# A subpath that returns to its start without close_path() is open: its two butt-capped ends
+	# meet a separate line's end at (0, 0), and that 3-way "star" vertex gets an extra round disc.
+	# Closed, the triangle has no ends there, so no disc.
+	def outline_count(close):
+		p = slughorn.canvas.Path()
+		p.move_to(-3.0, -1.0)
+		p.line_to(0.0, 0.0)
+		p.move_to(0.0, 0.0)
+		p.line_to(4.0, 0.0)
+		p.line_to(2.0, 3.0)
+		if close:
+			p.close_path()
+		else:
+			p.line_to(0.0, 0.0)
+		p.stroke_path(0.5)
+		return len(p.polylines(0.1))
+
+	assert outline_count(True) == 2
+	assert outline_count(False) == 3
+
+def test_path_stroke_closed_then_open_subpaths():
+	# The closed triangle is pending and the line still active when stroke_path() runs; both must
+	# come back as outlines (a triangle's centerline would be one contour of its perimeter, 11.2).
+	p = _triangle(True)
+	p.move_to(10.0, 0.0)
+	p.line_to(13.0, 0.0)
+	p.stroke_path(0.5)
+
+	lines = p.polylines(0.05)
+
+	assert len(lines) == 2
+	assert all(l.closed for l in lines)
+	assert lines[0].points[-1].arc_length > 2.0 * 11.0
+	assert lines[1].points[-1].arc_length == pytest.approx(2.0 * 3.0 + 2.0 * 0.5, abs=1e-3)
+
+def test_path_stroke_twice_keeps_earlier_outlines():
+	p = slughorn.canvas.Path()
+	p.move_to(0.0, 0.0)
+	p.line_to(3.0, 0.0)
+	p.stroke_path(0.5)
+
+	first = [l.points[-1].arc_length for l in p.polylines(0.05)]
+
+	p.rect(10.0, 0.0, 2.0, 2.0)
+	p.stroke_path(0.5)
+
+	lengths = [l.points[-1].arc_length for l in p.polylines(0.05)]
+
+	assert len(lengths) == 2
+	assert lengths[0] == pytest.approx(first[0])
+	assert lengths[1] > 2.0 * 8.0
+
+def test_path_stroke_outlines_are_closed():
+	p = _triangle(False)
+	p.stroke_path(0.5)
+
+	assert all(l.closed for l in p.polylines(0.1))

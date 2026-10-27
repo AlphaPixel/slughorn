@@ -91,6 +91,7 @@ void bind_canvas(py::module_& canvas) {
 	{
 		using Path = slughorn::canvas::Path;
 		using PathSample = slughorn::canvas::Path::Sample;
+		using PathPolyline = slughorn::canvas::Path::Polyline;
 
 		auto path = py::class_<Path>(canvas, "Path",
 			"Standalone geometry primitive (analogous to HTML Canvas Path2D).\n\n"
@@ -113,6 +114,22 @@ void bind_canvas(py::module_& canvas) {
 			.def_readonly("arc_length", &PathSample::arcLength,
 				"Distance traveled along the path to this point, from its subpath's start.")
 			.def("__repr__", [](const PathSample& s) { return streamRepr(s, "Path"); })
+		;
+
+		py::class_<PathPolyline>(path, "Polyline",
+			"One subpath as a polyline, returned by Path.polylines(). Fields are read-only.\n"
+			"Unpacks like a tuple:\n"
+			"    for points, closed in path.polylines(step): ..."
+		)
+			.def_readonly("points", &PathPolyline::points, "The polyline's Path.Sample points.")
+			.def_readonly("closed", &PathPolyline::closed,
+				"True if the subpath was closed with close_path() (for raw curves, if it ends where\n"
+				"it started): its last point repeats its first, and the ends join rather than cap.")
+			.def("__len__", [](const PathPolyline&) { return 2; })
+			.def("__iter__", [](const PathPolyline& l) {
+				return py::iter(py::make_tuple(l.points, l.closed));
+			})
+			.def("__repr__", [](const PathPolyline& l) { return streamRepr(l, "Path"); })
 		;
 
 		path
@@ -232,9 +249,9 @@ void bind_canvas(py::module_& canvas) {
 				"Samples spaced `spacing` apart by arc length, the first `phase` along each subpath.\n"
 				"Returns a list of Path.Sample(x, y, angle, arc_length); phase wraps into [0, spacing).")
 			.def("polylines", &Path::polylines, "step"_a,
-				"Each subpath as a list of evenly spaced Path.Sample, at most `step` apart and\n"
-				"including both ends; arc_length is summed along the polyline itself, restarting\n"
-				"at 0 per subpath.")
+				"Each subpath as a Path.Polyline: evenly spaced Path.Sample points, at most `step`\n"
+				"apart and including both ends, plus whether the subpath is closed. arc_length is\n"
+				"summed along the polyline itself, restarting at 0 per subpath.")
 			.def("__repr__", [](const Path& p) { return streamRepr(p); })
 		;
 	}

@@ -106,7 +106,16 @@ public:
 	// to this point, from its subpath's start.
 	struct Sample { slug_t x, y, angle, arcLength; };
 
+	// One subpath as a polyline (see polylines()). closed: the subpath was ended by closePath() (or,
+	// for curves with no such record, like Path(Atlas::Curves), it ends where it started), so its
+	// last point repeats its first and the two ends meet in a join, not a pair of caps.
+	struct Polyline {
+		std::vector<Sample> points;
+		bool closed = false;
+	};
+
 	friend std::ostream& operator<<(std::ostream& os, const Sample& s);
+	friend std::ostream& operator<<(std::ostream& os, const Polyline& l);
 	friend std::ostream& operator<<(std::ostream& os, const Path& p);
 
 	Path(): _decomposer(_activeCurves) {}
@@ -128,6 +137,8 @@ public:
 	_pendingCurves(o._pendingCurves),
 	_activeSubpathStarts(o._activeSubpathStarts),
 	_pendingSubpathStarts(o._pendingSubpathStarts),
+	_pendingClosedStarts(o._pendingClosedStarts),
+	_pendingStrokedEnd(o._pendingStrokedEnd),
 	_pendingSubpathsUntracked(o._pendingSubpathsUntracked),
 	_penX(o._penX), _penY(o._penY),
 	_ctm(o._ctm), _ctmStack(o._ctmStack),
@@ -146,6 +157,8 @@ public:
 		_pendingCurves = o._pendingCurves;
 		_activeSubpathStarts = o._activeSubpathStarts;
 		_pendingSubpathStarts = o._pendingSubpathStarts;
+		_pendingClosedStarts = o._pendingClosedStarts;
+		_pendingStrokedEnd = o._pendingStrokedEnd;
 		_pendingSubpathsUntracked = o._pendingSubpathsUntracked;
 		_penX = o._penX; _penY = o._penY;
 		_ctm = o._ctm; _ctmStack = o._ctmStack;
@@ -164,6 +177,8 @@ public:
 	_pendingCurves(std::move(o._pendingCurves)),
 	_activeSubpathStarts(std::move(o._activeSubpathStarts)),
 	_pendingSubpathStarts(std::move(o._pendingSubpathStarts)),
+	_pendingClosedStarts(std::move(o._pendingClosedStarts)),
+	_pendingStrokedEnd(o._pendingStrokedEnd),
 	_pendingSubpathsUntracked(o._pendingSubpathsUntracked),
 	_penX(o._penX), _penY(o._penY),
 	_ctm(o._ctm), _ctmStack(std::move(o._ctmStack)),
@@ -182,6 +197,8 @@ public:
 		_pendingCurves = std::move(o._pendingCurves);
 		_activeSubpathStarts = std::move(o._activeSubpathStarts);
 		_pendingSubpathStarts = std::move(o._pendingSubpathStarts);
+		_pendingClosedStarts = std::move(o._pendingClosedStarts);
+		_pendingStrokedEnd = o._pendingStrokedEnd;
 		_pendingSubpathsUntracked = o._pendingSubpathsUntracked;
 		_penX = o._penX; _penY = o._penY;
 		_ctm = o._ctm; _ctmStack = std::move(o._ctmStack);
@@ -213,6 +230,8 @@ public:
 		_activeCurves.clear();
 		_pendingSubpathStarts.clear();
 		_activeSubpathStarts.clear();
+		_pendingClosedStarts.clear();
+		_pendingStrokedEnd = 0;
 		_pendingSubpathsUntracked = false;
 
 		_decomposer._x = _decomposer._y = 0_cv;
@@ -227,8 +246,10 @@ public:
 	// boundaries (both other's already-closed subpaths AND its current in-progress one, if any) --
 	// see _appendTrackedCurves()'s doc comment. Does not affect @p other.
 	Path& addPath(const Path& other) {
-		_appendTrackedCurves(other._pendingCurves, other._pendingSubpathStarts, [](const Atlas::Curve& c) { return c; });
-		_appendTrackedCurves(other._activeCurves, other._activeSubpathStarts, [](const Atlas::Curve& c) { return c; });
+		auto identity = [](const Atlas::Curve& c) { return c; };
+
+		_appendTrackedCurves(other._pendingCurves, other._pendingSubpathStarts, other._pendingClosedStarts, identity);
+		_appendTrackedCurves(other._activeCurves, other._activeSubpathStarts, {}, identity);
 
 		if(other._pendingSubpathsUntracked) _pendingSubpathsUntracked = true;
 
@@ -251,8 +272,8 @@ public:
 			return out;
 		};
 
-		_appendTrackedCurves(other._pendingCurves, other._pendingSubpathStarts, xform);
-		_appendTrackedCurves(other._activeCurves, other._activeSubpathStarts, xform);
+		_appendTrackedCurves(other._pendingCurves, other._pendingSubpathStarts, other._pendingClosedStarts, xform);
+		_appendTrackedCurves(other._activeCurves, other._activeSubpathStarts, {}, xform);
 
 		if(other._pendingSubpathsUntracked) _pendingSubpathsUntracked = true;
 
@@ -374,8 +395,16 @@ public:
 		return *this;
 	}
 
+	// Ends the current subpath with a straight segment back to its start and records it as closed:
+	// strokePath() and polylines() join its two ends instead of capping them. A subpath that merely
+	// ends where it started, without closePath(), stays open.
 	Path& closePath() {
 		_decomposer.close();
+
+		if(!_activeCurves.empty()) _pendingClosedStarts.push_back(
+			_pendingCurves.size() + (_activeSubpathStarts.empty() ? 0 : _activeSubpathStarts.back())
+		);
+
 		_flushActiveIntoPending();
 
 		_lutDirty = true;
@@ -531,31 +560,33 @@ public:
 		slug_t width, bool cw=false,
 		LineJoin join=LineJoin::Miter, LineCap cap=LineCap::Butt, slug_t miterLimit=4_cv
 	) {
-		Atlas::Curves centerline;
+		// The centerline is every subpath not stroked yet: the pending ones past the outlines of
+		// earlier strokePath() calls (which stay, as fill geometry), then the active ones. Each
+		// stored index below is shifted down by `keep` so it indexes `centerline`.
+		const size_t keep = _pendingStrokedEnd;
+		const size_t pendingCount = _pendingCurves.size() - keep;
+
+		Atlas::Curves centerline(_pendingCurves.begin() + static_cast<std::ptrdiff_t>(keep), _pendingCurves.end());
 		std::vector<size_t> starts; // resolved: index 0 always explicit, unlike the stored *SubpathStarts
+		std::vector<size_t> closedStarts; // the active subpaths are never closed (see closePath())
 
-		if(!_activeCurves.empty()) {
-			starts = _resolveStarts(_activeCurves.size(), _activeSubpathStarts);
-			centerline = std::move(_activeCurves);
-			_activeSubpathStarts.clear();
-		}
+		for(const auto& c : _activeCurves) centerline.push_back(c);
 
-		else if(!_pendingCurves.empty()) {
-			starts = _pendingSubpathsUntracked
-				? std::vector<size_t>{}
-				: _resolveStarts(_pendingCurves.size(), _pendingSubpathStarts)
-			;
+		if(centerline.empty()) return false;
 
-			// Untracked (a raw Path(Atlas::Curves) buffer--e.g. the Python Path(curves)
-			// binding--or addPath() contagion from one): boundaries are genuinely unknown.
-			// Fall back to the coordinate-gap heuristic this tracking mechanism otherwise
-			// replaces (see Path::_pendingSubpathsUntracked's doc comment).
-			if(starts.empty()) {
-				starts.push_back(0);
+		// Untracked (a raw Path(Atlas::Curves) buffer--e.g. the Python Path(curves) binding--or
+		// addPath() contagion from one): the pending boundaries are genuinely unknown. Fall back
+		// to the coordinate-gap heuristic this tracking mechanism otherwise replaces (see
+		// Path::_pendingSubpathsUntracked's doc comment).
+		const size_t untrackedEnd = _pendingSubpathsUntracked ? pendingCount : 0;
 
-				for(size_t i = 1; i < _pendingCurves.size(); i++) {
-					const auto& prev = _pendingCurves[i - 1];
-					const auto& cur = _pendingCurves[i];
+		if(pendingCount > 0) {
+			starts.push_back(0);
+
+			if(untrackedEnd > 0) {
+				for(size_t i = 1; i < pendingCount; i++) {
+					const auto& prev = centerline[i - 1];
+					const auto& cur = centerline[i];
 
 					if(
 						std::abs(cur.x1 - prev.x3) > 1e-6_cv ||
@@ -564,12 +595,31 @@ public:
 				}
 			}
 
-			centerline = std::move(_pendingCurves);
-			_pendingSubpathStarts.clear();
-			_pendingSubpathsUntracked = false;
+			else {
+				for(size_t s : _pendingSubpathStarts) {
+					if(s > keep) starts.push_back(s - keep);
+				}
+			}
+
+			for(size_t s : _pendingClosedStarts) {
+				if(s >= keep) closedStarts.push_back(s - keep);
+			}
 		}
 
-		else return false;
+		if(!_activeCurves.empty()) {
+			starts.push_back(pendingCount);
+
+			for(size_t s : _activeSubpathStarts) starts.push_back(pendingCount + s);
+		}
+
+		_pendingCurves.resize(keep);
+
+		std::erase_if(_pendingSubpathStarts, [keep](size_t s) { return s >= keep; });
+		std::erase_if(_pendingClosedStarts, [keep](size_t s) { return s >= keep; });
+
+		_activeCurves.clear();
+		_activeSubpathStarts.clear();
+		_pendingSubpathsUntracked = false;
 
 		// Scale width by the CTM's pen scale so canvas.scale() affects stroke width.
 		const slug_t xScale = std::sqrt(_ctm.xx * _ctm.xx + _ctm.yx * _ctm.yx);
@@ -649,9 +699,12 @@ public:
 				;
 			}
 
-			const bool isClosed =
-				std::abs(pts.back().first - pts.front().first) < 1e-6_cv &&
-				std::abs(pts.back().second - pts.front().second) < 1e-6_cv
+			// Untracked curves carry no closePath() record, only geometry: a subpath ending where it
+			// started is the best available sign it was closed (raw fill contours always do).
+			const bool isClosed = begin < untrackedEnd
+				? std::abs(pts.back().first - pts.front().first) < 1e-6_cv &&
+					std::abs(pts.back().second - pts.front().second) < 1e-6_cv
+				: std::binary_search(closedStarts.begin(), closedStarts.end(), begin)
 			;
 
 			if(!isClosed) {
@@ -883,6 +936,8 @@ public:
 
 			if(outlineStart > 0) _pendingSubpathStarts.push_back(outlineStart);
 
+			_pendingClosedStarts.push_back(outlineStart);
+
 			for(const auto& c : outline) _pendingCurves.push_back(c);
 
 			if(cw) CurveDecomposer::reverseCurves(_pendingCurves, outlineStart, _pendingCurves.size());
@@ -972,6 +1027,8 @@ public:
 
 				if(discStart > 0) _pendingSubpathStarts.push_back(discStart);
 
+				_pendingClosedStarts.push_back(discStart);
+
 				for(const auto& c : disc) _pendingCurves.push_back(c);
 
 				if(cw) CurveDecomposer::reverseCurves(_pendingCurves, discStart, _pendingCurves.size());
@@ -980,6 +1037,7 @@ public:
 			}
 		}
 
+		_pendingStrokedEnd = _pendingCurves.size();
 		_lutDirty = true;
 
 		return any;
@@ -1091,10 +1149,11 @@ public:
 	// Each subpath as a polyline of evenly spaced points, at most `step` apart and including both
 	// of its ends. arcLength is summed along the polyline itself (restarting at 0 per subpath),
 	// not along the curves it approximates: a renderer measuring along the polyline's straight
-	// segments then agrees with it exactly. Empty when step <= 0; subpaths with no length are
-	// skipped.
-	std::vector<std::vector<Sample>> polylines(slug_t step) const {
-		std::vector<std::vector<Sample>> out;
+	// segments then agrees with it exactly. A closed subpath's polyline still ends on a repeat of
+	// its first point, so its last arcLength is its full length. Empty when step <= 0; subpaths with
+	// no length are skipped.
+	std::vector<Polyline> polylines(slug_t step) const {
+		std::vector<Polyline> out;
 
 		if(step <= 0_cv || arcLength() <= 0_cv) return out;
 
@@ -1111,19 +1170,23 @@ public:
 			const size_t n = static_cast<size_t>(std::ceil(length / step));
 			const slug_t spacing = length / static_cast<slug_t>(n);
 
-			std::vector<Sample> line;
+			Polyline line;
 
-			line.reserve(n + 1);
+			line.closed = _ptClosed[k];
+			line.points.reserve(n + 1);
 
 			for(size_t j = 0; j <= n; j++) {
 				Sample p = _sampleAt(_lut[lo] + static_cast<slug_t>(j) * spacing, lo, hi);
 
-				p.arcLength = line.empty()
+				p.arcLength = line.points.empty()
 					? 0_cv
-					: line.back().arcLength + std::hypot(p.x - line.back().x, p.y - line.back().y)
+					: line.points.back().arcLength + std::hypot(
+						p.x - line.points.back().x,
+						p.y - line.points.back().y
+					)
 				;
 
-				line.push_back(p);
+				line.points.push_back(p);
 			}
 
 			out.push_back(std::move(line));
@@ -1157,9 +1220,15 @@ private:
 	// Appends `srcCurves` (each passed through `xform`) onto _pendingCurves, and folds `srcStarts`
 	// (subpath-start offsets relative to srcCurves, same "index 0 implicit" convention as
 	// _pendingSubpathStarts) into _pendingSubpathStarts, translated by the pre-append size of
-	// _pendingCurves. Shared by both addPath() overloads.
+	// _pendingCurves. `srcClosed` (the starts of srcCurves' closed subpaths) is translated the same
+	// way into _pendingClosedStarts. Shared by both addPath() overloads.
 	template<typename Xform>
-	void _appendTrackedCurves(const Atlas::Curves& srcCurves, const std::vector<size_t>& srcStarts, Xform&& xform) {
+	void _appendTrackedCurves(
+		const Atlas::Curves& srcCurves,
+		const std::vector<size_t>& srcStarts,
+		const std::vector<size_t>& srcClosed,
+		Xform&& xform
+	) {
 		if(srcCurves.empty()) return;
 
 		const size_t base = _pendingCurves.size();
@@ -1167,6 +1236,8 @@ private:
 		if(base > 0) _pendingSubpathStarts.push_back(base);
 
 		for(size_t s : srcStarts) _pendingSubpathStarts.push_back(base + s);
+
+		for(size_t s : srcClosed) _pendingClosedStarts.push_back(base + s);
 
 		for(const auto& c : srcCurves) _pendingCurves.push_back(xform(c));
 	}
@@ -1268,6 +1339,7 @@ private:
 		_pts.clear();
 		_lut.clear();
 		_ptStarts.clear();
+		_ptClosed.clear();
 
 		_totalLength = 0_cv;
 
@@ -1277,9 +1349,10 @@ private:
 
 		if(!all.empty()) {
 			std::vector<size_t> starts = mergedContourStarts();
+			const bool untracked = starts.empty();
 
 			// Untracked boundaries: the same coordinate-gap fallback as strokePath().
-			if(starts.empty()) {
+			if(untracked) {
 				starts.push_back(0);
 
 				for(size_t i = 1; i < all.size(); i++) {
@@ -1297,6 +1370,11 @@ private:
 
 				if(next < starts.size() && starts[next] == i) {
 					_ptStarts.push_back(_pts.size());
+					_ptClosed.push_back(!untracked && std::binary_search(
+						_pendingClosedStarts.begin(),
+						_pendingClosedStarts.end(),
+						i
+					));
 					_pts.push_back({c.x1, c.y1});
 
 					next++;
@@ -1329,6 +1407,19 @@ private:
 				const slug_t dy = _pts[i].second - _pts[i - 1].second;
 
 				_lut[i] = _lut[i - 1] + std::sqrt(dx * dx + dy * dy);
+			}
+
+			// Untracked closure: the same ends-coincide fallback as strokePath().
+			if(untracked) {
+				for(size_t k = 0; k < _ptStarts.size(); k++) {
+					const auto& first = _pts[_ptStarts[k]];
+					const auto& last = _pts[k + 1 < _ptStarts.size() ? _ptStarts[k + 1] - 1 : _pts.size() - 1];
+
+					_ptClosed[k] =
+						std::abs(last.first - first.first) < 1e-6_cv &&
+						std::abs(last.second - first.second) < 1e-6_cv
+					;
+				}
 			}
 
 			_totalLength = _lut.back();
@@ -1380,6 +1471,17 @@ private:
 	std::vector<size_t> _activeSubpathStarts;
 	std::vector<size_t> _pendingSubpathStarts;
 
+	// The _pendingCurves index of each closed subpath's first curve, in increasing order: one entry
+	// per closePath(), plus every outline and disc strokePath() emits. Unlike the *SubpathStarts
+	// vectors, index 0 is stored too. _activeCurves needs no counterpart: closePath() always moves
+	// the subpath it closes into _pendingCurves.
+	std::vector<size_t> _pendingClosedStarts;
+
+	// _pendingCurves[0, _pendingStrokedEnd) are outlines earlier strokePath() calls emitted (fill
+	// geometry, kept so Canvas::stroke() can commit them); strokePath() strokes only what follows,
+	// plus _activeCurves. Always a subpath boundary.
+	size_t _pendingStrokedEnd = 0;
+
 	// Sticky: true only once this Path has ingested curves with no boundary information at all
 	// (the raw Path(Atlas::Curves) ctor, or addPath() from a Path that is itself untracked).
 	// strokePath() and pendingContourStarts() fall back to the coordinate-gap heuristic whenever
@@ -1394,6 +1496,7 @@ private:
 	mutable std::vector<std::pair<slug_t, slug_t>> _pts;
 	mutable std::vector<slug_t> _lut;
 	mutable std::vector<size_t> _ptStarts; // _pts index of each subpath's first point
+	mutable std::vector<uint8_t> _ptClosed; // parallel to _ptStarts: 1 if that subpath is closed
 	mutable slug_t _totalLength = 0_cv;
 	mutable bool _lutDirty = true;
 };
@@ -1778,6 +1881,8 @@ public:
 
 		_path._pendingCurves.clear();
 		_path._pendingSubpathStarts.clear();
+		_path._pendingClosedStarts.clear();
+		_path._pendingStrokedEnd = 0;
 		_path._pendingSubpathsUntracked = false;
 
 		return layer;
@@ -1792,6 +1897,8 @@ public:
 
 		_path._pendingCurves.clear();
 		_path._pendingSubpathStarts.clear();
+		_path._pendingClosedStarts.clear();
+		_path._pendingStrokedEnd = 0;
 		_path._pendingSubpathsUntracked = false;
 
 		return layer;
@@ -1807,6 +1914,8 @@ public:
 
 		_path._pendingCurves.clear();
 		_path._pendingSubpathStarts.clear();
+		_path._pendingClosedStarts.clear();
+		_path._pendingStrokedEnd = 0;
 		_path._pendingSubpathsUntracked = false;
 
 		return layer;
@@ -1822,6 +1931,8 @@ public:
 
 		_path._pendingCurves.clear();
 		_path._pendingSubpathStarts.clear();
+		_path._pendingClosedStarts.clear();
+		_path._pendingStrokedEnd = 0;
 		_path._pendingSubpathsUntracked = false;
 
 		return layer;
@@ -2749,6 +2860,10 @@ private:
 
 inline std::ostream& operator<<(std::ostream& os, const Path::Sample& s) {
 	return os << "Sample(x=" << s.x << " y=" << s.y << " angle=" << s.angle << " arcLength=" << s.arcLength << ")";
+}
+
+inline std::ostream& operator<<(std::ostream& os, const Path::Polyline& l) {
+	return os << "Polyline(points=" << l.points.size() << " closed=" << (l.closed ? "true" : "false") << ")";
 }
 
 inline std::ostream& operator<<(std::ostream& os, const Path& p) {
