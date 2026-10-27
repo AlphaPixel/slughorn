@@ -1071,7 +1071,9 @@ void bind_core(py::module_& m) {
 			"room downstream without disturbing these coordinates."
 		)
 		.def_property_readonly("curves",
-			[](const slughorn::Atlas::Shape& s) { return curveView2D(s.curves); },
+			[](py::object self) {
+				return curveView2D(self, self.cast<const slughorn::Atlas::Shape&>().curves);
+			},
 			"Em-space curves as a (N, 6) float32 memoryview (x1,y1,x2,y2,x3,y3 per row). "
 			"Pass directly to Path(curves), memoryview(), or np.asarray(). "
 			"Valid at any build lifecycle stage when accessed via get_shape()."
@@ -1097,10 +1099,9 @@ void bind_core(py::module_& m) {
 			}
 			return "unknown";
 		}, "String: 'RGBA16F' (curve), 'RG16UI' (band), 'RGBA8' (gradient), 'R32F'/'RGB32F' (SDF/MSDF tile atlas).")
-		.def_property_readonly("bytes", [](const slughorn::Atlas::TextureData& td) {
-			return bytesView(td.bytes);
-		}, "Zero-copy memoryview of the raw pixel data (row-major). "
-			"Keep the Atlas alive for the duration of any view."
+		.def_property_readonly("bytes", [](py::object self) {
+			return bytesView(self, self.cast<const slughorn::Atlas::TextureData&>().bytes);
+		}, "Zero-copy memoryview of the raw pixel data (row-major); keeps this TextureData alive."
 		)
 		.def("__repr__", [](const slughorn::Atlas::TextureData& td) { return streamRepr(td); })
 	;
@@ -1109,18 +1110,19 @@ void bind_core(py::module_& m) {
 	// slughorn.ShapeContours (PyShapeContours - CSR view, returned by Atlas.get_shape_contours())
 	// ============================================================================================
 	py::class_<PyShapeContours>(m, "ShapeContours")
-		.def_property_readonly("curves", [](const PyShapeContours& c) {
-			return curveView2D(c.curves);
+		.def_property_readonly("curves", [](py::object self) {
+			return curveView2D(self, self.cast<const PyShapeContours&>().curves);
 		}, "Zero-copy (N, 6) float32 memoryview of every curve across every contour, in order.")
-		.def_property_readonly("offsets", [](const PyShapeContours& c) {
-			return vectorView1D(c.offsets);
+		.def_property_readonly("offsets", [](py::object self) {
+			return vectorView1D(self, self.cast<const PyShapeContours&>().offsets);
 		}, "Zero-copy CSR row offsets into `curves`, length len(self) + 1.\n"
 			"Contour i is curves[offsets[i]:offsets[i + 1]]."
 		)
 		.def("__len__", [](const PyShapeContours& c) {
 			return c.offsets.empty() ? size_t(0) : c.offsets.size() - 1;
 		}, "Number of contours.")
-		.def("__getitem__", [](const PyShapeContours& c, py::ssize_t i) {
+		.def("__getitem__", [](py::object self, py::ssize_t i) {
+			const auto& c = self.cast<const PyShapeContours&>();
 			const auto n = static_cast<py::ssize_t>(c.offsets.empty() ? 0 : c.offsets.size() - 1);
 
 			if(i < 0) i += n;
@@ -1140,12 +1142,9 @@ void bind_core(py::module_& m) {
 			// own __getitem__/__len__ instead of returning a raw memoryview -- would let callers
 			// do `for row in contour: x1, y1, ... = row` directly (memoryview's OWN __getitem__
 			// still can't do this for ndim>1, see the comment above; a type we control could).
-			// Not worth it yet for bin/slughorn's one debug-tool call site (see
-			// [[feedback-pybind11-buffer]] for the memoryview.cast() workaround in use there) --
-			// revisit if this same need shows up on a hot path.
-			return flatView2D<slughorn::slug_t>(
-				static_cast<const void*>(c.curves.data() + start), count, 6, sizeof(slughorn::Atlas::Curve)
-			);
+			// Not worth it yet for bin/slughorn's one debug-tool call site (which reshapes the view
+			// with memoryview.cast() instead) -- revisit if this same need shows up on a hot path.
+			return curveView2D(self, c.curves.data() + start, count);
 		}, "Zero-copy (K, 6) float32 memoryview of contour i's own curves. Supports negative "
 			"indices. Combined with __len__, this also makes ShapeContours directly iterable "
 			"(`for contour in shape_contours:`) via Python's sequence protocol."
@@ -1520,7 +1519,9 @@ void bind_core(py::module_& m) {
 			"Return a copy of the accumulated Curves list."
 		)
 		.def_property_readonly("curve_buffer",
-			[](const PyCurveDecomposer& d) { return curveView2D(d.getCurves()); },
+			[](py::object self) {
+				return curveView2D(self, self.cast<const PyCurveDecomposer&>().getCurves());
+			},
 			"Zero-copy (N, 6) float32 memoryview of accumulated curves.\n"
 			"View is invalidated if the decomposer is mutated after this call."
 		)

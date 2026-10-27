@@ -41,8 +41,8 @@
 //
 // ShapeInfo / Shape / TextureData / Curve are copied across the boundary (they are value types).
 //
-// TextureData.bytes is a zero-copy memoryview that borrows from the Atlas's internal buffer - keep
-// the Atlas alive for the duration of any view over its data.
+// Zero-copy memoryviews (Shape.curves, TextureData.bytes, ...) keep the object they view alive;
+// see detail::OwnedBuffer.
 //
 // CurveDecomposer owns its Curves vector internally (unlike the C++ version which holds a
 // reference). Call .get_curves() to retrieve them. This avoids the dangling-reference hazard that
@@ -52,6 +52,8 @@
 
 PYBIND11_MODULE(slughorn, m) {
 	m.doc() = "slughorn - GPU-native vector shape renderer (Slug algorithm, Lengyel 2017)";
+
+	bindOwnedBuffer(m);
 
 	slughorn_python::bind_core(m);
 

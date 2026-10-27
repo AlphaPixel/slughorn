@@ -89,26 +89,40 @@ void bind_render(py::module_& render) {
 	py::class_<Sampler>(render, "Sampler")
 		.def_property_readonly("shape", [](const Sampler& d) { return d.shape; })
 		.def_property_readonly("curves", [](const Sampler& d) { return d.curves; })
-		.def_property_readonly("curve_buffer", [](const Sampler& d) {
-			return curveView2D(d.curves);
+		.def_property_readonly("curve_buffer", [](py::object self) {
+			const auto& d = self.cast<const Sampler&>();
+
+			return curveView2D(self, d.curves);
 		}, "2-D float32 memoryview of decoded curves with shape (num_curves, 6).")
-		.def_property_readonly("hband_offsets", [](const Sampler& d) {
-			return vectorView1D(d.hbandOffsets);
+		.def_property_readonly("hband_offsets", [](py::object self) {
+			const auto& d = self.cast<const Sampler&>();
+
+			return vectorView1D(self, d.hbandOffsets);
 		}, "CSR offsets for horizontal bands.")
-		.def_property_readonly("hband_indices", [](const Sampler& d) {
-			return vectorView1D(d.hbandIndices);
+		.def_property_readonly("hband_indices", [](py::object self) {
+			const auto& d = self.cast<const Sampler&>();
+
+			return vectorView1D(self, d.hbandIndices);
 		}, "CSR payload for horizontal bands.")
-		.def_property_readonly("vband_offsets", [](const Sampler& d) {
-			return vectorView1D(d.vbandOffsets);
+		.def_property_readonly("vband_offsets", [](py::object self) {
+			const auto& d = self.cast<const Sampler&>();
+
+			return vectorView1D(self, d.vbandOffsets);
 		}, "CSR offsets for vertical bands.")
-		.def_property_readonly("vband_indices", [](const Sampler& d) {
-			return vectorView1D(d.vbandIndices);
+		.def_property_readonly("vband_indices", [](py::object self) {
+			const auto& d = self.cast<const Sampler&>();
+
+			return vectorView1D(self, d.vbandIndices);
 		}, "CSR payload for vertical bands.")
-		.def_property_readonly("indir_y", [](const Sampler& d) {
-			return arrayView1D(d.indirY);
+		.def_property_readonly("indir_y", [](py::object self) {
+			const auto& d = self.cast<const Sampler&>();
+
+			return arrayView1D(self, d.indirY);
 		}, "Band indirection table for Y, length INDIRECTION_SIZE.")
-		.def_property_readonly("indir_x", [](const Sampler& d) {
-			return arrayView1D(d.indirX);
+		.def_property_readonly("indir_x", [](py::object self) {
+			const auto& d = self.cast<const Sampler&>();
+
+			return arrayView1D(self, d.indirX);
 		}, "Band indirection table for X, length INDIRECTION_SIZE.")
 		.def("get_hband", [](const Sampler& d, uint32_t i) {
 			if(i + 1 >= d.hbandOffsets.size()) {

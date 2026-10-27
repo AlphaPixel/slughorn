@@ -7,11 +7,11 @@ namespace slughorn_python {
 void bind_tessellate(py::module_& tessellate) {
 
 	py::class_<slughorn::tessellate::Mesh2D>(tessellate, "Mesh2D")
-		.def_property_readonly("positions", [](const slughorn::tessellate::Mesh2D& mesh) {
-			return flatView2D(mesh.positions, 2);
+		.def_property_readonly("positions", [](py::object self) {
+			return flatView2D(self, self.cast<const slughorn::tessellate::Mesh2D&>().positions, 2);
 		}, "Zero-copy (N, 2) float32 memoryview of vertex positions (xy).")
-		.def_property_readonly("indices", [](const slughorn::tessellate::Mesh2D& mesh) {
-			return flatView2D(mesh.indices, 3);
+		.def_property_readonly("indices", [](py::object self) {
+			return flatView2D(self, self.cast<const slughorn::tessellate::Mesh2D&>().indices, 3);
 		}, "Zero-copy (N, 3) uint32 memoryview of triangle indices.")
 		.def("__repr__", [](const slughorn::tessellate::Mesh2D& mesh) {
 			return "Mesh2D(" + std::to_string(mesh.positions.size() / 2) + " vertices, "
@@ -20,11 +20,11 @@ void bind_tessellate(py::module_& tessellate) {
 	;
 
 	py::class_<slughorn::tessellate::Mesh3D>(tessellate, "Mesh3D")
-		.def_property_readonly("positions", [](const slughorn::tessellate::Mesh3D& mesh) {
-			return flatView2D(mesh.positions, 3);
+		.def_property_readonly("positions", [](py::object self) {
+			return flatView2D(self, self.cast<const slughorn::tessellate::Mesh3D&>().positions, 3);
 		}, "Zero-copy (N, 3) float32 memoryview of vertex positions (xyz).")
-		.def_property_readonly("indices", [](const slughorn::tessellate::Mesh3D& mesh) {
-			return flatView2D(mesh.indices, 3);
+		.def_property_readonly("indices", [](py::object self) {
+			return flatView2D(self, self.cast<const slughorn::tessellate::Mesh3D&>().indices, 3);
 		}, "Zero-copy (N, 3) uint32 memoryview of triangle indices.")
 		.def("__repr__", [](const slughorn::tessellate::Mesh3D& mesh) {
 			return "Mesh3D(" + std::to_string(mesh.positions.size() / 3) + " vertices, "

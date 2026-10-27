@@ -41,53 +41,88 @@ PYBIND11_MAKE_OPAQUE(std::vector<slughorn::Layer>);
 
 namespace detail {
 
-// Zero-copy memoryview over a vector<uint8_t>.
-// The vector must outlive the view - caller's responsibility.
-inline py::memoryview bytesView(const std::vector<uint8_t>& v) {
-	return py::memoryview::from_memory(
-		const_cast<uint8_t*>(v.data()),
-		static_cast<py::ssize_t>(v.size())
-	);
+// A zero-copy buffer over memory that another Python object (the owner) holds, plus a reference
+// to that owner. The view helpers below hand one of these to Python wrapped in a memoryview: a
+// memoryview keeps the object it was made from alive, so the owner lives at least as long as the
+// view (and anything sliced from it). A bare memoryview::from_buffer() holds no such reference -
+// `atlas.get_shape(key).curves` then pointed into a temporary Shape that was already freed.
+//
+// This guards lifetime only: a view still goes stale if its owner's data is mutated or
+// reallocated afterwards (e.g. a CurveDecomposer that keeps appending curves).
+//
+// Hidden visibility under the same condition pybind11 hides its own namespace: a type holding a
+// py::object can't be more visible than py::object is.
+#if defined(__GNUG__) && !defined(_WIN32)
+	#define SLUGHORN_PYTHON_HIDDEN __attribute__((visibility("hidden")))
+#else
+	#define SLUGHORN_PYTHON_HIDDEN
+#endif
+
+struct SLUGHORN_PYTHON_HIDDEN OwnedBuffer {
+	py::object owner;
+	const void* data = nullptr;
+	py::ssize_t itemSize = 0;
+	std::string format;
+	std::vector<py::ssize_t> shape;
+	std::vector<py::ssize_t> strides;
+};
+
+// Registers OwnedBuffer's buffer protocol; must run before any view helper is called.
+inline void bindOwnedBuffer(py::module_& m) {
+	py::class_<OwnedBuffer>(m, "_OwnedBuffer", py::buffer_protocol())
+		.def_buffer([](OwnedBuffer& b) -> py::buffer_info {
+			return py::buffer_info(
+				const_cast<void*>(b.data),
+				b.itemSize,
+				b.format,
+				static_cast<py::ssize_t>(b.shape.size()),
+				b.shape,
+				b.strides,
+				true
+			);
+		})
+	;
 }
 
-// pybind11's memoryview::from_buffer stores the raw `format` pointer directly in the Py_buffer
-// struct (view.format = format) and PyMemoryView_FromBuffer does not copy the string it points
-// to - it must stay valid for the memoryview object's entire lifetime, not just this call. A
-// stack-local std::string (even via format_descriptor<T>::format()) is destroyed on return,
-// leaving a dangling pointer that "works" until something else reuses that stack slot. Must be
-// a function-local static (one instance per T) so the backing storage lives forever.
 template<typename T>
-const std::string& formatOf() {
-	static const std::string fmt = py::format_descriptor<T>::format();
+py::memoryview ownedView(
+	py::handle owner,
+	const void* data,
+	std::vector<py::ssize_t> shape,
+	std::vector<py::ssize_t> strides
+) {
+	return py::memoryview(py::cast(OwnedBuffer{
+		py::reinterpret_borrow<py::object>(owner),
+		data,
+		static_cast<py::ssize_t>(sizeof(T)),
+		py::format_descriptor<T>::format(),
+		std::move(shape),
+		std::move(strides)
+	}));
+}
 
-	return fmt;
+// Zero-copy memoryview over a vector<uint8_t> that `owner` holds.
+inline py::memoryview bytesView(py::handle owner, const std::vector<uint8_t>& v) {
+	return ownedView<uint8_t>(owner, v.data(), {static_cast<py::ssize_t>(v.size())}, {1});
 }
 
 template<typename T>
-py::memoryview vectorView1D(const std::vector<T>& v) {
-	const std::vector<py::ssize_t> shape = {static_cast<py::ssize_t>(v.size())};
-	const std::vector<py::ssize_t> strides = {static_cast<py::ssize_t>(sizeof(T))};
-
-	return py::memoryview::from_buffer(
-		static_cast<const void*>(v.data()),
-		sizeof(T),
-		formatOf<T>().c_str(),
-		shape,
-		strides
+py::memoryview vectorView1D(py::handle owner, const std::vector<T>& v) {
+	return ownedView<T>(
+		owner,
+		v.data(),
+		{static_cast<py::ssize_t>(v.size())},
+		{static_cast<py::ssize_t>(sizeof(T))}
 	);
 }
 
 template<typename T, size_t N>
-py::memoryview arrayView1D(const std::array<T, N>& v) {
-	const std::vector<py::ssize_t> shape = {static_cast<py::ssize_t>(N)};
-	const std::vector<py::ssize_t> strides = {static_cast<py::ssize_t>(sizeof(T))};
-
-	return py::memoryview::from_buffer(
-		static_cast<const void*>(v.data()),
-		sizeof(T),
-		formatOf<T>().c_str(),
-		shape,
-		strides
+py::memoryview arrayView1D(py::handle owner, const std::array<T, N>& v) {
+	return ownedView<T>(
+		owner,
+		v.data(),
+		{static_cast<py::ssize_t>(N)},
+		{static_cast<py::ssize_t>(sizeof(T))}
 	);
 }
 
@@ -95,29 +130,32 @@ py::memoryview arrayView1D(const std::array<T, N>& v) {
 // no copy. `rowStrideBytes` is separate from `cols * sizeof(T)` so callers whose row type has
 // padding (or is a struct, like Curve) can pass the real row size.
 template<typename T>
-py::memoryview flatView2D(const void* data, size_t rows, size_t cols, size_t rowStrideBytes) {
-	const std::vector<py::ssize_t> shape = {
-		static_cast<py::ssize_t>(rows), static_cast<py::ssize_t>(cols)
-	};
-	const std::vector<py::ssize_t> strides = {
-		static_cast<py::ssize_t>(rowStrideBytes),
-		static_cast<py::ssize_t>(sizeof(T))
-	};
-
-	return py::memoryview::from_buffer(data, sizeof(T), formatOf<T>().c_str(), shape, strides);
+py::memoryview flatView2D(
+	py::handle owner,
+	const void* data,
+	size_t rows,
+	size_t cols,
+	size_t rowStrideBytes
+) {
+	return ownedView<T>(
+		owner,
+		data,
+		{static_cast<py::ssize_t>(rows), static_cast<py::ssize_t>(cols)},
+		{static_cast<py::ssize_t>(rowStrideBytes), static_cast<py::ssize_t>(sizeof(T))}
+	);
 }
 
 template<typename T>
-py::memoryview flatView2D(const std::vector<T>& v, size_t cols) {
-	return flatView2D<T>(
-		static_cast<const void*>(v.data()), v.size() / cols, cols, cols * sizeof(T)
-	);
+py::memoryview flatView2D(py::handle owner, const std::vector<T>& v, size_t cols) {
+	return flatView2D<T>(owner, v.data(), v.size() / cols, cols, cols * sizeof(T));
 }
 
-inline py::memoryview curveView2D(const std::vector<slughorn::Atlas::Curve>& curves) {
-	return flatView2D<slughorn::slug_t>(
-		static_cast<const void*>(curves.data()), curves.size(), 6, sizeof(slughorn::Atlas::Curve)
-	);
+inline py::memoryview curveView2D(py::handle owner, const slughorn::Atlas::Curve* curves, size_t count) {
+	return flatView2D<slughorn::slug_t>(owner, curves, count, 6, sizeof(slughorn::Atlas::Curve));
+}
+
+inline py::memoryview curveView2D(py::handle owner, const std::vector<slughorn::Atlas::Curve>& curves) {
+	return curveView2D(owner, curves.data(), curves.size());
 }
 
 // Use the C++ operator<< to build a repr string for any type that has one.
@@ -216,6 +254,7 @@ struct CurveDecomposerRef {
 } // namespace detail
 
 // Bring detail helpers into file scope so existing call sites in each bind_*() need no change.
+using detail::bindOwnedBuffer;
 using detail::bytesView;
 using detail::vectorView1D;
 using detail::arrayView1D;
