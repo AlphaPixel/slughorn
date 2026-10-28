@@ -222,6 +222,65 @@ def test_fill_pattern_builds():
 
 	assert atlas.get_shape(h.info.tile) is not None
 
+# ---------------------------------------------------------------------------
+# Canvas.add_pattern
+# ---------------------------------------------------------------------------
+
+def test_canvas_add_pattern_identity_keeps_identity():
+	atlas = slughorn.Atlas()
+	cvs = slughorn.canvas.Canvas(atlas)
+
+	h = _define_hex_pattern(cvs)
+
+	assert cvs.add_pattern(h) == 1
+
+	info = atlas.get_patterns()[0]
+
+	assert info.tile == h.info.tile
+	assert (info.cell_x, info.cell_y) == pytest.approx((h.info.cell_x, h.info.cell_y))
+
+	for p in [(0.0, 0.0), (h.info.cell_x, h.info.cell_y), (1.5, -2.0)]:
+		assert info.transform.apply(*p) == pytest.approx(p)
+
+def test_canvas_add_pattern_transform_is_about_centerline():
+	atlas = slughorn.Atlas()
+	cvs = slughorn.canvas.Canvas(atlas)
+
+	h = _define_hex_pattern(cvs)
+
+	# Pattern space -> stroke frame: twice as large and rotated, about the stroke's start on its
+	# centerline.
+	h.transform = slughorn.Matrix.rotate(0.5) * slughorn.Matrix.scale(2.0, 2.0)
+
+	cvs.add_pattern(h)
+
+	info = atlas.get_patterns()[0]
+	cx, cy = h.info.cell_x, h.info.cell_y + h.info.cell_height * 0.5
+
+	# The cell's left edge at mid-height (the stroke's start on its centerline) is fixed; a
+	# stroke-frame point q, at tile em (cx, cy) + q, maps to the tile em of its pattern-space
+	# point inverse(transform) * q.
+	assert info.transform.apply(cx, cy) == pytest.approx((cx, cy))
+
+	qx, qy = h.transform.apply(0.25, 0.5)
+
+	assert info.transform.apply(cx + qx, cy + qy) == pytest.approx((cx + 0.25, cy + 0.5))
+
+def test_canvas_add_pattern_failures_return_zero():
+	atlas = slughorn.Atlas()
+	cvs = slughorn.canvas.Canvas(atlas)
+
+	cvs.begin_path()
+
+	assert cvs.add_pattern(cvs.define_pattern(0.0, 0.0, 1.0, 1.0)) == 0
+
+	h = _define_hex_pattern(cvs)
+
+	h.transform = slughorn.Matrix.scale(0.0, 1.0)
+
+	assert cvs.add_pattern(h) == 0
+	assert atlas.get_patterns() == []
+
 def test_canvas_keeps_temporary_atlas_alive():
 	import gc
 

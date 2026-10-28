@@ -659,6 +659,14 @@ void bind_canvas(py::module_& canvas) {
 			"path not cleared) with cell (x, y, w, h) in path coordinates, and return a\n"
 			"PatternHandle. The cell is converted to the tile's em-space, honoring auto_metrics."
 		)
+		.def("add_pattern",
+			&slughorn::canvas::Canvas::addPattern,
+			"handle"_a,
+			"Register the handle's pattern for a renderer that lays it along a stroke, with\n"
+			"handle.transform mapping pattern space to the stroke frame (tile units, origin at the\n"
+			"stroke's start on its centerline). Returns the Atlas pattern id, or 0 if the handle is\n"
+			"empty or its transform isn't invertible."
+		)
 		// fill_pattern() - auto-key
 		.def("fill_pattern",
 			[](

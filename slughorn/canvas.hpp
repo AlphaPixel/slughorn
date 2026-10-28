@@ -1715,8 +1715,15 @@ public:
 	// addPattern() per fill, its PatternInfo::transform mapping the region's em-space back to the
 	// tile's. The tile is drawn in `color`.
 	//
+	// addPattern() registers a handle's pattern on its own, for a renderer that lays the cell
+	// along a stroke instead of over a filled region (osgSlug's PathDrawable). Such a renderer
+	// fits the cell to the stroke's width and puts the cell's origin at the stroke's start on its
+	// lower edge; PatternInfo::transform then applies in tile em-space, after that fit.
+	//
 	// PatternHandle::transform is HTML Canvas's CanvasPattern.setTransform(): it maps pattern
-	// space to canvas space. It must be invertible, or fillPattern() fails.
+	// space to canvas space - or, for addPattern(), to the stroke frame (tile units, origin at the
+	// stroke's start on its centerline), so rotation and scale happen about the centerline. It
+	// must be invertible, or fillPattern()/addPattern() fail.
 	// -------------------------------------------------------------------------
 
 	struct PatternHandle {
@@ -1776,6 +1783,31 @@ public:
 		handle.info.repeatY = repeatY;
 
 		return handle;
+	}
+
+	// Returns the Atlas pattern id (0 if the handle is empty or its transform isn't invertible).
+	uint32_t addPattern(const PatternHandle& handle) {
+		if(handle.info.tile == Key(0u)) return 0;
+
+		const auto inverse = handle.transform.inverse();
+
+		if(!inverse) return 0;
+
+		// The cell's left edge at mid-height is where the stroke starts on its centerline.
+		// tile em -> stroke frame: minus that point; stroke frame -> pattern space: inverse;
+		// pattern space -> tile em: plus that point. Identity when transform is.
+		PatternInfo info = handle.info;
+
+		const slug_t px = info.cellX;
+		const slug_t py = info.cellY + info.cellHeight * 0.5_cv;
+
+		info.transform =
+			Matrix::translate(px, py) *
+			*inverse *
+			Matrix::translate(-px, -py)
+		;
+
+		return _atlas.addPattern(info);
 	}
 
 	// -------------------------------------------------------------------------
