@@ -836,16 +836,15 @@ Atlas::Contours Atlas::getShapeContours(Key key) const {
 	// MERGE fewer false boundaries than before, never split a previously-correct one apart.
 	Curves current;
 
+	const slug_t extent = detail::curveExtent(*flat);
+
 	for(size_t i = 0; i < flat->size(); ++i) {
 		const auto& cur = (*flat)[i];
 
 		current.push_back(cur);
 
 		const bool last = (i + 1 == flat->size());
-		const bool brk = !last && (
-			std::abs(cur.x3 - (*flat)[i + 1].x1) > 1e-6_cv ||
-			std::abs(cur.y3 - (*flat)[i + 1].y1) > 1e-6_cv
-		);
+		const bool brk = !last && !coincident(cur.x3, cur.y3, (*flat)[i + 1].x1, (*flat)[i + 1].y1, extent);
 
 		if(last || brk) {
 			result.push_back(std::move(current));

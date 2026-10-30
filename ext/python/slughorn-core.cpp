@@ -316,6 +316,13 @@ void bind_core(py::module_& m) {
 		"Returns Matrix.identity() for degenerate (zero-length) inputs."
 	);
 
+	m.def("coincident",
+		&slughorn::coincident,
+		"ax"_a, "ay"_a, "bx"_a, "by"_a, "extent"_a,
+		"Whether points (ax, ay) and (bx, by) are the same up to float rounding, in data whose\n"
+		"largest absolute coordinate is extent. Tolerance: 1e-5 * max(1, extent) per axis."
+	);
+
 	// ============================================================================================
 	// slughorn.PatternInfo
 	// ============================================================================================

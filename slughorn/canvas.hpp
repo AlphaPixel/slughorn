@@ -129,6 +129,38 @@ public:
 	_pendingSubpathsUntracked(true),
 	_decomposer(_activeCurves) {}
 
+	// A shape's curves read back from an Atlas (Atlas::getShape()), e.g. to flatten them with
+	// polylines(). Subpath boundaries come from shape.contourStarts when it is known (shapes
+	// committed by Canvas), so a subpath that starts exactly where the previous one ended stays
+	// separate; otherwise this is Path(shape.curves). The Atlas records no closePath() calls, so a
+	// subpath counts as closed when it ends where it starts.
+	explicit Path(const Atlas::Shape& shape):
+	Path(shape.curves) {
+		const auto& starts = shape.contourStarts;
+
+		if(starts.empty()) return;
+
+		_pendingSubpathsUntracked = false;
+
+		const slug_t extent = slughorn::detail::curveExtent(_pendingCurves);
+
+		for(size_t k = 0; k < starts.size(); k++) {
+			const size_t begin = starts[k];
+			const size_t end = k + 1 < starts.size() ? starts[k + 1] : _pendingCurves.size();
+
+			if(begin >= end || end > _pendingCurves.size()) continue;
+
+			if(begin > 0) _pendingSubpathStarts.push_back(begin);
+
+			const auto& first = _pendingCurves[begin];
+			const auto& last = _pendingCurves[end - 1];
+
+			if(slughorn::coincident(last.x3, last.y3, first.x1, first.y1, extent)) {
+				_pendingClosedStarts.push_back(begin);
+			}
+		}
+	}
+
 	// Custom copy/move needed: CurveDecomposer.curves is a reference that must stay
 	// bound to THIS object's _activeCurves, not the source's.
 
@@ -574,6 +606,9 @@ public:
 
 		if(centerline.empty()) return false;
 
+		// The scale the untracked boundary and closure tests below compare points at.
+		const slug_t extent = slughorn::detail::curveExtent(centerline);
+
 		// Untracked (a raw Path(Atlas::Curves) buffer--e.g. the Python Path(curves) binding--or
 		// addPath() contagion from one): the pending boundaries are genuinely unknown. Fall back
 		// to the coordinate-gap heuristic this tracking mechanism otherwise replaces (see
@@ -588,10 +623,9 @@ public:
 					const auto& prev = centerline[i - 1];
 					const auto& cur = centerline[i];
 
-					if(
-						std::abs(cur.x1 - prev.x3) > 1e-6_cv ||
-						std::abs(cur.y1 - prev.y3) > 1e-6_cv
-					) starts.push_back(i);
+					if(!slughorn::coincident(cur.x1, cur.y1, prev.x3, prev.y3, extent)) {
+						starts.push_back(i);
+					}
 				}
 			}
 
@@ -702,8 +736,13 @@ public:
 			// Untracked curves carry no closePath() record, only geometry: a subpath ending where it
 			// started is the best available sign it was closed (raw fill contours always do).
 			const bool isClosed = begin < untrackedEnd
-				? std::abs(pts.back().first - pts.front().first) < 1e-6_cv &&
-					std::abs(pts.back().second - pts.front().second) < 1e-6_cv
+				? slughorn::coincident(
+					pts.back().first,
+					pts.back().second,
+					pts.front().first,
+					pts.front().second,
+					extent
+				)
 				: std::binary_search(closedStarts.begin(), closedStarts.end(), begin)
 			;
 
@@ -1350,16 +1389,16 @@ private:
 		if(!all.empty()) {
 			std::vector<size_t> starts = mergedContourStarts();
 			const bool untracked = starts.empty();
+			const slug_t extent = slughorn::detail::curveExtent(all);
 
 			// Untracked boundaries: the same coordinate-gap fallback as strokePath().
 			if(untracked) {
 				starts.push_back(0);
 
 				for(size_t i = 1; i < all.size(); i++) {
-					if(
-						std::abs(all[i].x1 - all[i - 1].x3) > 1e-6_cv ||
-						std::abs(all[i].y1 - all[i - 1].y3) > 1e-6_cv
-					) starts.push_back(i);
+					if(!slughorn::coincident(all[i].x1, all[i].y1, all[i - 1].x3, all[i - 1].y3, extent)) {
+						starts.push_back(i);
+					}
 				}
 			}
 
@@ -1415,10 +1454,13 @@ private:
 					const auto& first = _pts[_ptStarts[k]];
 					const auto& last = _pts[k + 1 < _ptStarts.size() ? _ptStarts[k + 1] - 1 : _pts.size() - 1];
 
-					_ptClosed[k] =
-						std::abs(last.first - first.first) < 1e-6_cv &&
-						std::abs(last.second - first.second) < 1e-6_cv
-					;
+					_ptClosed[k] = slughorn::coincident(
+						last.first,
+						last.second,
+						first.first,
+						first.second,
+						extent
+					);
 				}
 			}
 
@@ -1886,6 +1928,14 @@ public:
 		return _commitShape(_path._pendingCurves, key, scale, origin, _path.pendingContourStarts());
 	}
 
+	// Commits the path like fill(), but its Layer is DrawMode::Geometry: the curves live in the
+	// Atlas and the Layer keeps their placement, but nothing draws it as a fill. A path for
+	// something else to follow or stroke (Path(const Atlas::Shape&) reads it back). Returns the
+	// Layer, or an empty Layer{} when there is no path.
+	Layer defineGeometry(Key key, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={}) {
+		return _markGeometry(fill(Color{}, scale, key, origin));
+	}
+
 	Layer stroke(
 		slug_t width, Color color, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={},
 		LineJoin join=LineJoin::Miter, LineCap cap=LineCap::Butt, slug_t miterLimit=4_cv
@@ -2054,6 +2104,10 @@ public:
 		if(!p.hasPendingPath()) return false;
 
 		return _commitShape(_merged(p), key, scale, origin, p.mergedContourStarts());
+	}
+
+	Layer defineGeometry(const Path& p, Key key, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={}) {
+		return _markGeometry(fill(p, Color{}, scale, key, origin));
 	}
 
 	Layer stroke(
@@ -2602,6 +2656,18 @@ private:
 		placement.apply(transform.dx, transform.dy, layer.transform.x, layer.transform.y);
 
 		_composite.layers.push_back(layer);
+
+		return layer;
+	}
+
+	// defineGeometry(): a fill() that pushed a Layer gets DrawMode::Geometry, on the returned copy
+	// and on the Layer in _composite.
+	Layer _markGeometry(Layer layer) {
+		if(layer.key == Key() || _composite.layers.empty()) return layer;
+
+		layer.drawMode = DrawMode::Geometry;
+
+		_composite.layers.back().drawMode = DrawMode::Geometry;
 
 		return layer;
 	}

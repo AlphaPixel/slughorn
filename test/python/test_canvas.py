@@ -882,6 +882,87 @@ def test_path_polylines_raw_curves_closed_when_ends_meet():
 
 	assert [l.closed for l in path.polylines(0.1)] == [True, True]
 
+def test_path_from_shape_keeps_touching_subpaths():
+	# The second subpath starts exactly where the first ends. The Shape's recorded boundaries keep
+	# them apart; raw curves can only guess from coordinate gaps and merge them.
+	atlas = slughorn.Atlas()
+	canvas = slughorn.canvas.Canvas(atlas)
+
+	canvas.begin_path()
+	canvas.move_to(0.0, 0.0)
+	canvas.line_to(10.0, 0.0)
+	canvas.move_to(10.0, 0.0)
+	canvas.line_to(10.0, 10.0)
+	canvas.define_shape(slughorn.Key("touching"))
+
+	shape = atlas.get_shape(slughorn.Key("touching"))
+
+	assert [l.closed for l in slughorn.canvas.Path(shape).polylines(1.0)] == [False, False]
+	assert len(slughorn.canvas.Path(shape.curves).polylines(1.0)) == 1
+
+def test_path_from_shape_closed_when_ends_meet():
+	atlas = slughorn.Atlas()
+	canvas = slughorn.canvas.Canvas(atlas)
+
+	canvas.begin_path()
+	canvas.circle(500.0, 500.0, 200.0)
+	canvas.move_to(0.0, 0.0)
+	canvas.line_to(100.0, 0.0)
+	canvas.define_shape(slughorn.Key("ring_and_line"))
+
+	path = slughorn.canvas.Path(atlas.get_shape(slughorn.Key("ring_and_line")))
+
+	assert [l.closed for l in path.polylines(5.0)] == [True, False]
+
+def test_path_raw_curves_closed_at_large_coordinates():
+	# A loop whose end misses its start by float rounding at ~1000 units: an absolute 1e-6
+	# tolerance called it open; the extent-relative one calls it closed.
+	x, y = 1000.0, 1000.0
+	off = 1000.0001
+	curves = [
+		slughorn.Curve(x, y, x + 50.0, y, x + 100.0, y),
+		slughorn.Curve(x + 100.0, y, x + 100.0, y + 50.0, x + 100.0, y + 100.0),
+		slughorn.Curve(x + 100.0, y + 100.0, x + 50.0, y + 50.0, off, y),
+	]
+
+	assert [l.closed for l in slughorn.canvas.Path(curves).polylines(5.0)] == [True]
+
+def test_canvas_define_geometry(canvas, atlas):
+	canvas.begin_path()
+	canvas.circle(0.5, 0.5, 0.4)
+	canvas.fill(slughorn.Color(1, 0, 0, 1))
+
+	canvas.begin_path()
+	canvas.move_to(0.1, 0.1)
+	canvas.line_to(0.9, 0.9)
+	layer = canvas.define_geometry(slughorn.Key("route"))
+
+	assert layer.key == slughorn.Key("route")
+	assert layer.drawMode == slughorn.DrawMode.Geometry
+
+	composite = canvas.finalize()
+
+	assert [l.drawMode for l in composite.layers] == [slughorn.DrawMode.Visible, slughorn.DrawMode.Geometry]
+	assert atlas.get_shape(slughorn.Key("route")) is not None
+
+def test_canvas_define_geometry_from_path(canvas, atlas):
+	p = slughorn.canvas.Path()
+	p.move_to(0.0, 0.0)
+	p.line_to(1.0, 1.0)
+
+	layer = canvas.define_geometry(p, slughorn.Key("route_path"))
+
+	assert layer.drawMode == slughorn.DrawMode.Geometry
+	assert canvas.finalize().layers[-1].drawMode == slughorn.DrawMode.Geometry
+
+def test_canvas_define_geometry_empty(canvas):
+	canvas.begin_path()
+
+	layer = canvas.define_geometry(slughorn.Key("nothing"))
+
+	assert layer.drawMode == slughorn.DrawMode.Visible
+	assert canvas.layer_count == 0
+
 def test_path_stroke_ends_only_on_unclosed_subpaths():
 	# A subpath that returns to its start without close_path() is open: its two butt-capped ends
 	# meet a separate line's end at (0, 0), and that 3-way "star" vertex gets an extra round disc.

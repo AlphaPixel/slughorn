@@ -134,6 +134,12 @@ void bind_canvas(py::module_& canvas) {
 
 		path
 			.def(py::init<>(), "Create an empty path with identity transform.")
+			.def(py::init<const slughorn::Atlas::Shape&>(), "shape"_a,
+				"Create a path from a Shape read back from an Atlas: Path(atlas.get_shape(key)).\n"
+				"Uses the shape's recorded subpath boundaries (shapes committed by Canvas), so a subpath\n"
+				"starting exactly where the previous one ended stays separate; without them this is\n"
+				"Path(shape.curves). A subpath counts as closed when it ends where it starts."
+			)
 			.def(py::init([](py::buffer b) {
 				py::buffer_info info = b.request();
 
@@ -160,7 +166,8 @@ void bind_canvas(py::module_& canvas) {
 				return slughorn::canvas::Path(std::move(curves));
 			}), "curves"_a,
 				"Create a path from a (N, 6) float32 buffer (memoryview, numpy array, etc.).\n"
-				"Accepts Shape.curves directly: Path(atlas.get_shape(key).curves)"
+				"Accepts Shape.curves directly: Path(atlas.get_shape(key).curves), though\n"
+				"Path(atlas.get_shape(key)) also keeps the shape's subpath boundaries."
 			)
 			.def(py::init<slughorn::Atlas::Curves>(), "curves"_a,
 				"Create a path pre-populated with a list of Curve objects."
@@ -397,6 +404,21 @@ void bind_canvas(py::module_& canvas) {
 			"Register the current path as a named Shape (geometry only, no Layer).\n"
 			"Returns False if the path was empty."
 		)
+		.def("define_geometry",
+			[](
+				slughorn::canvas::Canvas& c,
+				slughorn::Key key,
+				slug_t scale,
+				slughorn::Atlas::ShapeInfo::Origin origin
+			) {
+				return c.defineGeometry(key, scale, origin);
+			},
+			"key"_a, "scale"_a=1_cv, "origin"_a=slughorn::Atlas::ShapeInfo::Origin{},
+			"Commit the current path like fill(), but as a DrawMode.Geometry Layer: its curves live in\n"
+			"the Atlas and the Layer keeps their placement, but nothing draws it as a fill (a path for\n"
+			"something else to follow or stroke). Returns the Layer, or an empty Layer if the path was\n"
+			"empty."
+		)
 		// stroke_path() / in-place expand, then commit separately
 		.def("stroke_path",
 			[](
@@ -512,6 +534,19 @@ void bind_canvas(py::module_& canvas) {
 			},
 			"path"_a, "key"_a, "scale"_a=1_cv, "origin"_a=slughorn::Atlas::ShapeInfo::Origin{},
 			"Register a standalone Path as a named Shape (geometry only, no Layer)."
+		)
+		.def("define_geometry",
+			[](
+				slughorn::canvas::Canvas& c,
+				const slughorn::canvas::Path& p,
+				slughorn::Key key,
+				slug_t scale,
+				slughorn::Atlas::ShapeInfo::Origin origin
+			) {
+				return c.defineGeometry(p, key, scale, origin);
+			},
+			"path"_a, "key"_a, "scale"_a=1_cv, "origin"_a=slughorn::Atlas::ShapeInfo::Origin{},
+			"define_geometry() for a standalone Path. path is not consumed."
 		)
 		// stroke(path, ...) - auto-key
 		.def("stroke",

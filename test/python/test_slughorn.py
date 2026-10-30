@@ -1009,3 +1009,9 @@ def test_normalize_coverage_preserved(atlas):
 	for key in (l_small.key, l_large.key):
 		grid = atlas.decode(key).render_grid(32, 0.0, True)
 		assert max(memoryview(grid).cast('B').cast('f')) > 0.1, f"{key} should have non-zero coverage after normalize"
+
+def test_coincident_scales_with_extent():
+	# 1e-4 apart: rounding at extent 1000 (tolerance 0.01), a real gap at extent 1 (tolerance 1e-5).
+	assert slughorn.coincident(1000.0, 5.0, 1000.0001, 5.0, 1000.0)
+	assert not slughorn.coincident(0.5, 0.5, 0.5001, 0.5, 1.0)
+	assert slughorn.coincident(0.5, 0.5, 0.5, 0.5, 0.0)

@@ -148,6 +148,17 @@ concept Numeric = std::integral<T> || std::floating_point<T>;
 inline constexpr slug_t PI_CV = cv(std::numbers::pi_v<slug_t>);
 inline constexpr slug_t PI_2_CV = cv(std::numbers::pi_v<slug_t> / 2_cv);
 
+// Whether two points are the same up to float rounding, in data whose largest absolute coordinate
+// is `extent`. Float spacing is relative to magnitude, and a point's rounding error follows the
+// magnitudes it was computed from (the whole path's, through the same transforms), not its own;
+// so the tolerance is 1e-5 * extent, about 80 float steps of the largest coordinate, with an
+// absolute floor of 1e-5 for em-space data.
+inline bool coincident(slug_t ax, slug_t ay, slug_t bx, slug_t by, slug_t extent) {
+	const slug_t tolerance = 1e-5_cv * std::max(1_cv, extent);
+
+	return std::abs(ax - bx) <= tolerance && std::abs(ay - by) <= tolerance;
+}
+
 // ================================================================================================
 // Color
 //
@@ -2128,6 +2139,20 @@ private:
 // ================================================================================================
 
 namespace detail {
+
+// The largest absolute coordinate among the curves' points: the `extent` coincident() takes.
+inline slug_t curveExtent(const Atlas::Curves& curves) {
+	slug_t extent = 0_cv;
+
+	for(const auto& c : curves) extent = std::max({
+		extent,
+		std::abs(c.x1), std::abs(c.y1),
+		std::abs(c.x2), std::abs(c.y2),
+		std::abs(c.x3), std::abs(c.y3)
+	});
+
+	return extent;
+}
 
 // De Casteljau split of a quadratic Bezier at parameter t in (0,1).
 inline std::pair<Atlas::Curve, Atlas::Curve> quadSplitAt(const Atlas::Curve& c, slug_t t) {
