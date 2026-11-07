@@ -61,6 +61,8 @@
 // +-------------------------+---------------------------------+------------------------------+
 // | add_path_xform_comp     | composite [add_path_xform]      | 21                           |
 // +-------------------------+---------------------------------+------------------------------+
+// | scurve_centerline       | shape (stroke centerline)       | 24 - ShapeInfo::strokeRadius |
+// +-------------------------+---------------------------------+------------------------------+
 
 #include "slughorn/canvas.hpp"
 
@@ -189,7 +191,7 @@ int main(int argc, char** argv) {
 	canvas.moveTo(0.1_cv, 0.5_cv);
 	canvas.quadTo(0.25_cv, 0.05_cv, 0.5_cv, 0.5_cv);
 	canvas.quadTo(0.75_cv, 0.95_cv, 0.9_cv, 0.5_cv);
-	canvas.stroke(0.06_cv, WHITE); // auto-key "s_5"
+	canvas.stroke({.width=0.06_cv}, WHITE); // auto-key "s_5"
 
 	canvas.finalize(Key("scurve_stroke_composite"));
 
@@ -213,7 +215,7 @@ int main(int argc, char** argv) {
 	canvas.lineTo(0.8_cv, 0_cv);
 	canvas.lineTo(0.9_cv, 0.5_cv);
 	canvas.lineTo(1_cv, 0_cv);
-	canvas.stroke(0.04_cv, CYAN, 1_cv, Key("zigzag_stroke"));
+	canvas.stroke({.width=0.04_cv}, CYAN, 1_cv, Key("zigzag_stroke"));
 	// stroke() with an explicit key registers the shape AND queues a Layer in the
 	// composite accumulator, just like fill(). If you only want the named shape
 	// and not the composite wrapper, clear the accumulator explicitly.
@@ -496,7 +498,7 @@ int main(int argc, char** argv) {
 		canvas.lineTo(CX, CY + HAND_LENGTH);
 
 		canvas.stroke(
-			HAND_WIDTH,
+			{.width=HAND_WIDTH},
 			HAND_COLOR,
 			1_cv,
 			slughorn::Atlas::ShapeInfo::Origin(CX, CY)
@@ -578,7 +580,7 @@ int main(int argc, char** argv) {
 		}
 
 		// Commit via explicit-path overload - p is unchanged after this call.
-		canvas.stroke(p, 0.06_cv, WHITE);
+		canvas.stroke(p, {.width=0.06_cv}, WHITE);
 		canvas.finalize(Key("sample_path"));
 
 		// Verify: canvas.path() still returns the implicit path (unaffected by p).
@@ -827,7 +829,7 @@ int main(int argc, char** argv) {
 		{
 			makeRect();
 
-			const auto layer = canvas.stroke(0.1_cv, WHITE, 1_cv, Key("p22_stroke_default"));
+			const auto layer = canvas.stroke({.width=0.1_cv}, WHITE, 1_cv, Key("p22_stroke_default"));
 
 			const bool nonzeroTx = std::abs(layer.transform.x) > TOL || std::abs(layer.transform.y) > TOL;
 
@@ -896,7 +898,7 @@ int main(int argc, char** argv) {
 			.moveTo(0.1_cv, 0.5_cv)
 			.quadTo(0.25_cv, 0.05_cv, 0.5_cv, 0.5_cv)
 			.quadTo(0.75_cv, 0.95_cv, 0.9_cv, 0.5_cv)
-			.stroke(0.06_cv, WHITE);
+			.stroke({.width=0.06_cv}, WHITE);
 
 		canvas.finalize(Key("chain_scurve_composite"));
 
@@ -933,6 +935,29 @@ int main(int argc, char** argv) {
 			<< " chain_circle key=" << chainFill.key
 			<< " chain_rot key=" << chainRot.key << "\n"
 		;
+	}
+
+	// ============================================================================================
+	// Pattern 24: an open centerline committed as a stroke shape (ShapeInfo::strokeRadius).
+	//
+	// The Pattern 8 S-curve before strokePath() expands it: two quadratics, one open contour,
+	// nothing closing it. As a fill it has no inside; strokeRadius marks it as a stroke covering
+	// every point within 0.04 em of these curves (Pattern 8's 0.08 width), which also grows its
+	// automatic metrics and each curve's band membership by 0.04. Committed straight to the Atlas
+	// (no Canvas verb exists for it).
+	// ============================================================================================
+
+	{
+		slughorn::Atlas::ShapeInfo info;
+		slughorn::CurveDecomposer decomposer(info.curves);
+
+		decomposer.moveTo(0.2_cv, 0.85_cv);
+		decomposer.quadTo(0.1_cv, 0.5_cv, 0.5_cv, 0.5_cv);
+		decomposer.quadTo(0.9_cv, 0.5_cv, 0.8_cv, 0.15_cv);
+
+		info.strokeRadius = 0.04_cv;
+
+		atlas.addShape(Key("scurve_centerline"), info);
 	}
 
 	// ============================================================================================

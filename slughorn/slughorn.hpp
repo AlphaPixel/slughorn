@@ -985,6 +985,11 @@ public:
 		// ascending). If non-empty, overrides numBandsY; resulting numBands = splitsY.size() + 1.
 		std::vector<slug_t> splitsY = {};
 
+		// Half width of a centerline stroke: when > 0, `curves` are a centerline (open contours,
+		// not a fill outline) and every pixel within strokeRadius em of a curve is covered by it. Each curve then joins every band within strokeRadius of its bounding box,
+		// and an automatic bounding box grows by strokeRadius on every side. 0 = ordinary fill.
+		slug_t strokeRadius = 0_cv;
+
 		// Controls where the transform origin (Layer::transform.dx/dy) is placed relative to the
 		// shape geometry.
 		//
@@ -1103,6 +1108,9 @@ public:
 	//
 	// Type::SDF is a single channel (read .r); Type::MSDF is three (median of .rgb) and keeps the
 	// sharp corners a single-channel field rounds off.
+	//
+	// A centerline stroke (strokeRadius > 0) bakes its exact field, strokeRadius minus the distance
+	// to the nearest curve, with no msdfgen; under Type::MSDF all three channels hold that value.
 	// --------------------------------------------------------------------------------------------
 	struct SDF {
 		enum class Type: uint8_t { SDF, MSDF };
@@ -1200,6 +1208,10 @@ public:
 		// Em-space pivot offset. Shader reads this as the rotation/effect origin.
 		// Computed from ShapeInfo::Origin during build(); see `origin` below for the input spec.
 		slug_t originX = 0_cv, originY = 0_cv;
+
+		// ShapeInfo::strokeRadius: the maximum half width this shape's bands were built for
+		// (0 = an ordinary fill).
+		slug_t strokeRadius = 0_cv;
 
 		// The origin spec supplied by the caller at addShape()/canvas time.
 		// Preserved post-build for diagnostics (slughorn info) and for computeQuad
@@ -2366,6 +2378,7 @@ inline std::ostream& operator<<(std::ostream& os, const Atlas::Shape& s) {
 		<< "Shape(w=" << s.width << " h=" << s.height
 		<< " bearing=" << s.bearingX << "/" << s.bearingY
 		<< " origin=" << s.originX << "/" << s.originY
+		<< " strokeRadius=" << s.strokeRadius
 		<< " bandScale=" << s.bandScaleX << "/" << s.bandScaleY
 		<< " bandOffset=" << s.bandOffsetX << "/" << s.bandOffsetY << ")"
 	;
@@ -2380,6 +2393,7 @@ inline std::ostream& operator<<(std::ostream& os, const Atlas::ShapeInfo& info) 
 		<< " advance=" << info.advance
 		<< " bands=" << info.numBandsX << "x" << info.numBandsY
 		<< " splits=" << info.splitsX.size() << "/" << info.splitsY.size()
+		<< " strokeRadius=" << info.strokeRadius
 		<< " origin=" << info.origin << ")"
 	;
 }

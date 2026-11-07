@@ -294,6 +294,7 @@ void Atlas::addShape(Key key, const ShapeInfo& desc) {
 
 	build.curves = desc.curves;
 	build.metrics.contourStarts = desc.contourStarts;
+	build.metrics.strokeRadius = std::max(desc.strokeRadius, 0_cv);
 
 	if(!desc.autoMetrics) {
 		build.metrics.bearingX = desc.bearingX;
@@ -373,6 +374,7 @@ void Atlas::append(const Atlas& source, uint8_t mask, std::string_view namePrefi
 		info.height = shape.height;
 		info.advance = shape.advance;
 		info.origin = shape.origin;
+		info.strokeRadius = shape.strokeRadius;
 
 		addShape(remapAppendKey(key, mask, namePrefix), info);
 	}
@@ -948,6 +950,18 @@ void Atlas::buildShapeBands(
 	const slug_t curveMinX = minX, curveMaxX = maxX, curveRangeX = rangeX;
 	const slug_t curveMinY = minY, curveMaxY = maxY, curveRangeY = rangeY;
 
+	// A stroke covers strokeRadius beyond its centerline, so its automatic extent does too.
+	const slug_t strokeRadius = build.metrics.strokeRadius;
+
+	if(strokeRadius > 0_cv) {
+		minX -= strokeRadius;
+		minY -= strokeRadius;
+		maxX += strokeRadius;
+		maxY += strokeRadius;
+		rangeX += 2_cv * strokeRadius;
+		rangeY += 2_cv * strokeRadius;
+	}
+
 	// --------------------------------------------------------------------------------------------
 	// Derive metrics from bounding box when not overridden
 	// --------------------------------------------------------------------------------------------
@@ -1122,7 +1136,7 @@ void Atlas::buildShapeBands(
 			auto& band = build.hbands[b];
 
 			for(size_t ci = 0; ci < numCurves; ci++) {
-				if(curveIntersectsBandY(build.curves[ci], lo, hi)) band.curveIndices.push_back(ci);
+				if(curveIntersectsBandY(build.curves[ci], lo - strokeRadius, hi + strokeRadius)) band.curveIndices.push_back(ci);
 			}
 
 			// TODO: std::stable_sort is also an option here, investigate!
@@ -1198,7 +1212,7 @@ void Atlas::buildShapeBands(
 			auto& band = build.vbands[b];
 
 			for(size_t ci = 0; ci < numCurves; ci++) {
-				if(curveIntersectsBandX(build.curves[ci], lo, hi)) band.curveIndices.push_back(ci);
+				if(curveIntersectsBandX(build.curves[ci], lo - strokeRadius, hi + strokeRadius)) band.curveIndices.push_back(ci);
 			}
 
 			// TODO: See `stable_sort` above!

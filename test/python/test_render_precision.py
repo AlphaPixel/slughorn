@@ -163,7 +163,7 @@ def test_canvas_stroke_scaled_polyline():
 	for x, y in polyline[1:]:
 		cvs.line_to(x, y)
 
-	layer = cvs.stroke(0.125, slughorn.Color(1.0, 1.0, 1.0, 1.0), scale=160.0)
+	layer = cvs.stroke(slughorn.canvas.Stroke(width=0.125), slughorn.Color(1.0, 1.0, 1.0, 1.0), scale=160.0)
 
 	atlas.build()
 

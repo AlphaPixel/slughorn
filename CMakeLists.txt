@@ -479,6 +479,18 @@ if(SLUGHORN_BUILD_TESTS)
 	target_compile_options(slughorn-test-scanlinesweep PRIVATE ${SLUGHORN_COMPILE_OPTIONS})
 	add_test(NAME scanlinesweep COMMAND slughorn-test-scanlinesweep)
 
+	# Measurement, not a pass/fail test: edge AA error per render::AARamp mode.
+	# add_executable(slughorn-test-aa "test/slughorn-test-aa.cpp")
+	# target_link_libraries(slughorn-test-aa PRIVATE slughorn)
+	# target_compile_options(slughorn-test-aa PRIVATE ${SLUGHORN_COMPILE_OPTIONS})
+
+	# Measurement, not a pass/fail test: small-text sampling strategies on real glyphs.
+	# if(SLUGHORN_FREETYPE)
+	# 	add_executable(slughorn-test-smalltext "test/slughorn-test-smalltext.cpp")
+	# 	target_link_libraries(slughorn-test-smalltext PRIVATE slughorn)
+	# 	target_compile_options(slughorn-test-smalltext PRIVATE ${SLUGHORN_COMPILE_OPTIONS})
+	# endif()
+
 	add_executable(slughorn-test-pick "test/slughorn-test-pick.cpp")
 	target_link_libraries(slughorn-test-pick PRIVATE slughorn)
 	target_compile_options(slughorn-test-pick PRIVATE ${SLUGHORN_COMPILE_OPTIONS})

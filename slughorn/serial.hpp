@@ -572,6 +572,9 @@ json buildJson(
 			{"origin", {{"type", originType}, {"x", shape.origin.x}, {"y", shape.origin.y}}}
 		};
 
+		// Written only for stroke shapes; a missing key reads back as 0 (an ordinary fill).
+		if(shape.strokeRadius > 0_cv) jshape["stroke_radius"] = shape.strokeRadius;
+
 		if(shape.sdf) {
 			jshape["sdf"] = {
 				{"x", shape.sdf->x},
@@ -766,6 +769,7 @@ Atlas atlasFromJson(
 		shape.advance = js.at("advance");
 		shape.originX = js.value("origin_x", 0_cv);
 		shape.originY = js.value("origin_y", 0_cv);
+		shape.strokeRadius = js.value("stroke_radius", 0_cv);
 
 		if(js.contains("sdf")) {
 			const json& jt = js.at("sdf");

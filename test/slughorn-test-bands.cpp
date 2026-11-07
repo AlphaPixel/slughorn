@@ -290,7 +290,7 @@ static void runRoundedRect() {
 		});
 
 		drawShape(canvas);
-		canvas.stroke(0.05_cv, white, 1_cv, Key("rr"));
+		canvas.stroke({.width=0.05_cv}, white, 1_cv, Key("rr"));
 		atlas1.build();
 	}
 
@@ -335,7 +335,7 @@ static void runRoundedRect() {
 		});
 
 		drawShape(canvas);
-		canvas.stroke(0.05_cv, white, 1_cv, Key("rr"));
+		canvas.stroke({.width=0.05_cv}, white, 1_cv, Key("rr"));
 		atlas2.build();
 	}
 

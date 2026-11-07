@@ -86,3 +86,19 @@ set_target_properties(slughorn-example-glfw PROPERTIES
 	CXX_STANDARD_REQUIRED ON
 	RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
 )
+
+# ----------------------------------------------------------------------------
+# slughorn-bench-glfw (needs SLUGHORN_SERIAL to read .slugb atlases)
+# ----------------------------------------------------------------------------
+if(SLUGHORN_SERIAL)
+	add_executable(slughorn-bench-glfw "slughorn-bench-glfw.cpp")
+
+	target_link_libraries(slughorn-bench-glfw PRIVATE slughorn glad glfw)
+	target_include_directories(slughorn-bench-glfw PRIVATE ${CMAKE_SOURCE_DIR})
+
+	set_target_properties(slughorn-bench-glfw PROPERTIES
+		CXX_STANDARD 20
+		CXX_STANDARD_REQUIRED ON
+		RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
+	)
+endif()

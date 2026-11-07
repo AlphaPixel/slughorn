@@ -4,13 +4,17 @@
 // "slughorn" into an Atlas, uploads the two Slug textures, assembles a VAO
 // from Layer data, and renders with a stripped-down Slug fragment shader.
 //
-// Usage: slughorn-example-glfw <font.ttf>
+// Usage: slughorn-example-glfw <font.ttf> [--curve-precision 16|32] [--strokes]
+//
+// --strokes adds two centerline-stroke shapes (centerline curves + strokeRadius) below the text: an
+// S-curve and a zigzag. They render through slug_RenderStroke() instead of slug_Render().
 //
 // Interaction:
 // - Left drag: orbit camera
 // - Right drag: pan
 // - Mouse wheel: zoom
 // - P: toggle perspective / orthographic projection
+// - A: toggle the AA ramp: edge (default) / axis (Lengyel's original)
 // - R: reset view
 // - Esc: quit
 //
@@ -29,6 +33,7 @@
 //
 // u_mvp          mat4       view-projection transform
 // u_time         float      seconds since start
+// u_aaAxis       bool       true = axis ramp, false = edge ramp
 // u_curveTexture sampler2D  (unit 0) RGBA32F curve data
 // u_bandTexture  usampler2D (unit 1) RG16UI band data
 
@@ -65,6 +70,7 @@ layout(location = 2) in vec4 a_emCoord;
 layout(location = 3) in vec4 a_bandTransform; // bandScaleX/Y, bandOffsetX/Y
 layout(location = 4) in vec4 a_shapeData; // bandTexX/Y, bandMaxX/Y
 layout(location = 5) in float a_effectId; // unused in this demo, carried through
+layout(location = 6) in float a_strokeRadius; // > 0: a centerline-stroke shape
 
 uniform mat4 u_mvp;
 uniform float u_time;
@@ -75,6 +81,7 @@ out vec4 v_color;
 
 flat out vec4 v_bandTransform;
 flat out vec4 v_shapeData;
+flat out float v_strokeRadius;
 
 void main() {
 	v_emCoord = a_emCoord.xy;
@@ -82,6 +89,7 @@ void main() {
 	v_color = a_color;
 	v_bandTransform = a_bandTransform;
 	v_shapeData = a_shapeData;
+	v_strokeRadius = a_strokeRadius;
 
 	gl_Position = u_mvp * vec4(a_position, 1.0);
 }
@@ -99,9 +107,11 @@ in vec4 v_color;
 
 flat in vec4 v_bandTransform; // bandScaleX/Y, bandOffsetX/Y
 flat in vec4 v_shapeData; // bandTexX/Y, bandMaxX/Y
+flat in float v_strokeRadius;
 
 uniform sampler2D u_curveTexture;
 uniform usampler2D u_bandTexture;
+uniform bool u_aaAxis;
 
 out vec4 fragColor;
 
@@ -138,7 +148,9 @@ vec2 slug_SolveRoots(float a, float b, float c) {
 	return b >= 0.0 ? vec2(tNear, tFar) : vec2(tFar, tNear);
 }
 
-vec2 slug_SolveHorizPoly(vec4 p12, vec2 p3) {
+// tangents: the curve's direction at each root, a * t - b (xy for the first root, zw for the
+// second), unnormalized; only the edge ramp reads them.
+vec2 slug_SolveHorizPoly(vec4 p12, vec2 p3, out vec4 tangents) {
 	vec2 a = p12.xy - p12.zw * 2.0 + p3;
 	vec2 b = p12.xy - p12.zw;
 	float rb = 0.5 / b.y;
@@ -146,13 +158,14 @@ vec2 slug_SolveHorizPoly(vec4 p12, vec2 p3) {
 	float t1 = t.x;
 	float t2 = t.y;
 	if(abs(a.y) < 1.0 / 65536.0) { t1 = p12.y * rb; t2 = t1; }
+	tangents = vec4(a * t1 - b, a * t2 - b);
 	return vec2(
 		(a.x * t1 - b.x * 2.0) * t1 + p12.x,
 		(a.x * t2 - b.x * 2.0) * t2 + p12.x
 	);
 }
 
-vec2 slug_SolveVertPoly(vec4 p12, vec2 p3) {
+vec2 slug_SolveVertPoly(vec4 p12, vec2 p3, out vec4 tangents) {
 	vec2 a = p12.xy - p12.zw * 2.0 + p3;
 	vec2 b = p12.xy - p12.zw;
 	float rb = 0.5 / b.x;
@@ -160,6 +173,7 @@ vec2 slug_SolveVertPoly(vec4 p12, vec2 p3) {
 	float t1 = t.x;
 	float t2 = t.y;
 	if(abs(a.x) < 1.0 / 65536.0) { t1 = p12.x * rb; t2 = t1; }
+	tangents = vec4(a * t1 - b, a * t2 - b);
 	return vec2(
 		(a.y * t1 - b.y * 2.0) * t1 + p12.y,
 		(a.y * t2 - b.y * 2.0) * t2 + p12.y
@@ -193,9 +207,36 @@ float slug_CalcCoverage(float xcov, float ycov, float xwgt, float ywgt) {
 	return clamp(coverage, 0.0, 1.0);
 }
 
-float slug_Render(vec2 renderCoord, vec4 bandTransform, ivec2 glyphLoc, ivec2 bandMax) {
-	vec2 emsPerPixel = fwidth(renderCoord);
-	vec2 pixelsPerEm = 1.0 / emsPerPixel;
+// Edge ramp (u_aaAxis false; slughorn::render::AARamp::Edge): each crossing's distance is
+// converted to its distance across the edge in screen pixels, divided by the edge's ramp width
+// |cos| + |sin|, so edges ramp over |cos| + |sin| pixels at any angle, rotation or perspective.
+// The axis ramp (Lengyel's original) ramps one pixel along each ray instead, sharper on angled
+// edges. The scale is floored so a crossing contributes at most 2 pixels behind the sample, which
+// the early exit below relies on.
+const float SLUG_AA_SCALE_FLOOR = 0.25;
+
+// tangent: em-space curve direction at the crossing; n = (tangent.y, -tangent.x) is its normal.
+// The edge's offset along the ray is n.axis * r em, and one screen pixel step changes it by
+// n . emJacobian[0] and n . emJacobian[1]. across holds the loop-invariant part of that (see
+// slug_RampAcross()), already multiplied by the ray's pixels per em.
+float slug_RampScale(vec2 tangent, vec4 across, bool horizontal) {
+	float sum = abs(dot(tangent, across.xy)) + abs(dot(tangent, across.zw));
+	return sum > 0.0 ? max(SLUG_AA_SCALE_FLOOR, abs(horizontal ? tangent.y : tangent.x) / sum) : 1.0;
+}
+
+// n . v = tangent.y * v.x - tangent.x * v.y, for both Jacobian columns.
+vec4 slug_RampAcross(mat2 emJacobian, float pixelsPerEm) {
+	return vec4(-emJacobian[0].y, emJacobian[0].x, -emJacobian[1].y, emJacobian[1].x) * pixelsPerEm;
+}
+
+// emJacobian: the em-space change for a one pixel step along screen x (column 0) and screen y
+// (column 1), mat2(dFdx(em), dFdy(em)). The axis ramp reads only 1 / (|dx| + |dy|), which is
+// 1 / fwidth(em).
+float slug_Render(vec2 renderCoord, mat2 emJacobian, vec4 bandTransform, ivec2 glyphLoc, ivec2 bandMax) {
+	vec2 pixelsPerEm = 1.0 / (abs(emJacobian[0]) + abs(emJacobian[1]));
+	float reach = u_aaAxis ? 0.5 : 0.5 / SLUG_AA_SCALE_FLOOR;
+	vec4 hAcross = slug_RampAcross(emJacobian, pixelsPerEm.x);
+	vec4 vAcross = slug_RampAcross(emJacobian, pixelsPerEm.y);
 
 	// O(1) band index via indirection tables (2 fetches per axis).
 	int qY = clamp(int(renderCoord.y * bandTransform.y + bandTransform.w), 0, SLUG_INDIRECTION_SIZE - 1);
@@ -226,13 +267,16 @@ float slug_Render(vec2 renderCoord, vec4 bandTransform, ivec2 glyphLoc, ivec2 ba
 		// against the pre-sharing renderer at real CJK-atlas scale.
 		vec2 p3 = texelFetch(u_curveTexture, slug_CalcCurveLoc(curveLoc, 1), 0).xy - renderCoord;
 
-		if(max(max(p12.x, p12.z), p3.x) * pixelsPerEm.x < -0.5) break;
+		if(max(max(p12.x, p12.z), p3.x) * pixelsPerEm.x < -reach) break;
 
 		uint code = slug_CalcRootCode(p12.y, p12.w, p3.y);
 		if(code != 0u) {
-			vec2 r = slug_SolveHorizPoly(p12, p3) * pixelsPerEm.x;
-			if((code & 1u) != 0u) { xcov += clamp(r.x + 0.5, 0.0, 1.0); xwgt = max(xwgt, clamp(1.0 - abs(r.x) * 2.0, 0.0, 1.0)); }
-			if(code > 1u) { xcov -= clamp(r.y + 0.5, 0.0, 1.0); xwgt = max(xwgt, clamp(1.0 - abs(r.y) * 2.0, 0.0, 1.0)); }
+			vec4 tangents;
+			vec2 r = slug_SolveHorizPoly(p12, p3, tangents) * pixelsPerEm.x;
+			// The weights keep the unscaled distance, so a ray nearly parallel to an edge stays down-weighted.
+			vec2 rc = u_aaAxis ? r : r * vec2(slug_RampScale(tangents.xy, hAcross, true), slug_RampScale(tangents.zw, hAcross, true));
+			if((code & 1u) != 0u) { xcov += clamp(rc.x + 0.5, 0.0, 1.0); xwgt = max(xwgt, clamp(1.0 - abs(r.x) * 2.0, 0.0, 1.0)); }
+			if(code > 1u) { xcov -= clamp(rc.y + 0.5, 0.0, 1.0); xwgt = max(xwgt, clamp(1.0 - abs(r.y) * 2.0, 0.0, 1.0)); }
 		}
 	}
 
@@ -249,17 +293,156 @@ float slug_Render(vec2 renderCoord, vec4 bandTransform, ivec2 glyphLoc, ivec2 ba
 		// See the matching endpoint-sharing tradeoff comment in the horizontal-band loop above.
 		vec2 p3 = texelFetch(u_curveTexture, slug_CalcCurveLoc(curveLoc, 1), 0).xy - renderCoord;
 
-		if(max(max(p12.y, p12.w), p3.y) * pixelsPerEm.y < -0.5) break;
+		if(max(max(p12.y, p12.w), p3.y) * pixelsPerEm.y < -reach) break;
 
 		uint code = slug_CalcRootCode(p12.x, p12.z, p3.x);
 		if(code != 0u) {
-			vec2 r = slug_SolveVertPoly(p12, p3) * pixelsPerEm.y;
-			if((code & 1u) != 0u) { ycov -= clamp(r.x + 0.5, 0.0, 1.0); ywgt = max(ywgt, clamp(1.0 - abs(r.x) * 2.0, 0.0, 1.0)); }
-			if(code > 1u) { ycov += clamp(r.y + 0.5, 0.0, 1.0); ywgt = max(ywgt, clamp(1.0 - abs(r.y) * 2.0, 0.0, 1.0)); }
+			vec4 tangents;
+			vec2 r = slug_SolveVertPoly(p12, p3, tangents) * pixelsPerEm.y;
+			vec2 rc = u_aaAxis ? r : r * vec2(slug_RampScale(tangents.xy, vAcross, false), slug_RampScale(tangents.zw, vAcross, false));
+			if((code & 1u) != 0u) { ycov -= clamp(rc.x + 0.5, 0.0, 1.0); ywgt = max(ywgt, clamp(1.0 - abs(r.x) * 2.0, 0.0, 1.0)); }
+			if(code > 1u) { ycov += clamp(rc.y + 0.5, 0.0, 1.0); ywgt = max(ywgt, clamp(1.0 - abs(r.y) * 2.0, 0.0, 1.0)); }
 		}
 	}
 
 	return slug_CalcCoverage(xcov, ycov, xwgt, ywgt);
+}
+
+// ---------------------------------------------------------------------------
+// Centerline strokes; mirrors slughorn::render::distanceToCurve() and Sampler::_renderStroke().
+// ---------------------------------------------------------------------------
+
+// Distance from the origin to B(t) = p1 + 2t * a + t^2 * c.
+float slug_DistanceAt(vec2 p1, vec2 a, vec2 c, float t) {
+	return length(p1 + t * (2.0 * a + t * c));
+}
+
+// Distance from the origin to the quadratic p1, p2, p3 (points already relative to the pixel).
+// The nearest point solves B(t) . B'(t) = 0:
+//
+//     (c . c) t^3 + 3 (a . c) t^2 + (2 (a . a) + p1 . c) t + p1 . a = 0
+//
+// with a = p2 - p1 and c = p1 - 2 * p2 + p3. Its real roots clamped to [0, 1], plus both
+// endpoints (round caps), are the candidates.
+float slug_DistanceToCurve(vec2 p1, vec2 p2, vec2 p3) {
+	vec2 a = p2 - p1;
+	vec2 c = p1 - 2.0 * p2 + p3;
+	float cc = dot(c, c);
+	float aa = dot(a, a);
+
+	// Degenerate: a segment p1 -> p1 + 2a (or a single point when a is also zero).
+	if(cc <= 1e-12 * aa || cc == 0.0) {
+		vec2 d = 2.0 * a;
+		float len2 = dot(d, d);
+		float t = len2 > 0.0 ? clamp(-dot(p1, d) / len2, 0.0, 1.0) : 0.0;
+
+		return length(p1 + t * d);
+	}
+
+	// Monic cubic t^3 + ma t^2 + mb t + mk, then depressed with t = u - ma / 3: u^3 + p u + q = 0.
+	float ma = 3.0 * dot(a, c) / cc;
+	float mb = (2.0 * aa + dot(p1, c)) / cc;
+	float mk = dot(p1, a) / cc;
+	float p = mb - ma * ma / 3.0;
+	float q = 2.0 * ma * ma * ma / 27.0 - ma * mb / 3.0 + mk;
+	float shift = -ma / 3.0;
+	float disc = q * q / 4.0 + p * p * p / 27.0;
+	float best = min(slug_DistanceAt(p1, a, c, 0.0), slug_DistanceAt(p1, a, c, 1.0));
+
+	if(disc > 0.0) {
+		// One real root. The cube root takes the sign that adds like signs (no cancellation); the
+		// other term is -p / (3 * w).
+		float s = sqrt(disc);
+		float h = q >= 0.0 ? -q / 2.0 - s : -q / 2.0 + s;
+		float w = sign(h) * pow(abs(h), 1.0 / 3.0);
+		float u = w != 0.0 ? w - p / (3.0 * w) : 0.0;
+
+		best = min(best, slug_DistanceAt(p1, a, c, clamp(u + shift, 0.0, 1.0)));
+	}
+
+	else {
+		// Three real roots (p <= 0): the trigonometric form.
+		float m = 2.0 * sqrt(max(-p / 3.0, 0.0));
+		float arg = m > 0.0 ? clamp(3.0 * q / (p * m), -1.0, 1.0) : 0.0;
+		float theta = acos(arg) / 3.0;
+		const float third = 2.0943951; // 2 * pi / 3
+
+		for(int i = 0; i < 3; i++) {
+			float u = m * cos(theta - float(i) * third);
+
+			best = min(best, slug_DistanceAt(p1, a, c, clamp(u + shift, 0.0, 1.0)));
+		}
+	}
+
+	return best;
+}
+
+// A stroke shape's curves are a centerline; a point is covered within radius em of the nearest
+// one. Coverage ramps linearly over one pixel centered on that boundary, the pixel's em size taken
+// as the mean of its two axes.
+//
+// The builder files each curve in every band within radius of it, so the pixel's h-band and its
+// v-band each hold every curve that can reach it, and the shorter list is walked. Lists are sorted
+// by descending max x (h-bands) / max y (v-bands), so once a curve's max is farther behind the
+// pixel than the radius plus a pixel, no later curve can reach it either.
+//
+// The ramp reaches half a pixel past radius but the band padding is only radius, so every band of
+// the walked axis within half a pixel of the point is walked; a curve seen twice cannot change
+// the minimum.
+float slug_RenderStroke(
+	vec2 renderCoord,
+	mat2 emJacobian,
+	vec4 bandTransform,
+	ivec2 glyphLoc,
+	ivec2 bandMax,
+	float radius
+) {
+	vec2 emsPerPixel = abs(emJacobian[0]) + abs(emJacobian[1]);
+	float emPerPixel = max(0.5 * (emsPerPixel.x + emsPerPixel.y), 1e-12);
+
+	int qY = clamp(int(renderCoord.y * bandTransform.y + bandTransform.w), 0, SLUG_INDIRECTION_SIZE - 1);
+	int qX = clamp(int(renderCoord.x * bandTransform.x + bandTransform.z), 0, SLUG_INDIRECTION_SIZE - 1);
+	int bandY = int(texelFetch(u_bandTexture, ivec2(glyphLoc.x + qY, glyphLoc.y), 0).r);
+	int bandX = int(texelFetch(u_bandTexture, ivec2(glyphLoc.x + SLUG_INDIRECTION_SIZE + qX, glyphLoc.y), 0).r);
+	int hHeaders = glyphLoc.x + 2 * SLUG_INDIRECTION_SIZE;
+	int vHeaders = hHeaders + bandMax.y + 1;
+	uint hcount = texelFetch(u_bandTexture, ivec2(hHeaders + bandY, glyphLoc.y), 0).x;
+	uint vcount = texelFetch(u_bandTexture, ivec2(vHeaders + bandX, glyphLoc.y), 0).x;
+	bool horizontal = hcount <= vcount;
+
+	// The band axis is perpendicular to the sort axis: h-bands slice y, v-bands slice x.
+	float coord = horizontal ? renderCoord.y : renderCoord.x;
+	float bandScale = horizontal ? bandTransform.y : bandTransform.x;
+	float bandOffset = horizontal ? bandTransform.w : bandTransform.z;
+	int indir = glyphLoc.x + (horizontal ? 0 : SLUG_INDIRECTION_SIZE);
+	int headers = horizontal ? hHeaders : vHeaders;
+	float fringe = 0.5 * emPerPixel;
+	int qFirst = clamp(int((coord - fringe) * bandScale + bandOffset), 0, SLUG_INDIRECTION_SIZE - 1);
+	int qLast = clamp(int((coord + fringe) * bandScale + bandOffset), 0, SLUG_INDIRECTION_SIZE - 1);
+	int first = int(texelFetch(u_bandTexture, ivec2(indir + qFirst, glyphLoc.y), 0).r);
+	int last = int(texelFetch(u_bandTexture, ivec2(indir + qLast, glyphLoc.y), 0).r);
+
+	// Curve points are taken relative to the pixel, so the cutoff is relative too.
+	float cutoff = -radius - emPerPixel;
+	float d = 1e30;
+
+	for(int band = first; band <= last; band++) {
+		uvec2 bandData = texelFetch(u_bandTexture, ivec2(headers + band, glyphLoc.y), 0).xy;
+
+		for(int ci = 0; ci < int(bandData.x); ci++) {
+			ivec2 bandLoc = slug_CalcBandLoc(glyphLoc, bandData.y + uint(ci));
+			ivec2 curveLoc = ivec2(texelFetch(u_bandTexture, bandLoc, 0).xy);
+			vec4 p12 = texelFetch(u_curveTexture, curveLoc, 0) - vec4(renderCoord, renderCoord);
+			vec2 p3 = texelFetch(u_curveTexture, slug_CalcCurveLoc(curveLoc, 1), 0).xy - renderCoord;
+			float maxCoord = horizontal ? max(max(p12.x, p12.z), p3.x) : max(max(p12.y, p12.w), p3.y);
+
+			if(maxCoord < cutoff) break;
+
+			d = min(d, slug_DistanceToCurve(p12.xy, p12.zw, p3));
+		}
+	}
+
+	return clamp((radius - d) / emPerPixel + 0.5, 0.0, 1.0);
 }
 
 // ---------------------------------------------------------------------------
@@ -269,7 +452,14 @@ void main() {
 	ivec2 glyphLoc = ivec2(v_shapeData.xy);
 	ivec2 bandMax = ivec2(v_shapeData.zw);
 
-	float fill = slug_Render(v_emCoord, v_bandTransform, glyphLoc, bandMax);
+	// Taken here, before any branch or discard: derivatives need all four pixels of the 2x2 quad.
+	mat2 emJacobian = mat2(dFdx(v_emCoord), dFdy(v_emCoord));
+
+	// The shape's kind picks the method: a stroke radius means its curves are a centerline.
+	float fill = v_strokeRadius > 0.0
+		? slug_RenderStroke(v_emCoord, emJacobian, v_bandTransform, glyphLoc, bandMax, v_strokeRadius)
+		: slug_Render(v_emCoord, emJacobian, v_bandTransform, glyphLoc, bandMax)
+	;
 
 	if(fill < 0.001) discard;
 
@@ -495,6 +685,7 @@ struct ViewState {
 	float pitch = 0.0f;
 	float distance = 5.0f;
 	bool usePerspective = true;
+	bool aaAxis = false;
 
 	bool leftDragging = false;
 	bool rightDragging = false;
@@ -536,6 +727,7 @@ static Vec3 orbitCameraPosition(const ViewState& view) {
 // location 3: bandTransform vec4 (bandScaleX/Y, bandOffsetX/Y)
 // location 4: shapeData vec4 (bandTexX/Y, bandMaxX/Y)
 // location 5: effectId float (unused here, carried for forward-compat)
+// location 6: strokeRadius float (Shape::strokeRadius; > 0 = centerline stroke)
 // ============================================================================
 struct Vertex {
 	float position[3];
@@ -544,6 +736,7 @@ struct Vertex {
 	float bandTransform[4];
 	float shapeData[4];
 	float effectId;
+	float strokeRadius;
 };
 
 // Build the interleaved vertex + index arrays from a set of slughorn Layers.
@@ -617,6 +810,7 @@ static void buildMesh(
 			std::memcpy(v.bandTransform, bx, sizeof(v.bandTransform));
 			std::memcpy(v.shapeData, sd, sizeof(v.shapeData));
 			v.effectId = eid;
+			v.strokeRadius = (float)shape->strokeRadius;
 			outVerts.push_back(v);
 		}
 
@@ -649,6 +843,12 @@ static void onKey(GLFWwindow* win, int key, int /*scancode*/, int action, int /*
 
 	if(key == GLFW_KEY_P) view->usePerspective = !view->usePerspective;
 	if(key == GLFW_KEY_R) view->reset();
+
+	if(key == GLFW_KEY_A) {
+		view->aaAxis = !view->aaAxis;
+
+		std::printf("AA ramp: %s\n", view->aaAxis ? "axis" : "edge");
+	}
 }
 
 static void onMouseButton(GLFWwindow* win, int button, int action, int /*mods*/) {
@@ -727,7 +927,7 @@ static void onScroll(GLFWwindow* win, double /*xoffset*/, double yoffset) {
 
 int main(int argc, char** argv) {
 	if(argc < 2) {
-		std::fprintf(stderr, "Usage: %s <font.ttf> [--curve-precision 16|32]\n", argv[0]);
+		std::fprintf(stderr, "Usage: %s <font.ttf> [--curve-precision 16|32] [--strokes]\n", argv[0]);
 		std::fprintf(stderr,
 			"  --curve-precision: curve texture float precision (DEFAULT 32). 16 halves\n"
 			"    curve-texture memory but is a real precision tradeoff -- can visibly\n"
@@ -737,9 +937,14 @@ int main(int argc, char** argv) {
 	}
 
 	std::string curvePrecision = "32";
+	bool strokes = false;
 
 	for(int i = 2; i < argc - 1; i++) {
 		if(std::string(argv[i]) == "--curve-precision") curvePrecision = argv[i + 1];
+	}
+
+	for(int i = 2; i < argc; i++) {
+		if(std::string(argv[i]) == "--strokes") strokes = true;
 	}
 
 	if(curvePrecision != "16" && curvePrecision != "32") {
@@ -784,6 +989,31 @@ int main(int argc, char** argv) {
 		return 1;
 	}
 
+	// Centerline strokes: centerline curves committed with a strokeRadius instead of an outline.
+	if(strokes) {
+		slughorn::Atlas::ShapeInfo scurve;
+		slughorn::CurveDecomposer scurvePath(scurve.curves);
+
+		scurvePath.moveTo(0.2_cv, 0.85_cv);
+		scurvePath.quadTo(0.1_cv, 0.5_cv, 0.5_cv, 0.5_cv);
+		scurvePath.quadTo(0.9_cv, 0.5_cv, 0.8_cv, 0.15_cv);
+
+		scurve.strokeRadius = 0.04_cv;
+
+		atlas.addShape(slughorn::Key("scurve"), scurve);
+
+		slughorn::Atlas::ShapeInfo zigzag;
+		slughorn::CurveDecomposer zigzagPath(zigzag.curves);
+
+		zigzagPath.moveTo(0_cv, 0_cv);
+
+		for(size_t i = 1; i <= 20; i++) zigzagPath.lineTo(cv(i) / 20_cv, i % 2 ? 0.5_cv : 0_cv);
+
+		zigzag.strokeRadius = 0.02_cv;
+
+		atlas.addShape(slughorn::Key("zigzag"), zigzag);
+	}
+
 	atlas.build();
 
 	// ------------------------------------------------------------------------
@@ -821,6 +1051,23 @@ int main(int argc, char** argv) {
 		layers.push_back(layer);
 
 		cursorX += float(shape->advance) * fontSize;
+	}
+
+	// The stroke shapes sit one em below the baseline, left to right.
+	if(strokes) {
+		slughorn::Layer scurveLayer;
+		scurveLayer.key = slughorn::Key("scurve");
+		scurveLayer.color = {1.0f, 0.6f, 0.2f, 1.0f};
+		scurveLayer.transform = slughorn::Transform{.x = 0_cv, .y = -1.1_cv};
+		scurveLayer.scale = cv(fontSize);
+		layers.push_back(scurveLayer);
+
+		slughorn::Layer zigzagLayer;
+		zigzagLayer.key = slughorn::Key("zigzag");
+		zigzagLayer.color = {0.3f, 0.7f, 1.0f, 1.0f};
+		zigzagLayer.transform = slughorn::Transform{.x = 1.2_cv, .y = -0.85_cv};
+		zigzagLayer.scale = cv(fontSize);
+		layers.push_back(zigzagLayer);
 	}
 
 	// ------------------------------------------------------------------------
@@ -872,6 +1119,7 @@ int main(int argc, char** argv) {
 	std::printf("  Right drag  pan\n");
 	std::printf("  Wheel       zoom\n");
 	std::printf("  P           toggle perspective/ortho\n");
+	std::printf("  A           toggle AA ramp edge/axis\n");
 	std::printf("  R           reset view\n");
 	std::printf("  Esc         quit\n");
 
@@ -912,6 +1160,7 @@ int main(int argc, char** argv) {
 	const GLint u_time = glGetUniformLocation(program, "u_time");
 	const GLint u_curveTexture = glGetUniformLocation(program, "u_curveTexture");
 	const GLint u_bandTexture = glGetUniformLocation(program, "u_bandTexture");
+	const GLint u_aaAxis = glGetUniformLocation(program, "u_aaAxis");
 
 	glUseProgram(program);
 	glUniform1i(u_curveTexture, 0); // texture unit 0
@@ -972,6 +1221,11 @@ int main(int argc, char** argv) {
 	glVertexAttribPointer(5, 1, GL_FLOAT, GL_FALSE, stride,
 		(void*)offsetof(Vertex, effectId));
 
+	// location 6: strokeRadius (float)
+	glEnableVertexAttribArray(6);
+	glVertexAttribPointer(6, 1, GL_FLOAT, GL_FALSE, stride,
+		(void*)offsetof(Vertex, strokeRadius));
+
 	glBindVertexArray(0);
 
 	// ------------------------------------------------------------------------
@@ -1023,6 +1277,7 @@ int main(int argc, char** argv) {
 		glUseProgram(program);
 		glUniformMatrix4fv(u_mvp, 1, GL_FALSE, mvp);
 		glUniform1f(u_time, t);
+		glUniform1i(u_aaAxis, view.aaAxis ? 1 : 0);
 
 		glActiveTexture(GL_TEXTURE0);
 		glBindTexture(GL_TEXTURE_2D, texCurve);

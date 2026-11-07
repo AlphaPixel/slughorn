@@ -298,7 +298,7 @@ def test_canvas_quad_to(canvas, atlas):
 	canvas.begin_path()
 	canvas.move_to(0.0, 0.0)
 	canvas.quad_to(0.5, 1.0, 1.0, 0.0)
-	layer = canvas.stroke(0.05, slughorn.Color(1, 0, 0), 1.0, slughorn.Key("quad_stroke"))
+	layer = canvas.stroke(slughorn.canvas.Stroke(width=0.05), slughorn.Color(1, 0, 0), 1.0, slughorn.Key("quad_stroke"))
 	atlas.build()
 	assert atlas.get_shape(slughorn.Key("quad_stroke")) is not None
 
@@ -306,7 +306,7 @@ def test_canvas_bezier_to(canvas, atlas):
 	canvas.begin_path()
 	canvas.move_to(0.0, 0.0)
 	canvas.bezier_to(0.25, 1.0, 0.75, 1.0, 1.0, 0.0)
-	layer = canvas.stroke(0.05, slughorn.Color(1, 0, 0), 1.0, slughorn.Key("bezier_stroke"))
+	layer = canvas.stroke(slughorn.canvas.Stroke(width=0.05), slughorn.Color(1, 0, 0), 1.0, slughorn.Key("bezier_stroke"))
 	atlas.build()
 	assert atlas.get_shape(slughorn.Key("bezier_stroke")) is not None
 
@@ -324,7 +324,7 @@ def test_canvas_circle_helper(canvas, atlas):
 
 def test_canvas_arc_helper(canvas, atlas):
 	canvas.arc(0.5, 0.5, 0.4, 0.0, math.pi * 1.5)
-	layer = canvas.stroke(0.05, slughorn.Color(1, 0, 0), 1.0, slughorn.Key("arc_helper"))
+	layer = canvas.stroke(slughorn.canvas.Stroke(width=0.05), slughorn.Color(1, 0, 0), 1.0, slughorn.Key("arc_helper"))
 	atlas.build()
 	assert atlas.get_shape(slughorn.Key("arc_helper")) is not None
 
@@ -332,7 +332,7 @@ def test_canvas_arc_to(canvas, atlas):
 	canvas.begin_path()
 	canvas.move_to(0.0, 0.5)
 	canvas.arc_to(0.5, 1.0, 1.0, 0.5, 0.3)
-	layer = canvas.stroke(0.05, slughorn.Color(1, 0, 0), 1.0, slughorn.Key("arc_to"))
+	layer = canvas.stroke(slughorn.canvas.Stroke(width=0.05), slughorn.Color(1, 0, 0), 1.0, slughorn.Key("arc_to"))
 	atlas.build()
 	assert atlas.get_shape(slughorn.Key("arc_to")) is not None
 
@@ -405,19 +405,19 @@ def test_canvas_fill_explicit_path(canvas, atlas):
 def test_canvas_stroke_current_path(canvas, atlas):
 	canvas.begin_path()
 	canvas.circle(0.5, 0.5, 0.4)
-	layer = canvas.stroke(0.05, slughorn.Color(0, 1, 0), 1.0, slughorn.Key("stroke_cur"))
+	layer = canvas.stroke(slughorn.canvas.Stroke(width=0.05), slughorn.Color(0, 1, 0), 1.0, slughorn.Key("stroke_cur"))
 	atlas.build()
 	assert atlas.get_shape(slughorn.Key("stroke_cur")) is not None
 
 def test_canvas_stroke_auto_key(canvas):
 	canvas.circle(0.5, 0.5, 0.3)
-	layer = canvas.stroke(0.05, slughorn.Color(0, 1, 0))
+	layer = canvas.stroke(slughorn.canvas.Stroke(width=0.05), slughorn.Color(0, 1, 0))
 	assert layer.key is not None
 
 def test_canvas_stroke_explicit_path(canvas, atlas):
 	p = slughorn.canvas.Path()
 	p.circle(0.5, 0.5, 0.4)
-	layer = canvas.stroke(p, 0.05, slughorn.Color(0, 1, 0), 1.0, slughorn.Key("stroke_path"))
+	layer = canvas.stroke(p, slughorn.canvas.Stroke(width=0.05), slughorn.Color(0, 1, 0), 1.0, slughorn.Key("stroke_path"))
 	atlas.build()
 	assert atlas.get_shape(slughorn.Key("stroke_path")) is not None
 
@@ -468,7 +468,7 @@ def test_canvas_stroke_gradient(canvas, atlas, gradient_stops):
 	canvas.move_to(0.2, 0.2)
 	canvas.line_to(0.8, 0.8)
 	gh = canvas.create_sweep_gradient(0.5, 0.5, 0.0, math.pi, gradient_stops)
-	layer = canvas.stroke_gradient(0.05, gh, 1.0, slughorn.Key("stroke_grad"))
+	layer = canvas.stroke_gradient(slughorn.canvas.Stroke(width=0.05), gh, 1.0, slughorn.Key("stroke_grad"))
 	atlas.build()
 	assert atlas.get_shape(slughorn.Key("stroke_grad")) is not None
 
@@ -541,13 +541,13 @@ def test_canvas_fill_str_key(canvas, atlas):
 
 def test_canvas_stroke_str_key(canvas, atlas):
 	canvas.circle(0.5, 0.5, 0.3)
-	layer = canvas.stroke(0.05, slughorn.Color(0, 1, 0), 1.0, "str_stroke")
+	layer = canvas.stroke(slughorn.canvas.Stroke(width=0.05), slughorn.Color(0, 1, 0), 1.0, "str_stroke")
 	assert layer.key == slughorn.Key("str_stroke")
 
 def test_canvas_stroke_path_str_key(canvas, atlas):
 	p = slughorn.canvas.Path()
 	p.circle(0.5, 0.5, 0.2)
-	layer = canvas.stroke(p, 0.05, slughorn.Color(0, 0, 1), 1.0, "str_stroke_path")
+	layer = canvas.stroke(p, slughorn.canvas.Stroke(width=0.05), slughorn.Color(0, 0, 1), 1.0, "str_stroke_path")
 	assert layer.key == slughorn.Key("str_stroke_path")
 
 def test_canvas_get_shape_str(canvas, atlas):
@@ -565,7 +565,7 @@ def test_canvas_chain_begin_move_line_stroke(canvas):
 	layer = (canvas.begin_path()
 		.move_to(0.1, 0.5)
 		.line_to(0.9, 0.5)
-		.stroke(0.05, slughorn.Color(1, 1, 1)))
+		.stroke(slughorn.canvas.Stroke(width=0.05), slughorn.Color(1, 1, 1)))
 	assert layer.key is not None
 
 def test_canvas_chain_circle_fill(canvas):
@@ -681,7 +681,7 @@ def test_arc_stroke_centered_origin(atlas):
 	Origin = slughorn.ShapeInfo.Origin
 	canvas.begin_path()
 	canvas.arc(0.5, 0.5, 0.4, math.pi / 12, 2 * math.pi - math.pi / 12)
-	layer = canvas.stroke(0.01, slughorn.Color(0.6, 0.85, 1.0), 1.0, "arc_ring",
+	layer = canvas.stroke(slughorn.canvas.Stroke(width=0.01), slughorn.Color(0.6, 0.85, 1.0), 1.0, "arc_ring",
 		Origin(Origin.Type.Centered))
 	atlas.build()
 	s = atlas.get_shape("arc_ring")
@@ -695,7 +695,7 @@ def test_arc_stroke_compute_quad(atlas):
 	CX, CY = 0.5, 0.5
 	canvas.begin_path()
 	canvas.arc(CX, CY, 0.4, math.pi / 12, 2 * math.pi - math.pi / 12)
-	canvas.stroke(0.01, slughorn.Color(0.6, 0.85, 1.0), 1.0, "arc_quad",
+	canvas.stroke(slughorn.canvas.Stroke(width=0.01), slughorn.Color(0.6, 0.85, 1.0), 1.0, "arc_quad",
 		Origin(Origin.Type.Centered))
 	atlas.build()
 	s = atlas.get_shape("arc_quad")

@@ -25,7 +25,7 @@
 // slughorn::canvas::Path p;
 // p.moveTo(...); p.lineTo(...);
 // canvas.fill(p, color); // p is unchanged; can be reused
-// canvas.stroke(p, w, color);
+// canvas.stroke(p, {.width=w}, color);
 //
 // PATH SAMPLING:
 //
@@ -45,7 +45,10 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <optional>
+#include <stdexcept>
 #include <unordered_map>
+#include <utility>
 
 namespace slughorn {
 namespace canvas {
@@ -93,6 +96,32 @@ inline void flattenCurve(
 
 enum class LineJoin { Miter, Bevel, Round };
 enum class LineCap { Butt, Round, Square };
+
+// ================================================================================================
+// Stroke - HOW a path is stroked, passed to every Canvas stroke*() verb. It holds no curves: color,
+// scale, origin and key stay arguments of the verb, as they are for fill().
+//
+// Method::Outline expands the path into its outline (Path::strokePath()) and commits that as an
+// ordinary fill; every join and cap is available. Method::Centerline commits the path itself as a
+// centerline stroke (Atlas::ShapeInfo::strokeRadius = width / 2): far fewer curves and an exact
+// edge at any width, but only round joins and caps.
+//
+// join and cap left unset take the method's own default: Miter/Butt for Outline, Round/Round for
+// Centerline. A Centerline stroke throws std::invalid_argument for any other join or cap.
+// ================================================================================================
+
+struct Stroke {
+	enum class Method { Outline, Centerline };
+
+	slug_t width = 1_cv;
+	Method method = Method::Outline;
+
+	std::optional<LineJoin> join = {};
+	std::optional<LineCap> cap = {};
+
+	// Outline only; see LineJoin.
+	slug_t miterLimit = 4_cv;
+};
 
 // ================================================================================================
 // Path
@@ -655,11 +684,7 @@ public:
 		_activeSubpathStarts.clear();
 		_pendingSubpathsUntracked = false;
 
-		// Scale width by the CTM's pen scale so canvas.scale() affects stroke width.
-		const slug_t xScale = std::sqrt(_ctm.xx * _ctm.xx + _ctm.yx * _ctm.yx);
-		const slug_t yScale = std::sqrt(_ctm.xy * _ctm.xy + _ctm.yy * _ctm.yy);
-		const slug_t penScale = (xScale > 0_cv && yScale > 0_cv) ? std::sqrt(xScale * yScale) : 1_cv;
-		const slug_t h = width * penScale * 0.5_cv;
+		const slug_t h = width * _penScale() * 0.5_cv;
 		const slug_t tol = _decomposer.tolerance < TOLERANCE_EXACT
 			? _decomposer.tolerance
 			: std::max(TOLERANCE_BALANCED, h * 0.1_cv)
@@ -1237,6 +1262,52 @@ public:
 private:
 	friend class Canvas;
 
+	// The CTM's pen scale: stroke widths scale by it, so canvas.scale() affects them.
+	slug_t _penScale() const {
+		const slug_t xScale = std::sqrt(_ctm.xx * _ctm.xx + _ctm.yx * _ctm.yx);
+		const slug_t yScale = std::sqrt(_ctm.xy * _ctm.xy + _ctm.yy * _ctm.yy);
+
+		return (xScale > 0_cv && yScale > 0_cv) ? std::sqrt(xScale * yScale) : 1_cv;
+	}
+
+	// The curves strokePath() would stroke next - every subpath past the outlines of earlier
+	// strokePath() calls, pending then active - and their contour starts (index 0 explicit, empty
+	// when the pending boundaries are untracked), without changing the Path. A Centerline Stroke
+	// commits these as they are.
+	std::pair<Atlas::Curves, std::vector<size_t>> _centerline() const {
+		const size_t keep = _pendingStrokedEnd;
+		const size_t pendingCount = _pendingCurves.size() - keep;
+
+		Atlas::Curves curves(
+			_pendingCurves.begin() + static_cast<std::ptrdiff_t>(keep),
+			_pendingCurves.end()
+		);
+
+		std::vector<size_t> starts;
+
+		for(const auto& c : _activeCurves) curves.push_back(c);
+
+		if(curves.empty() || (_pendingSubpathsUntracked && pendingCount > 0)) {
+			return {std::move(curves), {}};
+		}
+
+		if(pendingCount > 0) {
+			starts.push_back(0);
+
+			for(size_t s : _pendingSubpathStarts) {
+				if(s > keep) starts.push_back(s - keep);
+			}
+		}
+
+		if(!_activeCurves.empty()) {
+			starts.push_back(pendingCount);
+
+			for(size_t s : _activeSubpathStarts) starts.push_back(pendingCount + s);
+		}
+
+		return {std::move(curves), std::move(starts)};
+	}
+
 	// Moves _activeCurves into _pendingCurves (translating any of its subpath-start markers along
 	// with it), and clears _activeCurves/_activeSubpathStarts. Shared by closePath() and
 	// Canvas::_consolidate() (both "finish the in-progress subpath" call sites) so the marker
@@ -1601,7 +1672,7 @@ public:
 	// _path._ctm - bakes transforms into internal path geometry at moveTo/lineTo time
 	// _ctm - applied as a placement transform for external-Path commit verbs
 	//
-	// Internal path commits (fill(Color), stroke(width, Color), etc.) rely on geometry
+	// Internal path commits (fill(Color), stroke(Stroke, Color), etc.) rely on geometry
 	// already baked by _path._ctm, so they do not additionally compose _ctm.
 	// External path commits (fill(Path, Color), etc.) compose _ctm into the layer
 	// transform so that translate/rotate/scale correctly position pre-built paths.
@@ -1936,22 +2007,25 @@ public:
 		return _markGeometry(fill(Color{}, scale, key, origin));
 	}
 
+	// An Outline stroke replaces the path's unstroked curves with their outline; a Centerline
+	// stroke commits them as they are and leaves the path unchanged. See Stroke.
 	Layer stroke(
-		slug_t width, Color color, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={},
-		LineJoin join=LineJoin::Miter, LineCap cap=LineCap::Butt, slug_t miterLimit=4_cv
+		const Stroke& s,
+		Color color,
+		slug_t scale=1_cv,
+		Atlas::ShapeInfo::Origin origin={}
 	) {
-		if(!_path.strokePath(width, false, join, cap, miterLimit)) return Layer{};
-
-		return _commitFill(_path._pendingCurves, color, scale, _key.next(), origin, Matrix::identity(), _path.pendingContourStarts());
+		return _stroke(s, color, scale, std::nullopt, origin);
 	}
 
 	Layer stroke(
-		slug_t width, Color color, slug_t scale, Key key, Atlas::ShapeInfo::Origin origin={},
-		LineJoin join=LineJoin::Miter, LineCap cap=LineCap::Butt, slug_t miterLimit=4_cv
+		const Stroke& s,
+		Color color,
+		slug_t scale,
+		Key key,
+		Atlas::ShapeInfo::Origin origin={}
 	) {
-		if(!_path.strokePath(width, false, join, cap, miterLimit)) return Layer{};
-
-		return _commitFill(_path._pendingCurves, color, scale, key, origin, Matrix::identity(), _path.pendingContourStarts());
+		return _stroke(s, color, scale, key, origin);
 	}
 
 	Layer fillGradient(const GradientHandle& handle, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={}) {
@@ -1961,11 +2035,7 @@ public:
 
 		Layer layer = _commitGradient(_path._pendingCurves, handle, scale, _key.next(), origin, Matrix::identity(), _path.pendingContourStarts());
 
-		_path._pendingCurves.clear();
-		_path._pendingSubpathStarts.clear();
-		_path._pendingClosedStarts.clear();
-		_path._pendingStrokedEnd = 0;
-		_path._pendingSubpathsUntracked = false;
+		_clearPending();
 
 		return layer;
 	}
@@ -1977,47 +2047,28 @@ public:
 
 		Layer layer = _commitGradient(_path._pendingCurves, handle, scale, key, origin, Matrix::identity(), _path.pendingContourStarts());
 
-		_path._pendingCurves.clear();
-		_path._pendingSubpathStarts.clear();
-		_path._pendingClosedStarts.clear();
-		_path._pendingStrokedEnd = 0;
-		_path._pendingSubpathsUntracked = false;
+		_clearPending();
 
 		return layer;
 	}
 
 	Layer strokeGradient(
-		slug_t width, const GradientHandle& handle, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={},
-		LineJoin join=LineJoin::Miter, LineCap cap=LineCap::Butt, slug_t miterLimit=4_cv
+		const Stroke& s,
+		const GradientHandle& handle,
+		slug_t scale=1_cv,
+		Atlas::ShapeInfo::Origin origin={}
 	) {
-		if(!_path.strokePath(width, false, join, cap, miterLimit)) return Layer{};
-
-		Layer layer = _commitGradient(_path._pendingCurves, handle, scale, _key.next(), origin, Matrix::identity(), _path.pendingContourStarts());
-
-		_path._pendingCurves.clear();
-		_path._pendingSubpathStarts.clear();
-		_path._pendingClosedStarts.clear();
-		_path._pendingStrokedEnd = 0;
-		_path._pendingSubpathsUntracked = false;
-
-		return layer;
+		return _strokeGradient(s, handle, scale, std::nullopt, origin);
 	}
 
 	Layer strokeGradient(
-		slug_t width, const GradientHandle& handle, slug_t scale, Key key, Atlas::ShapeInfo::Origin origin={},
-		LineJoin join=LineJoin::Miter, LineCap cap=LineCap::Butt, slug_t miterLimit=4_cv
+		const Stroke& s,
+		const GradientHandle& handle,
+		slug_t scale,
+		Key key,
+		Atlas::ShapeInfo::Origin origin={}
 	) {
-		if(!_path.strokePath(width, false, join, cap, miterLimit)) return Layer{};
-
-		Layer layer = _commitGradient(_path._pendingCurves, handle, scale, key, origin, Matrix::identity(), _path.pendingContourStarts());
-
-		_path._pendingCurves.clear();
-		_path._pendingSubpathStarts.clear();
-		_path._pendingClosedStarts.clear();
-		_path._pendingStrokedEnd = 0;
-		_path._pendingSubpathsUntracked = false;
-
-		return layer;
+		return _strokeGradient(s, handle, scale, key, origin);
 	}
 
 	Layer fillPattern(const PatternHandle& handle, Color color, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={}) {
@@ -2111,25 +2162,24 @@ public:
 	}
 
 	Layer stroke(
-		const Path& p, slug_t width, Color color, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={},
-		LineJoin join=LineJoin::Miter, LineCap cap=LineCap::Butt, slug_t miterLimit=4_cv
+		const Path& p,
+		const Stroke& s,
+		Color color,
+		slug_t scale=1_cv,
+		Atlas::ShapeInfo::Origin origin={}
 	) {
-		Path copy = p;
-
-		if(!copy.strokePath(width, false, join, cap, miterLimit)) return Layer{};
-
-		return _commitFill(_merged(copy), color, scale, _key.next(), origin, _ctm, copy.mergedContourStarts());
+		return _stroke(p, s, color, scale, std::nullopt, origin);
 	}
 
 	Layer stroke(
-		const Path& p, slug_t width, Color color, slug_t scale, Key key, Atlas::ShapeInfo::Origin origin={},
-		LineJoin join=LineJoin::Miter, LineCap cap=LineCap::Butt, slug_t miterLimit=4_cv
+		const Path& p,
+		const Stroke& s,
+		Color color,
+		slug_t scale,
+		Key key,
+		Atlas::ShapeInfo::Origin origin={}
 	) {
-		Path copy = p;
-
-		if(!copy.strokePath(width, false, join, cap, miterLimit)) return Layer{};
-
-		return _commitFill(_merged(copy), color, scale, key, origin, _ctm, copy.mergedContourStarts());
+		return _stroke(p, s, color, scale, key, origin);
 	}
 
 	Layer fillGradient(const Path& p, const GradientHandle& handle, slug_t scale=1_cv, Atlas::ShapeInfo::Origin origin={}) {
@@ -2226,10 +2276,13 @@ public:
 		return *this;
 	}
 
+	// Glyph curves are baked at fontSize, so s.width is in those baked units and the CTM's pen
+	// scale does not apply. Outline: one shape per glyph contour. Centerline: one shape per glyph,
+	// its contours as the centerline.
 	Canvas& strokeText(
 		std::string_view str,
 		slug_t fontSize,
-		slug_t strokeWidth,
+		const Stroke& s,
 		slug_t x,
 		slug_t y,
 		Color color,
@@ -2239,6 +2292,10 @@ public:
 		uint8_t mask=0 // see text()'s mask doc comment
 	) {
 		if(str.empty() || fontSize == 0_cv) return *this;
+
+		const bool centerline = s.method == Stroke::Method::Centerline;
+
+		if(centerline) _checkCenterline(s);
 
 		slug_t tx, ty;
 
@@ -2273,19 +2330,49 @@ public:
 			const uint32_t cp = static_cast<uint32_t>(static_cast<unsigned char>(c));
 			const auto info = _atlas.getShape(Key(cp, mask));
 
-			for(const auto& contour : _atlas.getShapeContours(Key(cp, mask))) {
-				Path gp;
+			const auto bake = [&](const Atlas::Curve& curve) -> Atlas::Curve {
+				return {
+					(curve.x1 + dx) * fontSize, (curve.y1 + dy) * fontSize,
+					(curve.x2 + dx) * fontSize, (curve.y2 + dy) * fontSize,
+					(curve.x3 + dx) * fontSize, (curve.y3 + dy) * fontSize,
+				};
+			};
 
-				for(const auto& curve : contour) {
-					gp._pendingCurves.push_back({
-						(curve.x1 + dx) * fontSize, (curve.y1 + dy) * fontSize,
-						(curve.x2 + dx) * fontSize, (curve.y2 + dy) * fontSize,
-						(curve.x3 + dx) * fontSize, (curve.y3 + dy) * fontSize,
-					});
+			if(centerline) {
+				Atlas::Curves curves;
+				std::vector<size_t> starts;
+
+				for(const auto& contour : _atlas.getShapeContours(Key(cp, mask))) {
+					starts.push_back(curves.size());
+
+					for(const auto& curve : contour) curves.push_back(bake(curve));
 				}
 
-				if(gp.strokePath(strokeWidth))
+				if(!curves.empty()) {
+					_commitFill(
+						curves,
+						color,
+						1_cv,
+						_key.next(),
+						{},
+						Matrix::identity(),
+						starts,
+						s.width * 0.5_cv
+					);
+				}
+			}
+
+			else for(const auto& contour : _atlas.getShapeContours(Key(cp, mask))) {
+				Path gp;
+
+				for(const auto& curve : contour) gp._pendingCurves.push_back(bake(curve));
+
+				// A glyph contour is always closed: strokePath() joins its ends instead of capping them.
+				gp._pendingClosedStarts.push_back(0);
+
+				if(_strokeOutline(gp, s)) {
 					_commitFill(gp._pendingCurves, color, 1_cv, _key.next(), {}, Matrix::identity(), gp.pendingContourStarts());
+				}
 			}
 
 			dx += info ? info->advance : 0.6_cv;
@@ -2572,6 +2659,170 @@ private:
 		return out;
 	}
 
+	// Drops the internal path's pending curves; fillGradient() and strokeGradient() consume them.
+	void _clearPending() {
+		_path._pendingCurves.clear();
+		_path._pendingSubpathStarts.clear();
+		_path._pendingClosedStarts.clear();
+		_path._pendingStrokedEnd = 0;
+		_path._pendingSubpathsUntracked = false;
+	}
+
+	// A Centerline stroke draws round joins and caps only (see Stroke).
+	static void _checkCenterline(const Stroke& s) {
+		if(s.join && *s.join != LineJoin::Round) throw std::invalid_argument(
+			"Canvas: a Centerline Stroke only draws LineJoin::Round joins"
+		);
+
+		if(s.cap && *s.cap != LineCap::Round) throw std::invalid_argument(
+			"Canvas: a Centerline Stroke only draws LineCap::Round caps"
+		);
+	}
+
+	// An Outline stroke of p's unstroked curves, with Stroke's Outline defaults (Miter, Butt).
+	static bool _strokeOutline(Path& p, const Stroke& s) {
+		return p.strokePath(
+			s.width,
+			false,
+			s.join.value_or(LineJoin::Miter),
+			s.cap.value_or(LineCap::Butt),
+			s.miterLimit
+		);
+	}
+
+	// stroke() on the internal path. An unset key takes the next auto key, only once something is
+	// committed.
+	Layer _stroke(
+		const Stroke& s,
+		Color color,
+		slug_t scale,
+		std::optional<Key> key,
+		Atlas::ShapeInfo::Origin origin
+	) {
+		if(s.method == Stroke::Method::Centerline) {
+			_checkCenterline(s);
+
+			auto [curves, starts] = _path._centerline();
+
+			if(curves.empty()) return Layer{};
+
+			return _commitFill(
+				curves,
+				color,
+				scale,
+				key ? *key : _key.next(),
+				origin,
+				Matrix::identity(),
+				starts,
+				s.width * _path._penScale() * 0.5_cv
+			);
+		}
+
+		if(!_strokeOutline(_path, s)) return Layer{};
+
+		return _commitFill(
+			_path._pendingCurves,
+			color,
+			scale,
+			key ? *key : _key.next(),
+			origin,
+			Matrix::identity(),
+			_path.pendingContourStarts()
+		);
+	}
+
+	// stroke() on an explicit Path, which is never modified.
+	Layer _stroke(
+		const Path& p,
+		const Stroke& s,
+		Color color,
+		slug_t scale,
+		std::optional<Key> key,
+		Atlas::ShapeInfo::Origin origin
+	) {
+		if(s.method == Stroke::Method::Centerline) {
+			_checkCenterline(s);
+
+			auto [curves, starts] = p._centerline();
+
+			if(curves.empty()) return Layer{};
+
+			return _commitFill(
+				curves,
+				color,
+				scale,
+				key ? *key : _key.next(),
+				origin,
+				_ctm,
+				starts,
+				s.width * p._penScale() * 0.5_cv
+			);
+		}
+
+		Path copy = p;
+
+		if(!_strokeOutline(copy, s)) return Layer{};
+
+		return _commitFill(
+			_merged(copy),
+			color,
+			scale,
+			key ? *key : _key.next(),
+			origin,
+			_ctm,
+			copy.mergedContourStarts()
+		);
+	}
+
+	// strokeGradient() on the internal path; like fillGradient(), it consumes the pending curves.
+	Layer _strokeGradient(
+		const Stroke& s,
+		const GradientHandle& handle,
+		slug_t scale,
+		std::optional<Key> key,
+		Atlas::ShapeInfo::Origin origin
+	) {
+		Layer layer;
+
+		if(s.method == Stroke::Method::Centerline) {
+			_checkCenterline(s);
+			_consolidate();
+
+			auto [curves, starts] = _path._centerline();
+
+			if(curves.empty()) return Layer{};
+
+			layer = _commitGradient(
+				curves,
+				handle,
+				scale,
+				key ? *key : _key.next(),
+				origin,
+				Matrix::identity(),
+				starts,
+				s.width * _path._penScale() * 0.5_cv
+			);
+		}
+
+		else {
+			if(!_strokeOutline(_path, s)) return Layer{};
+
+			layer = _commitGradient(
+				_path._pendingCurves,
+				handle,
+				scale,
+				key ? *key : _key.next(),
+				origin,
+				Matrix::identity(),
+				_path.pendingContourStarts()
+			);
+		}
+
+		_clearPending();
+
+		return layer;
+	}
+
 	// Core fill commit: scale, apply origin, register in atlas, push Layer.
 	Layer _commitFill(
 		const Atlas::Curves& curves,
@@ -2585,7 +2836,10 @@ private:
 		// both are pure per-curve coordinate transforms (verified: same size, same order, no
 		// reordering), so indices computed against the caller's original buffer stay valid against
 		// the scaled/re-origined `local` stored below.
-		const std::vector<size_t>& contourStarts={}
+		const std::vector<size_t>& contourStarts={},
+		// > 0: `curves` are a centerline (see Stroke::Method::Centerline). Same units as `curves`,
+		// scaled with them.
+		slug_t strokeRadius=0_cv
 	) {
 		if(curves.empty()) return Layer{};
 
@@ -2616,7 +2870,7 @@ private:
 		Matrix transform = Matrix::identity();
 
 		if(_autoMetrics) {
-			auto result = _toLocalOrigin(scaled, origin, scale);
+			auto result = _toLocalOrigin(scaled, origin, scale, strokeRadius > 0_cv);
 
 			local = std::move(result.first);
 			transform = result.second;
@@ -2634,6 +2888,7 @@ private:
 
 		info.curves = std::move(local);
 		info.contourStarts = contourStarts;
+		info.strokeRadius = strokeRadius * scale;
 
 		if(_autoMetrics) info.origin = infoOrigin;
 
@@ -2745,7 +3000,9 @@ private:
 		Key key,
 		Atlas::ShapeInfo::Origin origin,
 		const Matrix& placement = Matrix::identity(),
-		const std::vector<size_t>& contourStarts={}
+		const std::vector<size_t>& contourStarts={},
+		// See _commitFill().
+		slug_t strokeRadius=0_cv
 	) {
 		if(curves.empty()) return Layer{};
 
@@ -2771,7 +3028,7 @@ private:
 			infoOrigin.y = origin.y * scale;
 		}
 
-		auto [local, transform] = _toLocalOrigin(scaled, origin, scale);
+		auto [local, transform] = _toLocalOrigin(scaled, origin, scale, strokeRadius > 0_cv);
 
 		if(local.empty()) return Layer{};
 
@@ -2810,6 +3067,7 @@ private:
 
 		info.curves = std::move(local);
 		info.contourStarts = contourStarts;
+		info.strokeRadius = strokeRadius * scale;
 		info.origin = infoOrigin;
 
 		_applySplits(info);
@@ -2860,10 +3118,13 @@ private:
 		return out;
 	}
 
+	// allowFlat: a centerline stroke's control box may have zero width or height (a straight line,
+	// or a single point); its area comes from the stroke radius.
 	static std::pair<Atlas::Curves, Matrix> _toLocalOrigin(
 		const Atlas::Curves& src,
 		Atlas::ShapeInfo::Origin origin={},
-		slug_t scale=1_cv
+		slug_t scale=1_cv,
+		bool allowFlat=false
 	) {
 		if(src.empty()) return { {}, Matrix::identity() };
 
@@ -2879,7 +3140,7 @@ private:
 			maxY = std::max({maxY, c.y1, c.y2, c.y3});
 		}
 
-		if(maxX <= minX || maxY <= minY) return { {}, Matrix::identity() };
+		if(!allowFlat && (maxX <= minX || maxY <= minY)) return { {}, Matrix::identity() };
 
 		Matrix transform = Matrix::identity();
 
@@ -2955,6 +3216,21 @@ private:
 // ================================================================================================
 // Debugging Helpers
 // ================================================================================================
+
+inline std::ostream& operator<<(std::ostream& os, const Stroke& s) {
+	static constexpr const char* JOINS[] = {"Miter", "Bevel", "Round"};
+	static constexpr const char* CAPS[] = {"Butt", "Round", "Square"};
+
+	os
+		<< "Stroke(width=" << s.width
+		<< " method=" << (s.method == Stroke::Method::Centerline ? "Centerline" : "Outline")
+	;
+
+	if(s.join) os << " join=" << JOINS[static_cast<size_t>(*s.join)];
+	if(s.cap) os << " cap=" << CAPS[static_cast<size_t>(*s.cap)];
+
+	return os << " miterLimit=" << s.miterLimit << ")";
+}
 
 inline std::ostream& operator<<(std::ostream& os, const Path::Sample& s) {
 	return os << "Sample(x=" << s.x << " y=" << s.y << " angle=" << s.angle << " arcLength=" << s.arcLength << ")";

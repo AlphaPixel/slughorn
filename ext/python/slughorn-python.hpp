@@ -268,6 +268,8 @@ using detail::contoursFromCSR;
 
 using slughorn::render::Sample;
 using slughorn::render::Sampler;
+using slughorn::render::AARamp;
+using slughorn::render::EmJacobian;
 using slughorn::render::Grid;
 
 #ifdef SLUGHORN_HAS_SDF

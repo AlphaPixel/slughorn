@@ -198,6 +198,86 @@ def test_render_sample_inside_shape():
 
 
 # ---------------------------------------------------------------------------
+# aa_ramp / EmJacobian
+# ---------------------------------------------------------------------------
+
+def _make_diamond_sampler():
+	# Edges at 45 degrees in em space: the lower-left one lies on x + y = 0.5.
+	atlas = slughorn.Atlas()
+	d = slughorn.CurveDecomposer()
+	d.move_to(0.5, 0.0)
+	d.line_to(1.0, 0.5)
+	d.line_to(0.5, 1.0)
+	d.line_to(0.0, 0.5)
+	d.close()
+	info = slughorn.ShapeInfo()
+	info.curves = d.get_curves()
+	atlas.add_shape(slughorn.Key("diamond"), info)
+	atlas.build()
+	return atlas.decode("diamond")
+
+def _diamond_point(inside_px, ppe):
+	# A point inside_px screen pixels inside the lower-left edge's midpoint, along its normal.
+	o = inside_px / ppe / math.sqrt(2.0)
+	return 0.25 + o, 0.25 + o
+
+def test_aa_ramp_default_edge():
+	sampler = _make_built_atlas().decode("rect")
+	assert sampler.aa_ramp == slughorn.render.AARamp.Edge
+	sampler.aa_ramp = slughorn.render.AARamp.Axis
+	assert sampler.aa_ramp == slughorn.render.AARamp.Axis
+
+def test_em_jacobian_from_pixels_per_em():
+	em = slughorn.render.EmJacobian.from_pixels_per_em(16.0, 32.0)
+	assert em.dx_x == pytest.approx(1.0 / 16.0)
+	assert em.dy_y == pytest.approx(1.0 / 32.0)
+	assert em.dx_y == 0.0 and em.dy_x == 0.0
+	assert em.ppe_x == pytest.approx(16.0)
+	assert em.ppe_y == pytest.approx(32.0)
+
+def test_em_jacobian_from_rotation_ppe():
+	# Rotated 45 degrees, fwidth sees |cos| + |sin| = sqrt(2) em-pixels per pixel per axis.
+	em = slughorn.render.EmJacobian.from_rotation(math.pi / 4.0, 64.0)
+	assert em.ppe_x == pytest.approx(64.0 / math.sqrt(2.0))
+	assert em.ppe_y == pytest.approx(64.0 / math.sqrt(2.0))
+
+@pytest.mark.parametrize("ramp", ["Axis", "Edge"])
+def test_render_sample_jacobian_matches_ppe(ramp):
+	# An axis-aligned Jacobian gives exactly the per-axis entry points' result in both modes.
+	sampler = _make_diamond_sampler()
+	sampler.aa_ramp = getattr(slughorn.render.AARamp, ramp)
+	em = slughorn.render.EmJacobian.from_pixels_per_em(64.0, 64.0)
+	for px in (-0.4, 0.0, 0.3):
+		x, y = _diamond_point(px, 64.0)
+		assert sampler.render_sample(x, y, em).fill == pytest.approx(
+			sampler.render_sample(x, y, 64.0, 64.0).fill, abs=1e-6
+		)
+		assert sampler.render_sample_banded(x, y, em).fill == pytest.approx(
+			sampler.render_sample_banded(x, y, 64.0, 64.0).fill, abs=1e-6
+		)
+
+def test_render_sample_edge_unrotated_ramp():
+	# A 45 degree edge on screen: Edge ramps over |cos| + |sin| = sqrt(2) pixels.
+	sampler = _make_diamond_sampler()
+	sampler.aa_ramp = slughorn.render.AARamp.Edge
+	x, y = _diamond_point(0.3, 64.0)
+	assert sampler.render_sample(x, y, 64.0, 64.0).fill == pytest.approx(
+		0.3 / math.sqrt(2.0) + 0.5, abs=1e-3
+	)
+
+def test_render_sample_edge_rotated_jacobian():
+	# The diamond's 45 degree edge rotated 45 degrees on screen is screen-aligned: its ramp is 1
+	# pixel wide. Per-axis rates alone (what fwidth gives) see both rotations and ramp over 2.
+	sampler = _make_diamond_sampler()
+	sampler.aa_ramp = slughorn.render.AARamp.Edge
+	em = slughorn.render.EmJacobian.from_rotation(math.pi / 4.0, 64.0)
+	x, y = _diamond_point(0.3, 64.0)
+	assert sampler.render_sample(x, y, em).fill == pytest.approx(0.8, abs=1e-3)
+	assert sampler.render_sample_banded(x, y, em).fill == pytest.approx(0.8, abs=1e-3)
+	assert sampler.render_sample(x, y, em.ppe_x, em.ppe_y).fill == pytest.approx(0.65, abs=1e-3)
+
+
+# ---------------------------------------------------------------------------
 # Sample fields and repr
 # ---------------------------------------------------------------------------
 

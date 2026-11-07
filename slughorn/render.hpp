@@ -28,11 +28,14 @@
 
 #include "slughorn.hpp"
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 
@@ -76,6 +79,133 @@ struct Grid {
 // Sampler - holds a decoded shape and provides coverage evaluation
 // ================================================================================================
 
+// How each ray crossing ramps from outside to inside.
+//
+// Axis: Lengyel's original - a ramp 1 pixel wide along the ray's own axis (x for the horizontal
+// ray, y for the vertical one). Across an edge at angle theta that is 1 / (|cos| + |sin|) pixels
+// wide, close to an exact box filter's coverage.
+//
+// Edge (the default): each crossing's distance is converted to its distance across the edge in
+// screen pixels (through the EmJacobian), divided by the edge's ramp width |cos| + |sin|, so both
+// rays report the same linear ramp |cos| + |sin| pixels wide across the edge (the box filter's
+// full support) at any rotation. This is the ramp osgSlug::PathDrawable's Sluggit mode produces;
+// softer than Axis on angled edges, identical on axis-aligned ones. It costs more per crossing
+// and walks bands 2 pixels deep instead of 0.5.
+enum class AARamp {
+	Axis,
+	Edge
+};
+
+// How em space maps onto one screen pixel: dx is the em-space change for a one pixel step along
+// screen x, dy for a step along screen y (a shader's dFdx/dFdy of its em coordinate). Only
+// AARamp::Edge reads the full matrix; both modes read the per-axis pixels-per-em it implies
+// (1 / fwidth, as a shader computes it).
+struct EmJacobian {
+	slug_t dxX = 0_cv;
+	slug_t dxY = 0_cv;
+	slug_t dyX = 0_cv;
+	slug_t dyY = 0_cv;
+
+	// Em space axis-aligned with the screen, ppeX/ppeY pixels per em.
+	static EmJacobian fromPixelsPerEm(slug_t ppeX, slug_t ppeY) {
+		return {1_cv / ppeX, 0_cv, 0_cv, 1_cv / ppeY};
+	}
+
+	// Em space rotated by radians on screen (counterclockwise, Y-up), ppe pixels per em.
+	static EmJacobian fromRotation(slug_t radians, slug_t ppe) {
+		const slug_t c = std::cos(radians) / ppe;
+		const slug_t s = std::sin(radians) / ppe;
+
+		return {c, -s, s, c};
+	}
+
+	slug_t ppeX() const { return 1_cv / (std::abs(dxX) + std::abs(dyX)); }
+	slug_t ppeY() const { return 1_cv / (std::abs(dxY) + std::abs(dyY)); }
+};
+
+// ================================================================================================
+// distanceToCurve - em distance from a point to a quadratic curve (centerline strokes)
+//
+// With the point moved to the origin, the curve is B(t) = p1 + 2t * A + t^2 * C for t in [0, 1],
+// where A = p2 - p1 and C = p1 - 2 * p2 + p3. The nearest point is where the curve's direction
+// B'(t) = 2 * (A + t * C) is perpendicular to B(t), i.e. B(t) . B'(t) = 0, which expands to the
+// cubic
+//
+//     (C . C) t^3 + 3 (A . C) t^2 + (2 (A . A) + p1 . C) t + p1 . A = 0
+//
+// Its real roots, clamped to [0, 1], are the candidates; the clamp also covers the endpoints,
+// which are the nearest points past either end (round caps). A root error moves the result only
+// to second order, because the distance is stationary at its minimum.
+//
+// A straight segment stored the slughorn way (lineTo() commits p2 = p3) keeps C = p1 - p3, so it
+// is an ordinary cubic. Only C ~ 0 (control point at the chord midpoint) is degenerate: the curve
+// is then the segment p1 -> p3, measured directly.
+// ================================================================================================
+
+inline slug_t distanceToCurve(const Atlas::Curve& c, slug_t x, slug_t y) {
+	const slug_t p1x = c.x1 - x, p1y = c.y1 - y;
+	const slug_t ax = c.x2 - c.x1, ay = c.y2 - c.y1;
+	const slug_t cx = c.x1 - 2_cv * c.x2 + c.x3, cy = c.y1 - 2_cv * c.y2 + c.y3;
+
+	auto distanceAt = [&](slug_t t) {
+		const slug_t bx = p1x + t * (2_cv * ax + t * cx);
+		const slug_t by = p1y + t * (2_cv * ay + t * cy);
+
+		return std::sqrt(bx * bx + by * by);
+	};
+
+	const slug_t cc = cx * cx + cy * cy;
+	const slug_t aa = ax * ax + ay * ay;
+
+	// Degenerate: a segment p1 -> p1 + 2A (or a single point when A is also zero).
+	if(cc <= 1e-12_cv * aa || cc == 0_cv) {
+		const slug_t dx = 2_cv * ax, dy = 2_cv * ay;
+		const slug_t len2 = dx * dx + dy * dy;
+		const slug_t t = len2 > 0_cv ? std::clamp(-(p1x * dx + p1y * dy) / len2, 0_cv, 1_cv) : 0_cv;
+		const slug_t qx = p1x + t * dx, qy = p1y + t * dy;
+
+		return std::sqrt(qx * qx + qy * qy);
+	}
+
+	// Monic cubic t^3 + a t^2 + b t + k, then depressed with t = u - a / 3: u^3 + p u + q = 0.
+	const slug_t a = 3_cv * (ax * cx + ay * cy) / cc;
+	const slug_t b = (2_cv * aa + p1x * cx + p1y * cy) / cc;
+	const slug_t k = (p1x * ax + p1y * ay) / cc;
+	const slug_t p = b - a * a / 3_cv;
+	const slug_t q = 2_cv * a * a * a / 27_cv - a * b / 3_cv + k;
+	const slug_t shift = -a / 3_cv;
+	const slug_t disc = q * q / 4_cv + p * p * p / 27_cv;
+
+	slug_t best = std::min(distanceAt(0_cv), distanceAt(1_cv));
+
+	auto consider = [&](slug_t u) {
+		best = std::min(best, distanceAt(std::clamp(u + shift, 0_cv, 1_cv)));
+	};
+
+	if(disc > 0_cv) {
+		// One real root. The cube root takes the sign that adds like signs (no cancellation); the
+		// other term is -p / (3 * w), from (w + v)^3 with w * v = -p / 3.
+		const slug_t s = std::sqrt(disc);
+		const slug_t w = std::cbrt(q >= 0_cv ? -q / 2_cv - s : -q / 2_cv + s);
+
+		consider(w != 0_cv ? w - p / (3_cv * w) : 0_cv);
+	}
+
+	else {
+		// Three real roots (p <= 0): the trigonometric form.
+		const slug_t m = 2_cv * std::sqrt(std::max(-p / 3_cv, 0_cv));
+		const slug_t arg = m > 0_cv ? std::clamp(3_cv * q / (p * m), -1_cv, 1_cv) : 0_cv;
+		const slug_t theta = std::acos(arg) / 3_cv;
+		const slug_t third = 2.0943951023931953_cv; // 2 * pi / 3
+
+		consider(m * std::cos(theta));
+		consider(m * std::cos(theta - third));
+		consider(m * std::cos(theta - 2_cv * third));
+	}
+
+	return best;
+}
+
 struct Sampler;
 
 // Forward-declared here so Sampler's atlas+key ctor below can call it from a complete-class
@@ -109,6 +239,8 @@ struct Sampler {
 	std::vector<uint32_t> vbandIndices;
 	std::array<uint8_t, Atlas::INDIRECTION_SIZE> indirY{};
 	std::array<uint8_t, Atlas::INDIRECTION_SIZE> indirX{};
+
+	AARamp aaRamp = AARamp::Edge;
 
 	Sampler() = default;
 
@@ -169,137 +301,21 @@ struct Sampler {
 	// -------------------------------------------------------------------------
 
 	Sample renderSample(slug_t rx, slug_t ry, slug_t ppeX, slug_t ppeY) const {
-		Sample out;
+		return _renderSample(rx, ry, {EmJacobian::fromPixelsPerEm(ppeX, ppeY), ppeX, ppeY});
+	}
 
-		for(const auto& c : curves) {
-			out.iters++;
-
-			const slug_t x1 = c.x1 - rx, y1 = c.y1 - ry;
-			const slug_t x2 = c.x2 - rx, y2 = c.y2 - ry;
-			const slug_t x3 = c.x3 - rx, y3 = c.y3 - ry;
-
-			uint32_t code = _calcRootCode(y1, y2, y3);
-
-			if(code) {
-				auto [r1, r2] = _solveHorizPoly(x1, y1, x2, y2, x3, y3);
-
-				r1 *= ppeX; r2 *= ppeX;
-
-				if(code & 0x01u) {
-					out.xcov += _clamp(r1 + 0.5_cv, 0_cv, 1_cv);
-					out.xwgt = std::max(out.xwgt, _clamp(1_cv - std::abs(r1) * 2_cv, 0_cv, 1_cv));
-				}
-
-				if(code & 0x100u) {
-					out.xcov -= _clamp(r2 + 0.5_cv, 0_cv, 1_cv);
-					out.xwgt = std::max(out.xwgt, _clamp(1_cv - std::abs(r2) * 2_cv, 0_cv, 1_cv));
-				}
-			}
-
-			code = _calcRootCode(x1, x2, x3);
-
-			if(code) {
-				auto [r1, r2] = _solveVertPoly(x1, y1, x2, y2, x3, y3);
-
-				r1 *= ppeY; r2 *= ppeY;
-
-				if(code & 0x01u) {
-					out.ycov -= _clamp(r1 + 0.5_cv, 0_cv, 1_cv);
-					out.ywgt = std::max(out.ywgt, _clamp(1_cv - std::abs(r1) * 2_cv, 0_cv, 1_cv));
-				}
-
-				if(code & 0x100u) {
-					out.ycov += _clamp(r2 + 0.5_cv, 0_cv, 1_cv);
-					out.ywgt = std::max(out.ywgt, _clamp(1_cv - std::abs(r2) * 2_cv, 0_cv, 1_cv));
-				}
-			}
-		}
-
-		out.fill = _calcCoverage(out.xcov, out.ycov, out.xwgt, out.ywgt);
-
-		return out;
+	Sample renderSample(slug_t rx, slug_t ry, const EmJacobian& em) const {
+		return _renderSample(rx, ry, {em, em.ppeX(), em.ppeY()});
 	}
 
 	Sample renderSampleBanded(slug_t rx, slug_t ry, slug_t ppeX, slug_t ppeY) const {
-		Sample out;
-
-		if(hbandOffsets.size() < 2 || vbandOffsets.size() < 2) return out;
-
-		const uint32_t bandX = _lookupBandIndir(rx * shape.bandScaleX + shape.bandOffsetX, indirX);
-		const uint32_t bandY = _lookupBandIndir(ry * shape.bandScaleY + shape.bandOffsetY, indirY);
-
-		auto process = [&](uint32_t ci, bool horizontal) -> bool {
-			out.iters++;
-
-			const auto& c = curves[ci];
-
-			const slug_t x1 = c.x1 - rx, y1 = c.y1 - ry;
-			const slug_t x2 = c.x2 - rx, y2 = c.y2 - ry;
-			const slug_t x3 = c.x3 - rx, y3 = c.y3 - ry;
-
-			if(horizontal) {
-				if(std::max({x1, x2, x3}) * ppeX < -0.5_cv) return false;
-
-				const uint32_t code = _calcRootCode(y1, y2, y3);
-
-				if(!code) return true;
-
-				auto [r1, r2] = _solveHorizPoly(x1, y1, x2, y2, x3, y3);
-
-				r1 *= ppeX; r2 *= ppeX;
-
-				if(code & 0x01u) {
-					out.xcov += _clamp(r1 + 0.5_cv, 0_cv, 1_cv);
-					out.xwgt = std::max(out.xwgt, _clamp(1_cv - std::abs(r1) * 2_cv, 0_cv, 1_cv));
-				}
-
-				if(code & 0x100u) {
-					out.xcov -= _clamp(r2 + 0.5_cv, 0_cv, 1_cv);
-					out.xwgt = std::max(out.xwgt, _clamp(1_cv - std::abs(r2) * 2_cv, 0_cv, 1_cv));
-				}
-			}
-
-			else {
-				if(std::max({y1, y2, y3}) * ppeY < -0.5_cv) return false;
-
-				const uint32_t code = _calcRootCode(x1, x2, x3);
-
-				if(!code) return true;
-
-				auto [r1, r2] = _solveVertPoly(x1, y1, x2, y2, x3, y3);
-
-				r1 *= ppeY; r2 *= ppeY;
-
-				if(code & 0x01u) {
-					out.ycov -= _clamp(r1 + 0.5_cv, 0_cv, 1_cv);
-					out.ywgt = std::max(out.ywgt, _clamp(1_cv - std::abs(r1) * 2_cv, 0_cv, 1_cv));
-				}
-
-				if(code & 0x100u) {
-					out.ycov += _clamp(r2 + 0.5_cv, 0_cv, 1_cv);
-					out.ywgt = std::max(out.ywgt, _clamp(1_cv - std::abs(r2) * 2_cv, 0_cv, 1_cv));
-				}
-			}
-
-			return true;
-		};
-
-		if(bandY + 1 < hbandOffsets.size()) {
-			for(uint32_t i = hbandOffsets[bandY]; i < hbandOffsets[bandY + 1]; i++) {
-				if(!process(hbandIndices[i], true)) break;
-			}
-		}
-
-		if(bandX + 1 < vbandOffsets.size()) {
-			for(uint32_t i = vbandOffsets[bandX]; i < vbandOffsets[bandX + 1]; i++) {
-				if(!process(vbandIndices[i], false)) break;
-			}
-		}
-
-		out.fill = _calcCoverage(out.xcov, out.ycov, out.xwgt, out.ywgt);
-
-		return out;
+		return _renderSampleBanded(rx, ry, {EmJacobian::fromPixelsPerEm(ppeX, ppeY), ppeX, ppeY});
 	}
+
+	Sample renderSampleBanded(slug_t rx, slug_t ry, const EmJacobian& em) const {
+		return _renderSampleBanded(rx, ry, {em, em.ppeX(), em.ppeY()});
+	}
+
 
 	// CPU-side, GL-free hit test against this Sampler's analytic fill - answers "does this
 	// world-space point land inside the shape's real fill" without a GPU, a camera, or an FBO
@@ -394,6 +410,170 @@ struct Sampler {
 private:
 	static constexpr slug_t EPS = 1_cv / 65536_cv;
 
+	// Measured with test/slughorn-test-aa: 0.25 keeps straight edges on the linear ramp exactly from
+	// 20 to 45 degrees (mean error <= 0.006 below that) with a 2 pixel reach; 0.5 bends edges up to
+	// 0.13 off the ramp at 25-35 degrees.
+	static constexpr slug_t EDGE_SCALE_FLOOR = 0.25_cv;
+
+	// A sample's pixel footprint: the Jacobian, plus the per-axis pixels per em it implies (kept
+	// as given by the ppeX/ppeY entry points, so Axis results are unchanged by the round trip).
+	struct _Pixel {
+		EmJacobian em;
+		slug_t ppeX;
+		slug_t ppeY;
+	};
+
+	Sample _renderSample(slug_t rx, slug_t ry, const _Pixel& px) const {
+		if(shape.strokeRadius > 0_cv) return _renderStroke(rx, ry, px, false);
+
+		Sample out;
+
+		for(const auto& c : curves) {
+			out.iters++;
+
+			const slug_t x1 = c.x1 - rx, y1 = c.y1 - ry;
+			const slug_t x2 = c.x2 - rx, y2 = c.y2 - ry;
+			const slug_t x3 = c.x3 - rx, y3 = c.y3 - ry;
+
+			_addHorizCrossings(out, x1, y1, x2, y2, x3, y3, px);
+			_addVertCrossings(out, x1, y1, x2, y2, x3, y3, px);
+		}
+
+		out.fill = _calcCoverage(out.xcov, out.ycov, out.xwgt, out.ywgt);
+
+		return out;
+	}
+
+	Sample _renderSampleBanded(slug_t rx, slug_t ry, const _Pixel& px) const {
+		if(shape.strokeRadius > 0_cv) return _renderStroke(rx, ry, px, true);
+
+		Sample out;
+
+		if(hbandOffsets.size() < 2 || vbandOffsets.size() < 2) return out;
+
+		const uint32_t bandX = _lookupBandIndir(rx * shape.bandScaleX + shape.bandOffsetX, indirX);
+		const uint32_t bandY = _lookupBandIndir(ry * shape.bandScaleY + shape.bandOffsetY, indirY);
+
+		auto process = [&](uint32_t ci, bool horizontal) -> bool {
+			out.iters++;
+
+			const auto& c = curves[ci];
+
+			const slug_t x1 = c.x1 - rx, y1 = c.y1 - ry;
+			const slug_t x2 = c.x2 - rx, y2 = c.y2 - ry;
+			const slug_t x3 = c.x3 - rx, y3 = c.y3 - ry;
+
+			if(horizontal) {
+				if(std::max({x1, x2, x3}) * px.ppeX < -_rampReach()) return false;
+
+				_addHorizCrossings(out, x1, y1, x2, y2, x3, y3, px);
+			}
+
+			else {
+				if(std::max({y1, y2, y3}) * px.ppeY < -_rampReach()) return false;
+
+				_addVertCrossings(out, x1, y1, x2, y2, x3, y3, px);
+			}
+
+			return true;
+		};
+
+		if(bandY + 1 < hbandOffsets.size()) {
+			for(uint32_t i = hbandOffsets[bandY]; i < hbandOffsets[bandY + 1]; i++) {
+				if(!process(hbandIndices[i], true)) break;
+			}
+		}
+
+		if(bandX + 1 < vbandOffsets.size()) {
+			for(uint32_t i = vbandOffsets[bandX]; i < vbandOffsets[bandX + 1]; i++) {
+				if(!process(vbandIndices[i], false)) break;
+			}
+		}
+
+		out.fill = _calcCoverage(out.xcov, out.ycov, out.xwgt, out.ywgt);
+
+		return out;
+	}
+
+	// A stroke shape (shape.strokeRadius > 0): its curves are a centerline, and a point is covered
+	// within strokeRadius em of the nearest one (distanceToCurve()). Coverage ramps linearly over
+	// one pixel centered on that boundary, the pixel's em size taken as the mean of its two axes.
+	//
+	// Banded, only ONE band list is walked: the builder files each curve in every band within
+	// strokeRadius of it, so the pixel's h-band and its v-band each hold every curve that can reach
+	// it, and the shorter is taken. Lists are sorted by descending max x (h-bands) / max y
+	// (v-bands), so once a curve's max is farther behind the pixel than the reach plus a pixel, no
+	// later curve can reach it either. Curves far AHEAD of the pixel are still walked.
+	//
+	// The coverage ramp reaches half a pixel past strokeRadius, but the band padding is only
+	// strokeRadius (em, fixed at build time). Every band of the chosen axis within half a pixel of
+	// the point is walked, so a curve filed only in a neighboring band still contributes there;
+	// walking a curve twice cannot change the minimum.
+	Sample _renderStroke(slug_t rx, slug_t ry, const _Pixel& px, bool banded) const {
+		Sample out;
+
+		const slug_t radius = shape.strokeRadius;
+		const slug_t emPerPixel = 0.5_cv * (1_cv / px.ppeX + 1_cv / px.ppeY);
+
+		slug_t d = std::numeric_limits<slug_t>::infinity();
+
+		if(!banded) {
+			for(const auto& c : curves) {
+				out.iters++;
+
+				d = std::min(d, distanceToCurve(c, rx, ry));
+			}
+		}
+
+		else {
+			if(hbandOffsets.size() < 2 || vbandOffsets.size() < 2) return out;
+
+			const uint32_t bandX = _lookupBandIndir(rx * shape.bandScaleX + shape.bandOffsetX, indirX);
+			const uint32_t bandY = _lookupBandIndir(ry * shape.bandScaleY + shape.bandOffsetY, indirY);
+
+			if(bandY + 1 >= hbandOffsets.size() || bandX + 1 >= vbandOffsets.size()) return out;
+
+			const uint32_t hcount = hbandOffsets[bandY + 1] - hbandOffsets[bandY];
+			const uint32_t vcount = vbandOffsets[bandX + 1] - vbandOffsets[bandX];
+			const bool horizontal = hcount <= vcount;
+			const auto& offsets = horizontal ? hbandOffsets : vbandOffsets;
+			const auto& indices = horizontal ? hbandIndices : vbandIndices;
+			const slug_t cutoff = (horizontal ? rx : ry) - radius - emPerPixel;
+
+			// The band axis is perpendicular to the sort axis: h-bands slice y, v-bands slice x.
+			const slug_t coord = horizontal ? ry : rx;
+			const slug_t bandScale = horizontal ? shape.bandScaleY : shape.bandScaleX;
+			const slug_t bandOffset = horizontal ? shape.bandOffsetY : shape.bandOffsetX;
+			const auto& indir = horizontal ? indirY : indirX;
+			const slug_t fringe = 0.5_cv * emPerPixel;
+			const uint32_t first = _lookupBandIndir((coord - fringe) * bandScale + bandOffset, indir);
+			const uint32_t last = _lookupBandIndir((coord + fringe) * bandScale + bandOffset, indir);
+
+			for(uint32_t b = first; b <= last && b + 1 < offsets.size(); b++) {
+				for(uint32_t i = offsets[b]; i < offsets[b + 1]; i++) {
+					const auto& c = curves[indices[i]];
+					const slug_t maxCoord = horizontal
+						? std::max({c.x1, c.x2, c.x3})
+						: std::max({c.y1, c.y2, c.y3})
+					;
+
+					if(maxCoord < cutoff) break;
+
+					out.iters++;
+
+					d = std::min(d, distanceToCurve(c, rx, ry));
+				}
+			}
+		}
+
+		out.fill = emPerPixel > 0_cv
+			? _clamp((radius - d) / emPerPixel + 0.5_cv, 0_cv, 1_cv)
+			: (d <= radius ? 1_cv : 0_cv)
+		;
+
+		return out;
+	}
+
 	static uint32_t _floatBitsToUint32(slug_t x) { return std::bit_cast<uint32_t>(x); }
 
 	static slug_t _clamp(slug_t x, slug_t lo, slug_t hi) {
@@ -431,7 +611,15 @@ private:
 		return b >= 0_cv ? std::pair{tNear, tFar} : std::pair{tFar, tNear};
 	}
 
-	static std::pair<slug_t, slug_t> _solveHorizPoly(
+	// One ray crossing: r is the root's signed distance along the ray's axis (em units);
+	// (tx, ty) is the curve's tangent direction there, B'(t) / 2 = a * t - b, unnormalized.
+	struct Crossing {
+		slug_t r;
+		slug_t tx;
+		slug_t ty;
+	};
+
+	static std::pair<Crossing, Crossing> _solveHorizPoly(
 		slug_t x1, slug_t y1,
 		slug_t x2, slug_t y2,
 		slug_t x3, slug_t y3
@@ -439,19 +627,22 @@ private:
 		const slug_t ax = x1 - 2_cv * x2 + x3, ay = y1 - 2_cv * y2 + y3;
 		const slug_t bx = x1 - x2, by = y1 - y2;
 
-		if(std::abs(ay) < EPS) {
-			const slug_t t = std::abs(by) >= EPS ? y1 * (0.5_cv / by) : 0_cv;
-			const slug_t x = (ax * t - 2_cv * bx) * t + x1;
+		auto at = [&](slug_t t) {
+			return Crossing{(ax * t - 2_cv * bx) * t + x1, ax * t - bx, ay * t - by};
+		};
 
-			return {x, x};
+		if(std::abs(ay) < EPS) {
+			const auto c = at(std::abs(by) >= EPS ? y1 * (0.5_cv / by) : 0_cv);
+
+			return {c, c};
 		}
 
 		const auto [t1, t2] = _solveRoots(ay, by, y1);
 
-		return {(ax * t1 - 2_cv * bx) * t1 + x1, (ax * t2 - 2_cv * bx) * t2 + x1};
+		return {at(t1), at(t2)};
 	}
 
-	static std::pair<slug_t, slug_t> _solveVertPoly(
+	static std::pair<Crossing, Crossing> _solveVertPoly(
 		slug_t x1, slug_t y1,
 		slug_t x2, slug_t y2,
 		slug_t x3, slug_t y3
@@ -459,16 +650,104 @@ private:
 		const slug_t ax = x1 - 2_cv * x2 + x3, ay = y1 - 2_cv * y2 + y3;
 		const slug_t bx = x1 - x2, by = y1 - y2;
 
-		if(std::abs(ax) < EPS) {
-			const slug_t t = std::abs(bx) >= EPS ? x1 * (0.5_cv / bx) : 0_cv;
-			const slug_t y = (ay * t - 2_cv * by) * t + y1;
+		auto at = [&](slug_t t) {
+			return Crossing{(ay * t - 2_cv * by) * t + y1, ax * t - bx, ay * t - by};
+		};
 
-			return {y, y};
+		if(std::abs(ax) < EPS) {
+			const auto c = at(std::abs(bx) >= EPS ? x1 * (0.5_cv / bx) : 0_cv);
+
+			return {c, c};
 		}
 
 		const auto [t1, t2] = _solveRoots(ax, bx, x1);
 
-		return {(ay * t1 - 2_cv * by) * t1 + y1, (ay * t2 - 2_cv * by) * t2 + y1};
+		return {at(t1), at(t2)};
+	}
+
+	// Under AARamp::Edge, the factor a crossing's axis distance (pixels) is scaled by so it becomes
+	// the crossing's distance across the edge in screen pixels, divided by the edge's ramp width
+	// |cos| + |sin| (the box filter's support across the edge's screen-space direction). With n the
+	// curve's em-space normal there (the tangent rotated: n = (ty, -tx)) and the em axis distance
+	// r, the edge's offset is n.axis * r em and one screen pixel step changes it by n . dx and
+	// n . dy, so the scale is |n.axis| / (ppe.axis * (|n . dx| + |n . dy|)). It is floored at
+	// EDGE_SCALE_FLOOR, which bounds how far behind the sample a crossing can still contribute (see
+	// _rampReach()); the floor only bends edges within about 18 degrees of parallel to this ray,
+	// where the other ray carries most of the weight. A degenerate tangent keeps the axis ramp.
+	slug_t _rampScale(const Crossing& c, bool horizontal, const _Pixel& px) const {
+		if(aaRamp == AARamp::Axis) return 1_cv;
+
+		const slug_t nx = c.ty;
+		const slug_t ny = -c.tx;
+		const slug_t acrossX = std::abs(nx * px.em.dxX + ny * px.em.dxY);
+		const slug_t acrossY = std::abs(nx * px.em.dyX + ny * px.em.dyY);
+		const slug_t across = (acrossX + acrossY) * (horizontal ? px.ppeX : px.ppeY);
+
+		if(across <= 0_cv) return 1_cv;
+
+		return std::max(EDGE_SCALE_FLOOR, std::abs(horizontal ? nx : ny) / across);
+	}
+
+	// How far (pixels) behind the sample along a ray a crossing can still add coverage: the
+	// banded walk stops at the first curve entirely beyond it.
+	slug_t _rampReach() const {
+		return aaRamp == AARamp::Axis ? 0.5_cv : 0.5_cv / EDGE_SCALE_FLOOR;
+	}
+
+	void _addHorizCrossings(
+		Sample& out,
+		slug_t x1, slug_t y1,
+		slug_t x2, slug_t y2,
+		slug_t x3, slug_t y3,
+		const _Pixel& px
+	) const {
+		const uint32_t code = _calcRootCode(y1, y2, y3);
+
+		if(!code) return;
+
+		const auto [c1, c2] = _solveHorizPoly(x1, y1, x2, y2, x3, y3);
+
+		if(code & 0x01u) {
+			const slug_t r = c1.r * px.ppeX;
+
+			out.xcov += _clamp(r * _rampScale(c1, true, px) + 0.5_cv, 0_cv, 1_cv);
+			out.xwgt = std::max(out.xwgt, _clamp(1_cv - std::abs(r) * 2_cv, 0_cv, 1_cv));
+		}
+
+		if(code & 0x100u) {
+			const slug_t r = c2.r * px.ppeX;
+
+			out.xcov -= _clamp(r * _rampScale(c2, true, px) + 0.5_cv, 0_cv, 1_cv);
+			out.xwgt = std::max(out.xwgt, _clamp(1_cv - std::abs(r) * 2_cv, 0_cv, 1_cv));
+		}
+	}
+
+	void _addVertCrossings(
+		Sample& out,
+		slug_t x1, slug_t y1,
+		slug_t x2, slug_t y2,
+		slug_t x3, slug_t y3,
+		const _Pixel& px
+	) const {
+		const uint32_t code = _calcRootCode(x1, x2, x3);
+
+		if(!code) return;
+
+		const auto [c1, c2] = _solveVertPoly(x1, y1, x2, y2, x3, y3);
+
+		if(code & 0x01u) {
+			const slug_t r = c1.r * px.ppeY;
+
+			out.ycov -= _clamp(r * _rampScale(c1, false, px) + 0.5_cv, 0_cv, 1_cv);
+			out.ywgt = std::max(out.ywgt, _clamp(1_cv - std::abs(r) * 2_cv, 0_cv, 1_cv));
+		}
+
+		if(code & 0x100u) {
+			const slug_t r = c2.r * px.ppeY;
+
+			out.ycov += _clamp(r * _rampScale(c2, false, px) + 0.5_cv, 0_cv, 1_cv);
+			out.ywgt = std::max(out.ywgt, _clamp(1_cv - std::abs(r) * 2_cv, 0_cv, 1_cv));
+		}
 	}
 
 	static slug_t _calcCoverage(slug_t xcov, slug_t ycov, slug_t xwgt, slug_t ywgt) {
@@ -726,7 +1005,91 @@ inline msdfgen::Shape toMsdfgenShape(const Atlas& atlas, Key key) {
 	return shape;
 }
 
-// Bake one shape into a Field.
+// Bake a centerline stroke (Shape::strokeRadius > 0) into a Field without msdfgen: its curves are
+// a centerline, not an outline, so the exact signed distance is strokeRadius minus the distance to
+// the nearest curve (distanceToCurve()), positive inside. Same tile contract as field() below:
+// bounds are the curves' control-point box grown by strokeRadius + range, one uniform scale with
+// the longer axis at config.tileSize, texel centers at +0.5, and +/- range em mapped onto [0, 1].
+// A round-capped, round-joined stroke has no sharp convex corners, so Type::MSDF stores the same
+// value in all three channels (their median is that value).
+inline Field strokeField(
+	const Atlas::Curves& curves,
+	slug_t strokeRadius,
+	const Atlas::SDF::Config& config,
+	slug_t range
+) {
+	Field out;
+
+	out.channels = config.type == Atlas::SDF::Type::MSDF ? 3u : 1u;
+	out.range = range;
+
+	if(curves.empty()) return out;
+
+	double l = curves[0].x1, b = curves[0].y1, r = l, t = b;
+
+	for(const auto& c : curves) {
+		for(const auto& [x, y] : {std::pair{c.x1, c.y1}, std::pair{c.x2, c.y2}, std::pair{c.x3, c.y3}}) {
+			l = std::min(l, static_cast<double>(x));
+			r = std::max(r, static_cast<double>(x));
+			b = std::min(b, static_cast<double>(y));
+			t = std::max(t, static_cast<double>(y));
+		}
+	}
+
+	const double pad = static_cast<double>(strokeRadius + range);
+
+	l -= pad;
+	b -= pad;
+	r += pad;
+	t += pad;
+
+	const double scale = config.tileSize / std::max(r - l, t - b);
+
+	// See field() for the epsilon and the clamp.
+	const auto texels = [&](double extent) {
+		return static_cast<uint32_t>(
+			std::clamp(std::ceil(extent * scale - 1e-4), 1.0, static_cast<double>(config.tileSize))
+		);
+	};
+
+	const uint32_t w = texels(r - l);
+	const uint32_t h = texels(t - b);
+
+	std::vector<float> buf(size_t{w} * h * out.channels);
+
+	for(uint32_t row = 0; row < h; row++) {
+		const slug_t y = static_cast<slug_t>(b + (row + 0.5) / scale);
+
+		for(uint32_t col = 0; col < w; col++) {
+			const slug_t x = static_cast<slug_t>(l + (col + 0.5) / scale);
+
+			slug_t d = std::numeric_limits<slug_t>::max();
+
+			for(const auto& c : curves) d = std::min(d, distanceToCurve(c, x, y));
+
+			const float v = std::clamp(
+				static_cast<float>(0.5_cv + (strokeRadius - d) / (2_cv * range)),
+				0.0f,
+				1.0f
+			);
+
+			for(uint32_t ch = 0; ch < out.channels; ch++) {
+				buf[(size_t{row} * w + col) * out.channels + ch] = v;
+			}
+		}
+	}
+
+	out.width = w;
+	out.height = h;
+	out.texelsPerEm = static_cast<slug_t>(scale);
+	out.emOriginX = static_cast<slug_t>(l);
+	out.emOriginY = static_cast<slug_t>(b);
+	out.data = std::move(buf);
+
+	return out;
+}
+
+// Bake one shape into a Field. Centerline strokes go to strokeField().
 //
 // msdfgen's Projection formula is pixel = scale * (shape + translate) with `translate` in em-space,
 // so translating by -bounds.(l, b) puts the bounds' bottom-left corner at pixel (0, 0) - which is
@@ -755,6 +1118,10 @@ inline Field field(
 
 	out.channels = msdf ? 3u : 1u;
 	out.range = range;
+
+	if(const auto info = atlas.getShape(key); info && info->strokeRadius > 0_cv) {
+		return strokeField(info->curves, info->strokeRadius, config, range);
+	}
 
 	msdfgen::Shape shape = toMsdfgenShape(atlas, key);
 

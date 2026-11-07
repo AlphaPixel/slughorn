@@ -841,6 +841,12 @@ void bind_core(py::module_& m) {
 			"shape's X range (sorted ascending). When non-empty, overrides num_bands_x. "
 			"Use Atlas.compute_adaptive_splits() / Atlas.compute_uniform_splits(), or set manually."
 		)
+		.def_readwrite("stroke_radius", &slughorn::Atlas::ShapeInfo::strokeRadius,
+			"When > 0, the shape is a centerline stroke: curves are its centerline (open contours, "
+			"not a fill outline) covering "
+			"every point within stroke_radius em; bands and automatic metrics grow by it. "
+			"0 = ordinary fill."
+		)
 		.def_readwrite("origin", &slughorn::Atlas::ShapeInfo::origin,
 			"Where the transform origin (Layer.transform.x/y) is placed relative to the geometry.\n"
 			"Origin() = Default, Origin(Type) = type-only (e.g. Centered), Origin(x, y) = Pivot, Origin(Type, x, y) = explicit type + coords."
@@ -1022,6 +1028,9 @@ void bind_core(py::module_& m) {
 		.def_readonly("width", &slughorn::Atlas::Shape::width)
 		.def_readonly("height", &slughorn::Atlas::Shape::height)
 		.def_readonly("advance", &slughorn::Atlas::Shape::advance)
+		.def_readonly("stroke_radius", &slughorn::Atlas::Shape::strokeRadius,
+			"ShapeInfo.stroke_radius this shape's bands were built for (0 = ordinary fill)."
+		)
 		.def_readonly("origin_x", &slughorn::Atlas::Shape::originX,
 			"Em-space X offset of the transform origin. "
 			"0 = bottom-left corner (Origin.Default), width/2 = center (Origin.Centered)."

@@ -86,7 +86,39 @@ void bind_render(py::module_& render) {
 		})
 	;
 
+	py::enum_<AARamp>(render, "AARamp")
+		.value("Axis", AARamp::Axis)
+		.value("Edge", AARamp::Edge)
+	;
+
+	py::class_<EmJacobian>(render, "EmJacobian")
+		.def(py::init([](slug_t dxX, slug_t dxY, slug_t dyX, slug_t dyY) {
+			return EmJacobian{dxX, dxY, dyX, dyY};
+		}), "dx_x"_a=0_cv, "dx_y"_a=0_cv, "dy_x"_a=0_cv, "dy_y"_a=0_cv)
+		.def_readwrite("dx_x", &EmJacobian::dxX)
+		.def_readwrite("dx_y", &EmJacobian::dxY)
+		.def_readwrite("dy_x", &EmJacobian::dyX)
+		.def_readwrite("dy_y", &EmJacobian::dyY)
+		.def_static("from_pixels_per_em", &EmJacobian::fromPixelsPerEm, "ppe_x"_a, "ppe_y"_a)
+		.def_static("from_rotation", &EmJacobian::fromRotation, "radians"_a, "ppe"_a)
+		.def_property_readonly("ppe_x", &EmJacobian::ppeX)
+		.def_property_readonly("ppe_y", &EmJacobian::ppeY)
+		.def("__repr__", [](const EmJacobian& j) {
+			std::ostringstream ss;
+
+			ss
+				<< "EmJacobian(dx_x=" << j.dxX
+				<< ", dx_y=" << j.dxY
+				<< ", dy_x=" << j.dyX
+				<< ", dy_y=" << j.dyY << ")"
+			;
+
+			return ss.str();
+		})
+	;
+
 	py::class_<Sampler>(render, "Sampler")
+		.def_readwrite("aa_ramp", &Sampler::aaRamp)
 		.def_property_readonly("shape", [](const Sampler& d) { return d.shape; })
 		.def_property_readonly("curves", [](const Sampler& d) { return d.curves; })
 		.def_property_readonly("curve_buffer", [](py::object self) {
@@ -155,12 +187,26 @@ void bind_render(py::module_& render) {
 			"x"_a, "y"_a, "ppe_x"_a, "ppe_y"_a,
 			"Reference software sample using all decoded curves."
 		)
+		.def("render_sample",
+			[](const Sampler& d, slug_t x, slug_t y, const EmJacobian& em) {
+				return d.renderSample(x, y, em);
+			},
+			"x"_a, "y"_a, "em"_a,
+			"Reference software sample with a full em Jacobian (read by AARamp.Edge)."
+		)
 		.def("render_sample_banded",
 			[](const Sampler& d, slug_t x, slug_t y, slug_t ppeX, slug_t ppeY) {
 				return d.renderSampleBanded(x, y, ppeX, ppeY);
 			},
 			"x"_a, "y"_a, "ppe_x"_a, "ppe_y"_a,
 			"Band-accelerated software sample mirroring the GPU shader path."
+		)
+		.def("render_sample_banded",
+			[](const Sampler& d, slug_t x, slug_t y, const EmJacobian& em) {
+				return d.renderSampleBanded(x, y, em);
+			},
+			"x"_a, "y"_a, "em"_a,
+			"Band-accelerated software sample with a full em Jacobian (read by AARamp.Edge)."
 		)
 		.def("render_grid",
 			[](const Sampler& d, uint32_t size, slug_t margin, bool banded, bool parallel) {
@@ -183,6 +229,11 @@ void bind_render(py::module_& render) {
 				) + ")";
 		})
 	;
+
+	render.def("distance_to_curve", &slughorn::render::distanceToCurve,
+		"curve"_a, "x"_a, "y"_a,
+		"Em distance from (x, y) to the nearest point of a quadratic Curve (t in [0, 1])."
+	);
 
 	render.def("decode",
 		[](const slughorn::Atlas& atlas, slughorn::Key key) {

@@ -379,8 +379,13 @@ def build_curves_svg_string(
 			f'stroke="{color}" fill="none" stroke-width="1" />'
 		)
 
+	# A stroke shape's curves are an open centerline: no closing segment, and a translucent band
+	# 2 * stroke_radius wide shows the area the stroke covers.
+	is_stroke = shape.stroke_radius > 0.0
+	reach_px = 2.0 * shape.stroke_radius * w / xf.sx
+
 	for contour in contours:
-		# One closed SVG path per contour (outer outline, counter, etc.)
+		# One SVG path per contour (outer outline, counter, etc.), closed unless it is a centerline.
 		parts = []
 
 		# Flattens the (K, 6) buffer to 1D, zero-copy, still stdlib memoryview - no numpy needed.
@@ -414,7 +419,15 @@ def build_curves_svg_string(
 			circle(px3, py3, 2, fill="#50DC50")
 			circle(px2, py2, 3, stroke="#6464FF")
 
-		parts.append("Z")
+		if is_stroke:
+			elements.insert(0,
+				f'<path d="{" ".join(parts)}" stroke="#3080FF" stroke-opacity="0.35" fill="none" '
+				f'stroke-width="{reach_px}" stroke-linecap="round" stroke-linejoin="round" />'
+			)
+
+		else:
+			parts.append("Z")
+
 		elements.append(
 			f'<path d="{" ".join(parts)}" stroke="#CCCCCC" fill="none" stroke-width="1" />'
 		)
