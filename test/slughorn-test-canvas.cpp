@@ -474,9 +474,9 @@ int main(int argc, char** argv) {
 	}
 
 	// ============================================================================================
-	// Pattern 14: Origin(px, py) - explicit pivot for GPU-side rotation.
+	// Pattern 14: Origin({px, py}) - explicit pivot for GPU-side rotation.
 	//
-	// A clock hand (a stroke from the pivot point to the tip) authored with Origin(cx, cy)
+	// A clock hand (a stroke from the pivot point to the tip) authored with Origin({cx, cy})
 	// so that Layer::transform.dx/dy == (cx, cy) in em-space. The GPU consumer can then rotate
 	// the shape around that exact point without any translate-rotate-translate gymnastics.
 	//
@@ -484,7 +484,7 @@ int main(int argc, char** argv) {
 	//
 	// Origin{} - transform.dx/dy = bbox corner (wrong pivot)
 	// Origin(Centered) - transform.dx/dy = bbox center (wrong pivot, hand is asymmetric)
-	// Origin(cx, cy) - transform.dx/dy = hand base (correct pivot = clock centre)
+	// Origin({cx, cy}) - transform.dx/dy = hand base (correct pivot = clock centre)
 	// ============================================================================================
 
 	{
@@ -501,7 +501,7 @@ int main(int argc, char** argv) {
 			{.width=HAND_WIDTH},
 			HAND_COLOR,
 			1_cv,
-			slughorn::Atlas::ShapeInfo::Origin(CX, CY)
+			slughorn::Atlas::ShapeInfo::Origin({CX, CY})
 		);
 
 		// Verify: the layer's transform.dx/dy should equal (CX, CY) - the caller-supplied pivot.
@@ -527,7 +527,7 @@ int main(int argc, char** argv) {
 	// The rectangle spans [0.1, 0.9] x [0.15, 0.85] in authoring space.
 	//
 	// pivot_centered_shape: Origin::Centered -> dot at geometric center (0.5, 0.5)
-	// pivot_custom_shape: Origin(0.2, 0.72) -> dot clearly off-center; obviously intentional
+	// pivot_custom_shape: Origin({0.2, 0.72}) -> dot clearly off-center; obviously intentional
 	//
 	// CLI: `slughorn svg atlas.slug pivot_centered_shape`
 	//      `slughorn svg atlas.slug pivot_custom_shape`
@@ -545,7 +545,7 @@ int main(int argc, char** argv) {
 		canvas.finalize(Key("pivot_centered_composite"));
 
 		canvas.rect(0.1_cv, 0.15_cv, 0.8_cv, 0.7_cv);
-		canvas.fill(PURPLE, 1_cv, Key("pivot_custom_shape"), Origin(0.2_cv, 0.72_cv));
+		canvas.fill(PURPLE, 1_cv, Key("pivot_custom_shape"), Origin({0.2_cv, 0.72_cv}));
 
 		canvas.finalize(Key("pivot_custom_composite"));
 	}
@@ -726,9 +726,9 @@ int main(int argc, char** argv) {
 		rect.closePath();
 
 		canvas.beginPath();
-		canvas.addPath(rect, slughorn::Matrix::translate(0.1_cv, 0.25_cv));
-		canvas.addPath(rect, slughorn::Matrix::translate(0.4_cv, 0.25_cv));
-		canvas.addPath(rect, slughorn::Matrix::translate(0.7_cv, 0.25_cv));
+		canvas.addPath(rect, slughorn::Matrix::translate({0.1_cv, 0.25_cv}));
+		canvas.addPath(rect, slughorn::Matrix::translate({0.4_cv, 0.25_cv}));
+		canvas.addPath(rect, slughorn::Matrix::translate({0.7_cv, 0.25_cv}));
 		canvas.fill(WHITE, 1_cv, Key("add_path_xform"));
 
 		const auto comp21 = canvas.finalize();
@@ -815,7 +815,7 @@ int main(int argc, char** argv) {
 		{
 			makeRect();
 
-			const auto layer = canvas.fill(WHITE, 1_cv, Key("p22_fill_pivot"), Origin(0.35_cv, 0.6_cv));
+			const auto layer = canvas.fill(WHITE, 1_cv, Key("p22_fill_pivot"), Origin({0.35_cv, 0.6_cv}));
 
 			check("fill/Pivot     tx", layer.transform.x, 0.35_cv);
 			check("fill/Pivot     ty", layer.transform.y, 0.6_cv);
@@ -951,9 +951,9 @@ int main(int argc, char** argv) {
 		slughorn::Atlas::ShapeInfo info;
 		slughorn::CurveDecomposer decomposer(info.curves);
 
-		decomposer.moveTo(0.2_cv, 0.85_cv);
-		decomposer.quadTo(0.1_cv, 0.5_cv, 0.5_cv, 0.5_cv);
-		decomposer.quadTo(0.9_cv, 0.5_cv, 0.8_cv, 0.15_cv);
+		decomposer.moveTo({0.2_cv, 0.85_cv});
+		decomposer.quadTo({0.1_cv, 0.5_cv}, {0.5_cv, 0.5_cv});
+		decomposer.quadTo({0.9_cv, 0.5_cv}, {0.8_cv, 0.15_cv});
 
 		info.strokeRadius = 0.04_cv;
 

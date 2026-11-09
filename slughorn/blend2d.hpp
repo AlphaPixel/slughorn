@@ -148,6 +148,8 @@ std::pair<Atlas::ShapeInfo, Transform> decomposePath(
 	Atlas::Curves curves;
 	CurveDecomposer decomposer(curves);
 
+	const auto point = [scale](const BLPoint& p) { return Point{cv(p.x) * scale, cv(p.y) * scale}; };
+
 	const BLPathView v = path.view();
 	const uint8_t* cmds = v.command_data;
 	const BLPoint* pts = v.vertex_data;
@@ -157,14 +159,14 @@ std::pair<Atlas::ShapeInfo, Transform> decomposePath(
 	while(ci < v.size) {
 		switch(cmds[ci]) {
 			case BL_PATH_CMD_MOVE:
-				decomposer.moveTo(cv(pts[vi].x) * scale, cv(pts[vi].y) * scale);
+				decomposer.moveTo(point(pts[vi]));
 
 				ci += 1; vi += 1;
 
 				break;
 
 			case BL_PATH_CMD_ON:
-				decomposer.lineTo(cv(pts[vi].x) * scale, cv(pts[vi].y) * scale);
+				decomposer.lineTo(point(pts[vi]));
 
 				ci += 1; vi += 1;
 
@@ -172,10 +174,7 @@ std::pair<Atlas::ShapeInfo, Transform> decomposePath(
 
 			case BL_PATH_CMD_QUAD:
 				// [QUAD, ON] -> pts[vi]=cp, pts[vi+1]=end
-				decomposer.quadTo(
-					cv(pts[vi].x) * scale, cv(pts[vi].y) * scale,
-					cv(pts[vi+1].x) * scale, cv(pts[vi+1].y) * scale
-				);
+				decomposer.quadTo(point(pts[vi]), point(pts[vi+1]));
 
 				ci += 2; vi += 2;
 
@@ -183,11 +182,7 @@ std::pair<Atlas::ShapeInfo, Transform> decomposePath(
 
 			case BL_PATH_CMD_CUBIC:
 				// [CUBIC, CUBIC, ON] -> pts[vi]=cp1, pts[vi+1]=cp2, pts[vi+2]=end
-				decomposer.cubicTo(
-					cv(pts[vi].x) * scale, cv(pts[vi].y) * scale,
-					cv(pts[vi+1].x) * scale, cv(pts[vi+1].y) * scale,
-					cv(pts[vi+2].x) * scale, cv(pts[vi+2].y) * scale
-				);
+				decomposer.cubicTo(point(pts[vi]), point(pts[vi+1]), point(pts[vi+2]));
 
 				ci += 3; vi += 3;
 
@@ -196,10 +191,7 @@ std::pair<Atlas::ShapeInfo, Transform> decomposePath(
 			case BL_PATH_CMD_CONIC:
 				// [CONIC, WEIGHT, ON] -> pts[vi]=cp, pts[vi+1].x=weight, pts[vi+2]=end
 				// Approximate as quadratic (weight ignored for now).
-				decomposer.quadTo(
-					cv(pts[vi].x) * scale, cv(pts[vi].y) * scale,
-					cv(pts[vi+2].x) * scale, cv(pts[vi+2].y) * scale
-				);
+				decomposer.quadTo(point(pts[vi]), point(pts[vi+2]));
 
 				ci += 3; vi += 3;
 
@@ -230,13 +222,11 @@ std::pair<Atlas::ShapeInfo, Transform> decomposePath(
 	Atlas::ShapeInfo::Origin infoOrigin = origin;
 
 	if(origin.type == Atlas::ShapeInfo::Origin::Type::Pivot) {
-		infoOrigin.x = origin.x * scale - offX;
-		infoOrigin.y = origin.y * scale - offY;
+		infoOrigin.point = origin.point * scale - Point{offX, offY};
 	}
 
 	else if(origin.type == Atlas::ShapeInfo::Origin::Type::Custom) {
-		infoOrigin.x = origin.x * scale;
-		infoOrigin.y = origin.y * scale;
+		infoOrigin.point = origin.point * scale;
 	}
 
 	// YES, code like this a DEAD GIVEAWAY that AI wrote it. :) But I still like it, so... it stays!
@@ -244,9 +234,9 @@ std::pair<Atlas::ShapeInfo, Transform> decomposePath(
 		(origin.type == Atlas::ShapeInfo::Origin::Type::Centered)
 		? Transform{ cv(bbox.x0 + bbox.x1) * 0.5_cv * scale, cv(bbox.y0 + bbox.y1) * 0.5_cv * scale }
 		: (origin.type == Atlas::ShapeInfo::Origin::Type::Pivot)
-		? Transform{ origin.x * scale, origin.y * scale }
+		? Transform{ origin.point.x * scale, origin.point.y * scale }
 		: (origin.type == Atlas::ShapeInfo::Origin::Type::Custom)
-		? Transform{ ox + origin.x * scale, oy + origin.y * scale }
+		? Transform{ ox + origin.point.x * scale, oy + origin.point.y * scale }
 		: Transform{ ox, oy }
 	;
 
@@ -256,8 +246,7 @@ std::pair<Atlas::ShapeInfo, Transform> decomposePath(
 	info.origin = infoOrigin;
 
 	if(!autoMetrics && canvasExtent) {
-		info.bearingX = 0_cv;
-		info.bearingY = canvasExtent->second;
+		info.bearing = {0_cv, canvasExtent->second};
 		info.width = canvasExtent->first;
 		info.height = canvasExtent->second;
 		info.autoMetrics = false;

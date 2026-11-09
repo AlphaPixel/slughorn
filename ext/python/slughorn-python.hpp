@@ -206,14 +206,19 @@ struct PyCurveDecomposer {
 
 	PyCurveDecomposer(): decomposer(curves) {}
 
-	void moveTo(slug_t x, slug_t y) { decomposer.moveTo(x, y); }
-	void lineTo(slug_t x3, slug_t y3) { decomposer.lineTo(x3, y3); }
-	void quadTo(slug_t cx, slug_t cy, slug_t x3, slug_t y3) { decomposer.quadTo(cx, cy, x3, y3); }
+	void moveTo(slughorn::Point p) { decomposer.moveTo(p); }
+	void lineTo(slughorn::Point p) { decomposer.lineTo(p); }
+	void quadTo(slughorn::Point c, slughorn::Point p) { decomposer.quadTo(c, p); }
+	void cubicTo(slughorn::Point c1, slughorn::Point c2, slughorn::Point p) { decomposer.cubicTo(c1, c2, p); }
+
+	void moveTo(slug_t x, slug_t y) { moveTo({x, y}); }
+	void lineTo(slug_t x3, slug_t y3) { lineTo({x3, y3}); }
+	void quadTo(slug_t cx, slug_t cy, slug_t x3, slug_t y3) { quadTo({cx, cy}, {x3, y3}); }
 	void cubicTo(
 		slug_t c1x, slug_t c1y,
 		slug_t c2x, slug_t c2y,
 		slug_t x3, slug_t y3
-	) { decomposer.cubicTo(c1x, c1y, c2x, c2y, x3, y3); }
+	) { cubicTo({c1x, c1y}, {c2x, c2y}, {x3, y3}); }
 
 	const slughorn::Atlas::Curves& getCurves() const { return curves; }
 	void close() { decomposer.close(); }

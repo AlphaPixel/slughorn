@@ -297,8 +297,7 @@ void Atlas::addShape(Key key, const ShapeInfo& desc) {
 	build.metrics.strokeRadius = std::max(desc.strokeRadius, 0_cv);
 
 	if(!desc.autoMetrics) {
-		build.metrics.bearingX = desc.bearingX;
-		build.metrics.bearingY = desc.bearingY;
+		build.metrics.bearing = desc.bearing;
 		build.metrics.width = desc.width;
 		build.metrics.height = desc.height;
 		build.metrics.advance = desc.advance;
@@ -368,8 +367,7 @@ void Atlas::append(const Atlas& source, uint8_t mask, std::string_view namePrefi
 		info.curves = shape.curves;
 		info.contourStarts = shape.contourStarts;
 		info.autoMetrics = false;
-		info.bearingX = shape.bearingX;
-		info.bearingY = shape.bearingY;
+		info.bearing = shape.bearing;
 		info.width = shape.width;
 		info.height = shape.height;
 		info.advance = shape.advance;
@@ -424,19 +422,20 @@ void Atlas::normalizeShapeMetrics(const std::vector<Key>& keys) {
 	}
 
 	// Compute cell dimensions.
-	slug_t cellBearingX, cellBearingY, cellWidth, cellHeight, cellAdvance;
+	Point cellBearing;
+	slug_t cellWidth, cellHeight, cellAdvance;
 
 	if(tabular) {
-		cellBearingX = 0_cv;
+		cellBearing.x = 0_cv;
 		cellWidth = refAdvance;
 		cellAdvance = refAdvance;
-		cellBearingY = 0_cv;
+		cellBearing.y = 0_cv;
 		cellHeight = 0_cv;
 
 		for(const auto& e : entries) {
 			const auto& m = e.build->metrics;
 
-			if(m.bearingY > cellBearingY) cellBearingY = m.bearingY;
+			if(m.bearing.y > cellBearing.y) cellBearing.y = m.bearing.y;
 			if(m.height > cellHeight) cellHeight = m.height;
 		}
 	}
@@ -445,22 +444,22 @@ void Atlas::normalizeShapeMetrics(const std::vector<Key>& keys) {
 		slug_t minLeft = std::numeric_limits<slug_t>::max();
 		slug_t maxRight = -std::numeric_limits<slug_t>::max();
 
-		cellBearingY = 0_cv;
+		cellBearing.y = 0_cv;
 		cellHeight = 0_cv;
 		cellAdvance = 0_cv;
 
 		for(const auto& e : entries) {
 			const auto& m = e.build->metrics;
-			const slug_t right = m.bearingX + m.width;
+			const slug_t right = m.bearing.x + m.width;
 
-			if(m.bearingX < minLeft) minLeft = m.bearingX;
+			if(m.bearing.x < minLeft) minLeft = m.bearing.x;
 			if(right > maxRight) maxRight = right;
-			if(m.bearingY > cellBearingY) cellBearingY = m.bearingY;
+			if(m.bearing.y > cellBearing.y) cellBearing.y = m.bearing.y;
 			if(m.height > cellHeight) cellHeight = m.height;
 			if(m.advance > cellAdvance) cellAdvance = m.advance;
 		}
 
-		cellBearingX = minLeft;
+		cellBearing.x = minLeft;
 		cellWidth = maxRight - minLeft;
 	}
 
@@ -468,8 +467,7 @@ void Atlas::normalizeShapeMetrics(const std::vector<Key>& keys) {
 	for(auto& e : entries) {
 		auto& m = e.build->metrics;
 
-		m.bearingX = cellBearingX;
-		m.bearingY = cellBearingY;
+		m.bearing = cellBearing;
 		m.width = cellWidth;
 		m.height = cellHeight;
 		m.advance = cellAdvance;
@@ -483,8 +481,7 @@ void Atlas::normalizeShapeMetrics(const std::vector<Key>& keys) {
 
 void Atlas::setShapeMetrics(
 	const Key& key,
-	slug_t bearingX,
-	slug_t bearingY,
+	Point bearing,
 	slug_t width,
 	slug_t height
 ) {
@@ -496,8 +493,7 @@ void Atlas::setShapeMetrics(
 
 	auto& m = it->second.metrics;
 
-	m.bearingX = bearingX;
-	m.bearingY = bearingY;
+	m.bearing = bearing;
 	m.width = width;
 	m.height = height;
 }
@@ -754,8 +750,7 @@ void Atlas::bakeSDF() {
 				.h = f.height,
 				.range = f.range,
 				.texelsPerEm = f.texelsPerEm,
-				.emOriginX = f.emOriginX,
-				.emOriginY = f.emOriginY
+				.emOrigin = f.emOrigin
 			};
 		}
 
@@ -846,7 +841,7 @@ Atlas::Contours Atlas::getShapeContours(Key key) const {
 		current.push_back(cur);
 
 		const bool last = (i + 1 == flat->size());
-		const bool brk = !last && !coincident(cur.x3, cur.y3, (*flat)[i + 1].x1, (*flat)[i + 1].y1, extent);
+		const bool brk = !last && !coincident(cur.p3(), (*flat)[i + 1].p1(), extent);
 
 		if(last || brk) {
 			result.push_back(std::move(current));
@@ -968,38 +963,33 @@ void Atlas::buildShapeBands(
 	if(!overrideMetrics) {
 		build.metrics.width = rangeX;
 		build.metrics.height = rangeY;
-		build.metrics.bearingX = minX;
-		build.metrics.bearingY = maxY; // top of shape, Y-up convention
+		build.metrics.bearing = {minX, maxY}; // top-left of shape, Y-up convention
 		build.metrics.advance = rangeX;
 	}
 
 	// Origin offset: shifts the quad so transform.dx/dy acts as the correct rotation pivot.
 	// For Centered: half the curve bbox (computed here, correct for both auto and override metrics).
-	// For Custom: the caller-supplied pivot, already converted to local-origin em-space by the
-	// backend (Canvas pre-subtracts bbox-min*scale before storing in info.origin.x/y).
-	if(origin.type == ShapeInfo::Origin::Type::Centered) {
-		build.metrics.originX = rangeX / 2_cv;
-		build.metrics.originY = rangeY / 2_cv;
-	}
-
-	else if(
-		origin.type == ShapeInfo::Origin::Type::Pivot ||
-		origin.type == ShapeInfo::Origin::Type::Custom
-	) {
-		build.metrics.originX = origin.x;
-		build.metrics.originY = origin.y;
-	}
-
+	// For Pivot/Custom: the caller-supplied point, already converted to local-origin em-space by
+	// the backend (Canvas pre-subtracts bbox-min*scale before storing in info.origin.point).
+	// For Default: (0, 0), whatever point the caller passed.
 	build.metrics.origin = origin;
+
+	if(origin.type == ShapeInfo::Origin::Type::Centered) {
+		build.metrics.origin.point = {rangeX / 2_cv, rangeY / 2_cv};
+	}
+
+	else if(origin.type == ShapeInfo::Origin::Type::Default) {
+		build.metrics.origin.point = {};
+	}
 
 	// When metrics are overridden, use the declared extent as the band spatial range so that
 	// band transforms and indirection tables are consistent with the layout bounds, not the
 	// tight curve bbox. This is required for correct coverage outside the curve bbox (e.g. tiling).
 	if(overrideMetrics) {
-		minX = build.metrics.bearingX;
-		maxX = build.metrics.bearingX + build.metrics.width;
-		minY = build.metrics.bearingY - build.metrics.height;
-		maxY = build.metrics.bearingY;
+		minX = build.metrics.bearing.x;
+		maxX = build.metrics.bearing.x + build.metrics.width;
+		minY = build.metrics.bearing.y - build.metrics.height;
+		maxY = build.metrics.bearing.y;
 		rangeX = build.metrics.width;
 		rangeY = build.metrics.height;
 

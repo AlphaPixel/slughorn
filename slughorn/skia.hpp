@@ -58,7 +58,7 @@ namespace skia {
 // Layer::transform; computeQuad will reconstruct the correct world position.
 //
 // Origin::Centered - transform.x/y = bounds.centerX/Y * scale (bbox center). Pass directly to
-// Layer::transform; computeQuad subtracts originX/Y (= rangeX/2, rangeY/2) and the quad still lands
+// Layer::transform; computeQuad subtracts origin.point (= rangeX/2, rangeY/2) and the quad still lands
 // at the correct canvas position. Use this when the transform should act as a pivot point for
 // GPU-side rotation.
 //
@@ -72,7 +72,7 @@ namespace skia {
 // has a zero-size bounding box.
 //
 // When autoMetrics=false and canvasExtent={widthEm, heightEm} is supplied, the returned ShapeInfo
-// has its band metrics (bearingX/Y, width, height, autoMetrics) pre-populated. Callers that use
+// has its band metrics (bearing, width, height, autoMetrics) pre-populated. Callers that use
 // decomposePath directly and then call atlas.addShape() should pass canvasExtent here.
 std::pair<Atlas::ShapeInfo, Transform> decomposePath(
 	const SkPath& path,
@@ -152,26 +152,23 @@ namespace detail {
 
 static void splitConic(
 	CurveDecomposer& decomposer,
-	slug_t p0x, slug_t p0y, // current pen P0
-	slug_t p1x, slug_t p1y, // control point P1
-	slug_t p2x, slug_t p2y, // end point P2
+	Point p0, // current pen P0
+	Point p1, // control point P1
+	Point p2, // end point P2
 	slug_t w // conic weight
 ) {
 	const slug_t denom = 1_cv + w;
 	const slug_t inv = 1_cv / denom;
 
 	// Midpoint on the curve
-	const slug_t midX = (p0x + 2_cv * w * p1x + p2x) * (0.5_cv * inv);
-	const slug_t midY = (p0y + 2_cv * w * p1y + p2y) * (0.5_cv * inv);
+	const Point mid = (p0 + 2_cv * w * p1 + p2) * (0.5_cv * inv);
 
 	// Control points for each half
-	const slug_t c0x = (p0x + w * p1x) * inv;
-	const slug_t c0y = (p0y + w * p1y) * inv;
-	const slug_t c1x = (p2x + w * p1x) * inv;
-	const slug_t c1y = (p2y + w * p1y) * inv;
+	const Point c0 = (p0 + w * p1) * inv;
+	const Point c1 = (p2 + w * p1) * inv;
 
-	decomposer.quadTo(c0x, c0y, midX, midY);
-	decomposer.quadTo(c1x, c1y, p2x, p2y);
+	decomposer.quadTo(c0, mid);
+	decomposer.quadTo(c1, p2);
 }
 
 }
@@ -196,6 +193,8 @@ std::pair<Atlas::ShapeInfo, Transform> decomposePath(const SkPath& path, slug_t 
 
 	CurveDecomposer decomposer(curves);
 
+	const auto point = [scale](const SkPoint& p) { return Point{cv(p.x()) * scale, cv(p.y()) * scale}; };
+
 	// Force-close open contours so the winding rule works correctly.
 	SkPath::Iter iter(local, true);
 
@@ -206,26 +205,17 @@ std::pair<Atlas::ShapeInfo, Transform> decomposePath(const SkPath& path, slug_t 
 	while((verb = iter.next(pts)) != SkPath::kDone_Verb) {
 		switch(verb) {
 			case SkPath::kMove_Verb:
-				decomposer.moveTo(
-					cv(pts[0].x()) * scale,
-					cv(pts[0].y()) * scale
-				);
+				decomposer.moveTo(point(pts[0]));
 
 				break;
 
 			case SkPath::kLine_Verb:
-				decomposer.lineTo(
-					cv(pts[1].x()) * scale,
-					cv(pts[1].y()) * scale
-				);
+				decomposer.lineTo(point(pts[1]));
 
 				break;
 
 			case SkPath::kQuad_Verb:
-				decomposer.quadTo(
-					cv(pts[1].x()) * scale, cv(pts[1].y()) * scale,
-					cv(pts[2].x()) * scale, cv(pts[2].y()) * scale
-				);
+				decomposer.quadTo(point(pts[1]), point(pts[2]));
 
 				break;
 
@@ -233,28 +223,15 @@ std::pair<Atlas::ShapeInfo, Transform> decomposePath(const SkPath& path, slug_t 
 				const slug_t w = cv(iter.conicWeight());
 
 				// w == 1.0: ordinary quadratic, no split needed.
-				if(std::abs(w - 1_cv) < 1e-5_cv) decomposer.quadTo(
-					cv(pts[1].x()) * scale, cv(pts[1].y()) * scale,
-					cv(pts[2].x()) * scale, cv(pts[2].y()) * scale
-				);
+				if(std::abs(w - 1_cv) < 1e-5_cv) decomposer.quadTo(point(pts[1]), point(pts[2]));
 
-				else detail::splitConic(
-					decomposer,
-					cv(pts[0].x()) * scale, cv(pts[0].y()) * scale,
-					cv(pts[1].x()) * scale, cv(pts[1].y()) * scale,
-					cv(pts[2].x()) * scale, cv(pts[2].y()) * scale,
-					w
-				);
+				else detail::splitConic(decomposer, point(pts[0]), point(pts[1]), point(pts[2]), w);
 
 				break;
 			}
 
 			case SkPath::kCubic_Verb:
-				decomposer.cubicTo(
-					cv(pts[1].x()) * scale, cv(pts[1].y()) * scale,
-					cv(pts[2].x()) * scale, cv(pts[2].y()) * scale,
-					cv(pts[3].x()) * scale, cv(pts[3].y()) * scale
-				);
+				decomposer.cubicTo(point(pts[1]), point(pts[2]), point(pts[3]));
 
 				break;
 
@@ -274,21 +251,19 @@ std::pair<Atlas::ShapeInfo, Transform> decomposePath(const SkPath& path, slug_t 
 	Atlas::ShapeInfo::Origin infoOrigin = origin;
 
 	if(origin.type == Atlas::ShapeInfo::Origin::Type::Pivot) {
-		infoOrigin.x = origin.x * scale - offX;
-		infoOrigin.y = origin.y * scale - offY;
+		infoOrigin.point = origin.point * scale - Point{offX, offY};
 	}
 	else if(origin.type == Atlas::ShapeInfo::Origin::Type::Custom) {
-		infoOrigin.x = origin.x * scale;
-		infoOrigin.y = origin.y * scale;
+		infoOrigin.point = origin.point * scale;
 	}
 
 	const Transform transform = !autoMetrics ? Transform{} :
 		(origin.type == Atlas::ShapeInfo::Origin::Type::Centered)
 		? Transform{ cv(bounds.centerX()) * scale, cv(bounds.centerY()) * scale }
 		: (origin.type == Atlas::ShapeInfo::Origin::Type::Pivot)
-		? Transform{ origin.x * scale, origin.y * scale }
+		? Transform{ origin.point.x * scale, origin.point.y * scale }
 		: (origin.type == Atlas::ShapeInfo::Origin::Type::Custom)
-		? Transform{ bx + origin.x * scale, by + origin.y * scale }
+		? Transform{ bx + origin.point.x * scale, by + origin.point.y * scale }
 		: Transform{ bx, by }
 	;
 
@@ -298,8 +273,7 @@ std::pair<Atlas::ShapeInfo, Transform> decomposePath(const SkPath& path, slug_t 
 	info.origin = infoOrigin;
 
 	if(!autoMetrics && canvasExtent) {
-		info.bearingX = 0_cv;
-		info.bearingY = canvasExtent->second;
+		info.bearing = {0_cv, canvasExtent->second};
 		info.width = canvasExtent->first;
 		info.height = canvasExtent->second;
 		info.autoMetrics = false;

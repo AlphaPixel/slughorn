@@ -25,11 +25,18 @@
 
 #include <mapbox/earcut.hpp>
 
-#include <array>
 #include <cmath>
 #include <cstdint>
 #include <limits>
 #include <vector>
+
+// earcut reads a point's coordinates through these.
+namespace mapbox::util {
+
+template<> struct nth<0, slughorn::Point> { static slughorn::slug_t get(const slughorn::Point& p) { return p.x; } };
+template<> struct nth<1, slughorn::Point> { static slughorn::slug_t get(const slughorn::Point& p) { return p.y; } };
+
+}
 
 namespace slughorn {
 namespace tessellate {
@@ -50,36 +57,7 @@ struct Mesh3D {
 
 namespace detail {
 
-using Point = std::array<slug_t, 2>;
 using Ring = std::vector<Point>;
-
-// Midpoint-subdivision curve flattening, identical in spirit to canvas.hpp's
-// detail::flattenCurve. Duplicated here (rather than included) so this header has no
-// dependency on canvas.hpp for one small pure-math helper.
-inline void flattenCurve(
-	slug_t p0x, slug_t p0y,
-	slug_t p1x, slug_t p1y,
-	slug_t p2x, slug_t p2y,
-	slug_t tol, size_t depth,
-	Ring& pts
-) {
-	const slug_t dx = p2x - p0x, dy = p2y - p0y;
-	const slug_t lenSq = dx * dx + dy * dy;
-	const slug_t cross = (p1x - p0x) * dy - (p1y - p0y) * dx;
-
-	if(lenSq < 1e-12_cv || (cross * cross) <= (tol * tol * lenSq) || depth >= 8) {
-		pts.push_back({p2x, p2y});
-
-		return;
-	}
-
-	const slug_t m01x = (p0x + p1x) * 0.5_cv, m01y = (p0y + p1y) * 0.5_cv;
-	const slug_t m12x = (p1x + p2x) * 0.5_cv, m12y = (p1y + p2y) * 0.5_cv;
-	const slug_t mx = (m01x + m12x) * 0.5_cv, my = (m01y + m12y) * 0.5_cv;
-
-	flattenCurve(p0x, p0y, m01x, m01y, mx, my, tol, depth + 1, pts);
-	flattenCurve(mx, my, m12x, m12y, p2x, p2y, tol, depth + 1, pts);
-}
 
 // Flattens one closed contour (a single Bezier loop, as returned per-entry by
 // Atlas::getShapeContours()) into a polygon ring with no duplicated closing vertex.
@@ -88,15 +66,15 @@ inline Ring flattenContour(const Atlas::Curves& contour, slug_t tolerance) {
 
 	if(contour.empty()) return pts;
 
-	pts.push_back({contour.front().x1, contour.front().y1});
+	pts.push_back(contour.front().p1());
 
-	for(const auto& c : contour) flattenCurve(c.x1, c.y1, c.x2, c.y2, c.x3, c.y3, tolerance, 0, pts);
+	for(const auto& c : contour) slughorn::detail::flattenCurve(c, tolerance, pts);
 
 	if(pts.size() > 1) {
 		const auto& first = pts.front();
 		const auto& last = pts.back();
 
-		if(std::abs(first[0] - last[0]) < 1e-6_cv && std::abs(first[1] - last[1]) < 1e-6_cv) {
+		if(std::abs(first.x - last.x) < 1e-6_cv && std::abs(first.y - last.y) < 1e-6_cv) {
 			pts.pop_back();
 		}
 	}
@@ -112,7 +90,7 @@ inline slug_t signedArea2(const Ring& ring) {
 		const auto& a = ring[i];
 		const auto& b = ring[(i + 1) % ring.size()];
 
-		area += a[0] * b[1] - b[0] * a[1];
+		area += cross(a, b);
 	}
 
 	return area;
@@ -127,8 +105,8 @@ inline bool pointInRing(const Ring& ring, const Point& p) {
 		const auto& b = ring[j];
 
 		if(
-			((a[1] > p[1]) != (b[1] > p[1])) &&
-			(p[0] < (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]) + a[0])
+			((a.y > p.y) != (b.y > p.y)) &&
+			(p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x)
 		) inside = !inside;
 	}
 
@@ -214,8 +192,8 @@ inline Mesh2D tessellate(const Atlas::Contours& contours, slug_t tolerance = TOL
 
 		for(const auto& ring : polygon) {
 			for(const auto& p : ring) {
-				mesh.positions.push_back(p[0]);
-				mesh.positions.push_back(p[1]);
+				mesh.positions.push_back(p.x);
+				mesh.positions.push_back(p.y);
 			}
 
 			vertexOffset += static_cast<uint32_t>(ring.size());
@@ -276,14 +254,14 @@ inline Mesh3D extrude(
 		const auto base = static_cast<uint32_t>(mesh.positions.size() / 3);
 
 		for(const auto& p : ring) {
-			mesh.positions.push_back(p[0]);
-			mesh.positions.push_back(p[1]);
+			mesh.positions.push_back(p.x);
+			mesh.positions.push_back(p.y);
 			mesh.positions.push_back(depth);
 		}
 
 		for(const auto& p : ring) {
-			mesh.positions.push_back(p[0]);
-			mesh.positions.push_back(p[1]);
+			mesh.positions.push_back(p.x);
+			mesh.positions.push_back(p.y);
 			mesh.positions.push_back(0_cv);
 		}
 

@@ -15,7 +15,7 @@ Roundtrip invariants verified:
     - per-shape sdf tiles (x, y, w, h, range, ...) restored
     - MSDF texture data is non-empty and the correct size
     - packing_stats.msdf_tile_size matches what was registered
-    - CompositeShape layers (key, color, effectId) preserved
+    - CompositeShape layers (key, color, effect_id) preserved
     - Error on unbuilt atlas write; error on missing file read
 """
 
@@ -70,7 +70,7 @@ def _atlas_with_composite():
         atlas.add_shape(slughorn.Key(name), info)
 
     cs = slughorn.CompositeShape()
-    cs.layers.append(slughorn.Layer(slughorn.Key("A"), slughorn.Color(1.0, 0.0, 0.0, 1.0), effectId=7))
+    cs.layers.append(slughorn.Layer(slughorn.Key("A"), slughorn.Color(1.0, 0.0, 0.0, 1.0), effect_id=7))
     cs.layers.append(slughorn.Layer(slughorn.Key("B"), slughorn.Color(0.0, 0.0, 1.0, 0.5)))
     atlas.add_composite_shape(slughorn.Key("AB"), cs)
     atlas.build()
@@ -151,7 +151,7 @@ def test_json_roundtrip_composite(tmp_path):
     assert len(cs.layers) == 2
     assert cs.layers[0].key == slughorn.Key("A")
     assert cs.layers[0].color.r == pytest.approx(1.0, abs=1e-5)
-    assert cs.layers[0].effectId == 7
+    assert cs.layers[0].effect_id == 7
     assert cs.layers[1].key == slughorn.Key("B")
     assert cs.layers[1].color.a == pytest.approx(0.5, abs=1e-5)
 

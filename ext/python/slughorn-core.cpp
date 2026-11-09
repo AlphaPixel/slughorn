@@ -2,6 +2,8 @@
 
 #ifdef SLUGHORN_HAS_SERIAL
 #include "slughorn/serial.hpp"
+
+#include <pybind11/operators.h>
 #include <sstream>
 #endif
 
@@ -154,6 +156,65 @@ void bind_core(py::module_& m) {
 	;
 
 	// ============================================================================================
+	// slughorn.Point
+	//
+	// A 2-tuple converts implicitly wherever a Point is expected, and a Point unpacks like one.
+	//
+	// TODO: Consider adding wrapper METHODS (p.dot(q), p.length(), p.normalize(), ...) that forward to
+	// the module-level free functions, for Python discoverability; C++ stays free-function only.
+	// ============================================================================================
+	using slughorn::Point;
+
+	py::class_<Point>(m, "Point")
+		.def(py::init([](slug_t x, slug_t y) { return Point{x, y}; }), "x"_a=0_cv, "y"_a=0_cv)
+		.def(py::init([](const py::tuple& t) {
+			if(t.size() != 2) throw py::value_error("Point: expected a 2-tuple (x, y)");
+
+			return Point{t[0].cast<slug_t>(), t[1].cast<slug_t>()};
+		}), "xy"_a)
+		.def_readwrite("x", &Point::x)
+		.def_readwrite("y", &Point::y)
+		.def(py::self + py::self)
+		.def(py::self - py::self)
+		.def(-py::self)
+		.def(py::self * slug_t())
+		.def(slug_t() * py::self)
+		.def(py::self / slug_t())
+		.def(py::self += py::self)
+		.def(py::self -= py::self)
+		.def(py::self *= slug_t())
+		.def(py::self /= slug_t())
+		.def(py::self == py::self)
+		.def("__len__", [](const Point&) { return 2; })
+		.def("__getitem__", [](const Point& p, size_t i) {
+			if(i > 1) throw py::index_error("Point index out of range");
+
+			return i ? p.y : p.x;
+		})
+		.def("__iter__", [](const Point& p) { return py::iter(py::make_tuple(p.x, p.y)); })
+		.def("__repr__", [](const Point& p) { return streamRepr(p); })
+	;
+
+	py::implicitly_convertible<py::tuple, Point>();
+
+	m.def("dot", &slughorn::dot, "a"_a, "b"_a);
+	m.def("cross", &slughorn::cross, "a"_a, "b"_a,
+		"The z component of the 3D cross product: positive when b is counterclockwise from a."
+	);
+	m.def("length", &slughorn::length, "a"_a);
+	m.def("length_squared", &slughorn::lengthSquared, "a"_a);
+	m.def("perp", &slughorn::perp, "a"_a, "a rotated 90 degrees counterclockwise.");
+	m.def("normalize", &slughorn::normalize, "a"_a,
+		"a scaled to unit length; a zero-length a is returned unchanged."
+	);
+	m.def("lerp", &slughorn::lerp, "a"_a, "b"_a, "t"_a);
+	m.def("mid", &slughorn::mid, "a"_a, "b"_a);
+	m.def("coincident", &slughorn::coincident, "a"_a, "b"_a, "extent"_a,
+		"Whether a and b are the same up to float rounding, in data whose largest absolute\n"
+		"coordinate is extent. Tolerance: 1e-5 * max(1, extent) per axis."
+	);
+
+	// ============================================================================================
 	// slughorn.Color
 	// ============================================================================================
 	py::class_<slughorn::Color>(m, "Color")
@@ -194,7 +255,7 @@ void bind_core(py::module_& m) {
 	py::class_<slughorn::Matrix>(m, "Matrix")
 		.def(py::init<>(), "Default: identity.")
 		.def_static("identity", &slughorn::Matrix::identity, "Return the identity matrix.")
-		.def_static("translate", &slughorn::Matrix::translate, "tx"_a, "ty"_a,
+		.def_static("translate", &slughorn::Matrix::translate, "t"_a,
 			"Return a pure-translation matrix."
 		)
 		.def_static("scale", &slughorn::Matrix::scale, "sx"_a, "sy"_a,
@@ -209,20 +270,17 @@ void bind_core(py::module_& m) {
 		.def_readwrite("yy", &slughorn::Matrix::yy)
 		.def_readwrite("dx", &slughorn::Matrix::dx)
 		.def_readwrite("dy", &slughorn::Matrix::dy)
+		.def("apply", &slughorn::Matrix::apply, "p"_a,
+			"Return p transformed by this matrix (also matrix * p)."
+		)
+		.def("__mul__", [](const slughorn::Matrix& mat, Point p) { return mat * p; }, py::is_operator())
 		.def("is_identity", &slughorn::Matrix::isIdentity,
 			"Return True if this matrix is (approximately) the identity."
 		)
 		.def("inverse", &slughorn::Matrix::inverse,
 			"Return the inverse matrix, or None if this matrix is singular."
 		)
-		.def("apply", [](const slughorn::Matrix& mat, slug_t x, slug_t y) {
-			slug_t ox, oy;
-
-			mat.apply(x, y, ox, oy);
-
-			return py::make_tuple(ox, oy);
-		}, "x"_a, "y"_a, "Apply the matrix to point (x, y), returning (x', y').")
-		.def("__mul__", &slughorn::Matrix::operator*, "rhs"_a,
+		.def("__mul__", py::overload_cast<const slughorn::Matrix&>(&slughorn::Matrix::operator*, py::const_), "rhs"_a,
 			"Concatenate: (self * rhs) - rhs is applied first."
 		)
 		.def("__repr__", [](const slughorn::Matrix& mat) { return streamRepr(mat); })
@@ -310,17 +368,10 @@ void bind_core(py::module_& m) {
 	// Free function: convert two em-space endpoints to a GradientInfo::transform matrix.
 	m.def("build_linear_gradient_matrix",
 		&slughorn::buildLinearGradientMatrix,
-		"x0"_a, "y0"_a, "x1"_a, "y1"_a,
-		"Build the affine matrix for a linear gradient from em-space points (x0,y0)->(x1,y1).\n"
+		"p0"_a, "p1"_a,
+		"Build the affine matrix for a linear gradient from em-space points p0->p1.\n"
 		"Store the result in GradientInfo.transform.\n"
 		"Returns Matrix.identity() for degenerate (zero-length) inputs."
-	);
-
-	m.def("coincident",
-		&slughorn::coincident,
-		"ax"_a, "ay"_a, "bx"_a, "by"_a, "extent"_a,
-		"Whether points (ax, ay) and (bx, by) are the same up to float rounding, in data whose\n"
-		"largest absolute coordinate is extent. Tolerance: 1e-5 * max(1, extent) per axis."
 	);
 
 	// ============================================================================================
@@ -497,31 +548,31 @@ void bind_core(py::module_& m) {
 			"(Canvas.mask() fills these in; default 0, 0) and params[2] = scale about the tile's\n"
 			"own center (default 1) - the cheap way to animate a baked mask.")
 		.def_static("circle", &slughorn::Mask::circle,
-			"cx"_a, "cy"_a, "r"_a, "invert"_a=false,
-			"Analytical circle mask: center (cx, cy), radius r.")
+			"c"_a, "r"_a, "invert"_a=false,
+			"Analytical circle mask: center c, radius r.")
 		.def_static("rect", &slughorn::Mask::rect,
-			"x"_a, "y"_a, "w"_a, "h"_a, "invert"_a=false,
-			"Analytical axis-aligned box mask: corner (x, y), size (w, h).")
+			"p"_a, "w"_a, "h"_a, "invert"_a=false,
+			"Analytical axis-aligned box mask: corner p, size (w, h).")
 		.def_static("capsule", &slughorn::Mask::capsule,
-			"ax"_a, "ay"_a, "bx"_a, "by"_a, "r"_a, "invert"_a=false,
-			"Analytical capsule mask: endpoints (ax,ay)→(bx,by), radius r.")
+			"a"_a, "b"_a, "r"_a, "invert"_a=false,
+			"Analytical capsule mask: endpoints a->b, radius r.")
 		.def_static("arc", &slughorn::Mask::arc,
-			"cx"_a, "cy"_a, "r"_a, "a0"_a, "a1"_a, "invert"_a=false,
-			"Analytical pie-sector mask: center (cx,cy), radius r, angle range [a0,a1] radians (0=+X, CCW).")
-		.def_static("arcBand", &slughorn::Mask::arcBand,
-			"cx"_a, "cy"_a, "r"_a, "a0"_a, "a1"_a, "rb"_a, "invert"_a=false,
-			"Analytical stroked-arc mask: center (cx,cy), arc radius r, angle range [a0,a1], stroke half-width rb.")
+			"c"_a, "r"_a, "a0"_a, "a1"_a, "invert"_a=false,
+			"Analytical pie-sector mask: center c, radius r, angle range [a0,a1] radians (0=+X, CCW).")
+		.def_static("arc_band", &slughorn::Mask::arcBand,
+			"c"_a, "r"_a, "a0"_a, "a1"_a, "rb"_a, "invert"_a=false,
+			"Analytical stroked-arc mask: center c, arc radius r, angle range [a0,a1], stroke half-width rb.")
 		.def_static("hexagon", &slughorn::Mask::hexagon,
-			"cx"_a, "cy"_a, "r"_a, "rotation"_a=0.0f, "invert"_a=false,
-			"Analytical regular-hexagon mask: center (cx,cy), radius r, rotation in radians.")
+			"c"_a, "r"_a, "rotation"_a=0.0f, "invert"_a=false,
+			"Analytical regular-hexagon mask: center c, radius r, rotation in radians.")
 		.def_static("octagon", &slughorn::Mask::octagon,
-			"cx"_a, "cy"_a, "r"_a, "rotation"_a=0.0f, "invert"_a=false,
-			"Analytical regular-octagon mask: center (cx,cy), radius r, rotation in radians.")
+			"c"_a, "r"_a, "rotation"_a=0.0f, "invert"_a=false,
+			"Analytical regular-octagon mask: center c, radius r, rotation in radians.")
 		.def_static("star", &slughorn::Mask::star,
-			"cx"_a, "cy"_a, "r"_a,
+			"c"_a, "r"_a,
 			"points"_a, "inner_ratio"_a, "rotation"_a=0.0f,
 			"invert"_a=false,
-			"Analytical n-pointed star mask: center (cx,cy), outer radius r, point count, "
+			"Analytical n-pointed star mask: center c, outer radius r, point count, "
 			"inner_ratio in [0,1] (0=sharpest spikes, 1=regular polygon), rotation in radians.")
 		.def("__repr__", [](const slughorn::Mask& mk) { return streamRepr(mk); })
 	;
@@ -586,13 +637,13 @@ void bind_core(py::module_& m) {
 			"color"_a=slughorn::Color{},
 			"transform"_a=slughorn::Transform{},
 			"scale"_a=1_cv,
-			"effectId"_a=0,
-			"effectParam"_a=0_cv,
-			"gradientId"_a=0,
-			"patternId"_a=0,
+			"effect_id"_a=0,
+			"effect_param"_a=0_cv,
+			"gradient_id"_a=0,
+			"pattern_id"_a=0,
 			"bleed"_a=0_cv,
-			"drawMode"_a=slughorn::DrawMode::Visible,
-			"blendMode"_a=slughorn::BlendMode::SrcOver
+			"draw_mode"_a=slughorn::DrawMode::Visible,
+			"blend_mode"_a=slughorn::BlendMode::SrcOver
 		)
 
 		.def_readwrite("key", &slughorn::Layer::key,
@@ -608,32 +659,32 @@ void bind_core(py::module_& m) {
 			"    compile() both read this value.\n"
 			"  SVG / Cairo / NanoSVG: leave at the default of 1.0 - curves are\n"
 			"    already em-normalised by the backend.")
-		.def_readwrite("effectId", &slughorn::Layer::effectId,
+		.def_readwrite("effect_id", &slughorn::Layer::effectId,
 			"Fragment-shader fill mode selector. "
 			"0 = standard Slug fill (default). "
 			"See osgSlug-frag.glsl slug_ApplyEffect() for the full table.")
-		.def_readwrite("effectParam", &slughorn::Layer::effectParam,
+		.def_readwrite("effect_param", &slughorn::Layer::effectParam,
 			"Per-layer float hint passed to the frontend vertex shader. "
 			"slughorn does not interpret this value; typical uses include rotation speed, "
 			"scale factor, or any other per-layer scalar the vertex hook needs.")
-		.def_readwrite("gradientId", &slughorn::Layer::gradientId,
+		.def_readwrite("gradient_id", &slughorn::Layer::gradientId,
 			"Gradient fill ID. 0 = flat color (layer.color used). "
 			"Non-zero = 1-based index into the atlas gradient list "
 			"(registered via Atlas.add_gradient()). "
 			"When non-zero, layer.color.rgb is ignored; layer.color.a is a global opacity multiplier.")
-		.def_readwrite("patternId", &slughorn::Layer::patternId,
+		.def_readwrite("pattern_id", &slughorn::Layer::patternId,
 			"Pattern fill ID. 0 = none. "
 			"Non-zero = 1-based index into the atlas pattern list "
-			"(registered via Atlas.add_pattern()). Mutually exclusive with gradientId.")
+			"(registered via Atlas.add_pattern()). Mutually exclusive with gradient_id.")
 		.def_readwrite("bleed", &slughorn::Layer::bleed,
 			"Extra em-space CONTENT margin on each side of the quad (default 0), for effects "
 			"that intentionally draw outside the shape's true bounds (outer glow, drop shadow, "
 			"MSDF spread) - print's 'bleed'. NOT an antialiasing margin: the AA margin is the "
 			"renderer's responsibility, computed live at pixel scale in the vertex stage.")
-		.def_readwrite("drawMode", &slughorn::Layer::drawMode,
+		.def_readwrite("draw_mode", &slughorn::Layer::drawMode,
 			"Controls whether/how this layer is rendered. "
 			"Visible=normal draw; Hidden=temporarily suppressed; Geometry=path-source only (no quad).")
-		.def_readwrite("blendMode", &slughorn::Layer::blendMode,
+		.def_readwrite("blend_mode", &slughorn::Layer::blendMode,
 			"Per-layer compositing mode. SrcOver=normal alpha blend (default). "
 			"Photoshop-style modes (Multiply, Screen, etc.) require GL_KHR_blend_equation_advanced.")
 		.def("__repr__", [](const slughorn::Layer& l) { return streamRepr(l); })
@@ -784,8 +835,7 @@ void bind_core(py::module_& m) {
 
 				if(key == "curves") assignShapeInfoCurves(info, item.second);
 				else if(key == "auto_metrics") info.autoMetrics = item.second.cast<bool>();
-				else if(key == "bearing_x") info.bearingX = item.second.cast<slug_t>();
-				else if(key == "bearing_y") info.bearingY = item.second.cast<slug_t>();
+				else if(key == "bearing") info.bearing = item.second.cast<Point>();
 				else if(key == "width") info.width = item.second.cast<slug_t>();
 				else if(key == "height") info.height = item.second.cast<slug_t>();
 				else if(key == "advance") info.advance = item.second.cast<slug_t>();
@@ -820,8 +870,7 @@ void bind_core(py::module_& m) {
 			"If True (default), derive width/height/bearing/advance from the "
 			"curve bounding box automatically."
 		)
-		.def_readwrite("bearing_x", &slughorn::Atlas::ShapeInfo::bearingX)
-		.def_readwrite("bearing_y", &slughorn::Atlas::ShapeInfo::bearingY)
+		.def_readwrite("bearing", &slughorn::Atlas::ShapeInfo::bearing)
 		.def_readwrite("width", &slughorn::Atlas::ShapeInfo::width)
 		.def_readwrite("height", &slughorn::Atlas::ShapeInfo::height)
 		.def_readwrite("advance", &slughorn::Atlas::ShapeInfo::advance)
@@ -849,7 +898,7 @@ void bind_core(py::module_& m) {
 		)
 		.def_readwrite("origin", &slughorn::Atlas::ShapeInfo::origin,
 			"Where the transform origin (Layer.transform.x/y) is placed relative to the geometry.\n"
-			"Origin() = Default, Origin(Type) = type-only (e.g. Centered), Origin(x, y) = Pivot, Origin(Type, x, y) = explicit type + coords."
+			"Origin() = Default, Origin(Type) = type-only (e.g. Centered), Origin(p) = Pivot, Origin(Type, p) = explicit type + coords."
 		)
 		.def("__repr__", [](const slughorn::Atlas::ShapeInfo& info) { return streamRepr(info); })
 	;
@@ -862,19 +911,18 @@ void bind_core(py::module_& m) {
 			"type"_a,
 			"Type-only origin: pass Origin.Type.Centered (or any future named variant)."
 		)
-		.def(py::init<slughorn::slug_t, slughorn::slug_t>(),
-			"x"_a, "y"_a,
+		.def(py::init<Point>(),
+			"p"_a,
 			"Pivot origin: authoring-space pivot (bbox-min subtracted). "
-			"Layer.transform.x/y will equal (x, y) scaled to local em-space."
+			"Layer.transform.x/y will equal p scaled to local em-space."
 		)
-		.def(py::init<slughorn::Atlas::ShapeInfo::Origin::Type, slughorn::slug_t, slughorn::slug_t>(),
-			"type"_a, "x"_a, "y"_a,
-			"Explicit type + coords. Use Origin.Type.Custom to store (x, y) * scale verbatim "
+		.def(py::init<slughorn::Atlas::ShapeInfo::Origin::Type, Point>(),
+			"type"_a, "p"_a,
+			"Explicit type + coords. Use Origin.Type.Custom to store p * scale verbatim "
 			"with no em-space adjustment (e.g. raw ejection direction vectors)."
 		)
 		.def_readwrite("type", &slughorn::Atlas::ShapeInfo::Origin::type)
-		.def_readwrite("x", &slughorn::Atlas::ShapeInfo::Origin::x)
-		.def_readwrite("y", &slughorn::Atlas::ShapeInfo::Origin::y)
+		.def_readwrite("point", &slughorn::Atlas::ShapeInfo::Origin::point)
 		.def("__eq__", &slughorn::Atlas::ShapeInfo::Origin::operator==)
 		.def("__ne__", &slughorn::Atlas::ShapeInfo::Origin::operator!=)
 		.def("__repr__", [](const slughorn::Atlas::ShapeInfo::Origin& origin) {
@@ -973,8 +1021,8 @@ void bind_core(py::module_& m) {
 			"Em-space half-range this tile was baked with.")
 		.def_readonly("texels_per_em", &slughorn::Atlas::SDF::Tile::texelsPerEm)
 		.def_property_readonly("em_origin", [](const slughorn::Atlas::SDF::Tile& t) {
-			return py::make_tuple(t.emOriginX, t.emOriginY);
-		}, "Em-space (x, y) at the tile's bottom-left corner.")
+			return t.emOrigin;
+		}, "Em-space Point at the tile's bottom-left corner.")
 		.def_property_readonly("pixel_range", &slughorn::Atlas::SDF::Tile::pixelRange,
 			"Total distance range in texels (2 * range * texels_per_em) - msdfgen calls pixelRange.")
 		.def("__repr__", [](const slughorn::Atlas::SDF::Tile& t) {
@@ -1023,25 +1071,16 @@ void bind_core(py::module_& m) {
 		.def_readonly("band_scale_y", &slughorn::Atlas::Shape::bandScaleY)
 		.def_readonly("band_offset_x", &slughorn::Atlas::Shape::bandOffsetX)
 		.def_readonly("band_offset_y", &slughorn::Atlas::Shape::bandOffsetY)
-		.def_readonly("bearing_x", &slughorn::Atlas::Shape::bearingX)
-		.def_readonly("bearing_y", &slughorn::Atlas::Shape::bearingY)
+		.def_readonly("bearing", &slughorn::Atlas::Shape::bearing)
 		.def_readonly("width", &slughorn::Atlas::Shape::width)
 		.def_readonly("height", &slughorn::Atlas::Shape::height)
 		.def_readonly("advance", &slughorn::Atlas::Shape::advance)
 		.def_readonly("stroke_radius", &slughorn::Atlas::Shape::strokeRadius,
 			"ShapeInfo.stroke_radius this shape's bands were built for (0 = ordinary fill)."
 		)
-		.def_readonly("origin_x", &slughorn::Atlas::Shape::originX,
-			"Em-space X offset of the transform origin. "
-			"0 = bottom-left corner (Origin.Default), width/2 = center (Origin.Centered)."
-		)
-		.def_readonly("origin_y", &slughorn::Atlas::Shape::originY,
-			"Em-space Y offset of the transform origin. "
-			"0 = bottom-left corner (Origin.Default), height/2 = center (Origin.Centered)."
-		)
 		.def_readonly("origin", &slughorn::Atlas::Shape::origin,
-			"The ShapeInfo::Origin spec supplied at build time. "
-			"Preserved post-build for diagnostics and computeQuad branching."
+			"The resolved origin: type as supplied at build time, point = em-space offset of the "
+			"transform origin ((0, 0) for Default, (width/2, height/2) for Centered)."
 		)
 
 		.def_property_readonly("sdf", [](const slughorn::Atlas::Shape& shape) {
@@ -1056,7 +1095,7 @@ void bind_core(py::module_& m) {
 			slug_t ox = (s.bandScaleX != 0_cv) ? -s.bandOffsetX / s.bandScaleX : 0_cv;
 			slug_t oy = (s.bandScaleY != 0_cv) ? -s.bandOffsetY / s.bandScaleY : 0_cv;
 
-			return py::make_tuple(ox, oy);
+			return slughorn::Point{ox, oy};
 		}, "Em-space (x, y) of the shape's bottom-left corner. "
 			"Mirrors slug_EmToUV's emOrigin computation."
 		)
@@ -1389,7 +1428,7 @@ void bind_core(py::module_& m) {
 			&slughorn::Atlas::addGradient,
 			"info"_a,
 			"Register a gradient. Returns a 1-based ID (0 = error / atlas already built).\n"
-			"Store the ID in Layer.gradientId to activate the gradient for that layer.\n"
+			"Store the ID in Layer.gradient_id to activate the gradient for that layer.\n"
 			"Must be called before build(). Gradients are rasterized during build()."
 		)
 
@@ -1404,7 +1443,7 @@ void bind_core(py::module_& m) {
 			&slughorn::Atlas::addPattern,
 			"info"_a,
 			"Register a pattern. Returns a 1-based ID (0 = error / atlas already built).\n"
-			"Store the ID in Layer.patternId to activate the pattern for that layer.\n"
+			"Store the ID in Layer.pattern_id to activate the pattern for that layer.\n"
 			"Must be called before build(); the tile shape must be added before build() too."
 		)
 
@@ -1522,12 +1561,19 @@ void bind_core(py::module_& m) {
 			&PyCurveDecomposer::setTolerance,
 			"Flatness threshold for cubic decomposition in curve-space units."
 		)
-		.def("move_to", &PyCurveDecomposer::moveTo, "x"_a, "y"_a)
-		.def("line_to", &PyCurveDecomposer::lineTo, "x3"_a, "y3"_a)
-		.def("quad_to", &PyCurveDecomposer::quadTo,
+		.def("move_to", py::overload_cast<Point>(&PyCurveDecomposer::moveTo), "p"_a)
+		.def("line_to", py::overload_cast<Point>(&PyCurveDecomposer::lineTo), "p"_a)
+		.def("quad_to", py::overload_cast<Point, Point>(&PyCurveDecomposer::quadTo), "c"_a, "p"_a)
+		.def("cubic_to", py::overload_cast<Point, Point, Point>(&PyCurveDecomposer::cubicTo),
+			"c1"_a, "c2"_a, "p"_a
+		)
+		.def("move_to", py::overload_cast<slug_t, slug_t>(&PyCurveDecomposer::moveTo), "x"_a, "y"_a)
+		.def("line_to", py::overload_cast<slug_t, slug_t>(&PyCurveDecomposer::lineTo), "x3"_a, "y3"_a)
+		.def("quad_to", py::overload_cast<slug_t, slug_t, slug_t, slug_t>(&PyCurveDecomposer::quadTo),
 			"cx"_a, "cy"_a, "x3"_a, "y3"_a
 		)
-		.def("cubic_to", &PyCurveDecomposer::cubicTo,
+		.def("cubic_to",
+			py::overload_cast<slug_t, slug_t, slug_t, slug_t, slug_t, slug_t>(&PyCurveDecomposer::cubicTo),
 			"c1x"_a, "c1y"_a, "c2x"_a, "c2y"_a, "x3"_a, "y3"_a
 		)
 		.def("get_curves", &PyCurveDecomposer::getCurves,

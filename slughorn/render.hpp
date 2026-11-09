@@ -142,35 +142,29 @@ struct EmJacobian {
 // is then the segment p1 -> p3, measured directly.
 // ================================================================================================
 
-inline slug_t distanceToCurve(const Atlas::Curve& c, slug_t x, slug_t y) {
-	const slug_t p1x = c.x1 - x, p1y = c.y1 - y;
-	const slug_t ax = c.x2 - c.x1, ay = c.y2 - c.y1;
-	const slug_t cx = c.x1 - 2_cv * c.x2 + c.x3, cy = c.y1 - 2_cv * c.y2 + c.y3;
+inline slug_t distanceToCurve(const Atlas::Curve& c, Point point) {
+	const Point p1 = c.p1() - point;
+	const Point A = c.p2() - c.p1();
+	const Point C = c.p1() - 2_cv * c.p2() + c.p3();
 
-	auto distanceAt = [&](slug_t t) {
-		const slug_t bx = p1x + t * (2_cv * ax + t * cx);
-		const slug_t by = p1y + t * (2_cv * ay + t * cy);
+	auto distanceAt = [&](slug_t t) { return length(p1 + t * (2_cv * A + t * C)); };
 
-		return std::sqrt(bx * bx + by * by);
-	};
-
-	const slug_t cc = cx * cx + cy * cy;
-	const slug_t aa = ax * ax + ay * ay;
+	const slug_t cc = dot(C, C);
+	const slug_t aa = dot(A, A);
 
 	// Degenerate: a segment p1 -> p1 + 2A (or a single point when A is also zero).
 	if(cc <= 1e-12_cv * aa || cc == 0_cv) {
-		const slug_t dx = 2_cv * ax, dy = 2_cv * ay;
-		const slug_t len2 = dx * dx + dy * dy;
-		const slug_t t = len2 > 0_cv ? std::clamp(-(p1x * dx + p1y * dy) / len2, 0_cv, 1_cv) : 0_cv;
-		const slug_t qx = p1x + t * dx, qy = p1y + t * dy;
+		const Point d = 2_cv * A;
+		const slug_t len2 = dot(d, d);
+		const slug_t t = len2 > 0_cv ? std::clamp(-dot(p1, d) / len2, 0_cv, 1_cv) : 0_cv;
 
-		return std::sqrt(qx * qx + qy * qy);
+		return length(p1 + t * d);
 	}
 
 	// Monic cubic t^3 + a t^2 + b t + k, then depressed with t = u - a / 3: u^3 + p u + q = 0.
-	const slug_t a = 3_cv * (ax * cx + ay * cy) / cc;
-	const slug_t b = (2_cv * aa + p1x * cx + p1y * cy) / cc;
-	const slug_t k = (p1x * ax + p1y * ay) / cc;
+	const slug_t a = 3_cv * dot(A, C) / cc;
+	const slug_t b = (2_cv * aa + p1.x * C.x + p1.y * C.y) / cc;
+	const slug_t k = dot(p1, A) / cc;
 	const slug_t p = b - a * a / 3_cv;
 	const slug_t q = 2_cv * a * a * a / 27_cv - a * b / 3_cv + k;
 	const slug_t shift = -a / 3_cv;
@@ -260,14 +254,14 @@ struct Sampler {
 	// Em-space helpers
 	// -------------------------------------------------------------------------
 
-	std::pair<slug_t, slug_t> emOrigin() const {
+	Point emOrigin() const {
 		const slug_t ox = shape.bandScaleX != 0_cv ? -shape.bandOffsetX / shape.bandScaleX : 0_cv;
 		const slug_t oy = shape.bandScaleY != 0_cv ? -shape.bandOffsetY / shape.bandScaleY : 0_cv;
 
 		return {ox, oy};
 	}
 
-	std::pair<slug_t, slug_t> emSize() const {
+	Point emSize() const {
 		const slug_t sx = shape.bandScaleX != 0_cv
 			? cv(Atlas::INDIRECTION_SIZE) / shape.bandScaleX
 			: 0_cv
@@ -300,20 +294,36 @@ struct Sampler {
 	// Coverage evaluation
 	// -------------------------------------------------------------------------
 
+	Sample renderSample(Point r, slug_t ppeX, slug_t ppeY) const {
+		return _renderSample(r, {EmJacobian::fromPixelsPerEm(ppeX, ppeY), ppeX, ppeY});
+	}
+
+	Sample renderSample(Point r, const EmJacobian& em) const {
+		return _renderSample(r, {em, em.ppeX(), em.ppeY()});
+	}
+
+	Sample renderSampleBanded(Point r, slug_t ppeX, slug_t ppeY) const {
+		return _renderSampleBanded(r, {EmJacobian::fromPixelsPerEm(ppeX, ppeY), ppeX, ppeY});
+	}
+
+	Sample renderSampleBanded(Point r, const EmJacobian& em) const {
+		return _renderSampleBanded(r, {em, em.ppeX(), em.ppeY()});
+	}
+
 	Sample renderSample(slug_t rx, slug_t ry, slug_t ppeX, slug_t ppeY) const {
-		return _renderSample(rx, ry, {EmJacobian::fromPixelsPerEm(ppeX, ppeY), ppeX, ppeY});
+		return renderSample({rx, ry}, ppeX, ppeY);
 	}
 
 	Sample renderSample(slug_t rx, slug_t ry, const EmJacobian& em) const {
-		return _renderSample(rx, ry, {em, em.ppeX(), em.ppeY()});
+		return renderSample({rx, ry}, em);
 	}
 
 	Sample renderSampleBanded(slug_t rx, slug_t ry, slug_t ppeX, slug_t ppeY) const {
-		return _renderSampleBanded(rx, ry, {EmJacobian::fromPixelsPerEm(ppeX, ppeY), ppeX, ppeY});
+		return renderSampleBanded({rx, ry}, ppeX, ppeY);
 	}
 
 	Sample renderSampleBanded(slug_t rx, slug_t ry, const EmJacobian& em) const {
-		return _renderSampleBanded(rx, ry, {em, em.ppeX(), em.ppeY()});
+		return renderSampleBanded({rx, ry}, em);
 	}
 
 
@@ -333,14 +343,14 @@ struct Sampler {
 	bool pick(const Transform& transform, slug_t scale, slug_t worldX, slug_t worldY) const {
 		if(curves.empty() || scale == 0_cv) return false;
 
-		const slug_t localX = worldX / scale - transform.x + shape.originX;
-		const slug_t localY = worldY / scale - transform.y + shape.originY;
+		const slug_t localX = worldX / scale - transform.x + shape.origin.point.x;
+		const slug_t localY = worldY / scale - transform.y + shape.origin.point.y;
 
 		// Cheap bbox pre-test in local space, mirroring computeQuad()'s own authored bounds - skips
 		// the curve walk for the overwhelmingly common "nowhere near this layer" case.
 		if(
-			localX < shape.bearingX || localX > shape.bearingX + shape.width ||
-			localY < shape.bearingY - shape.height || localY > shape.bearingY
+			localX < shape.bearing.x || localX > shape.bearing.x + shape.width ||
+			localY < shape.bearing.y - shape.height || localY > shape.bearing.y
 		) return false;
 
 		// No AA ramp wanted for a hit test - a huge "pixels per em" collapses the 1-pixel AA ramp
@@ -348,8 +358,8 @@ struct Sampler {
 		constexpr slug_t INFINITE_PPE = 1e6_cv;
 
 		const auto result = hbandOffsets.size() >= 2
-			? renderSampleBanded(localX, localY, INFINITE_PPE, INFINITE_PPE)
-			: renderSample(localX, localY, INFINITE_PPE, INFINITE_PPE)
+			? renderSampleBanded({localX, localY}, INFINITE_PPE, INFINITE_PPE)
+			: renderSample({localX, localY}, INFINITE_PPE, INFINITE_PPE)
 		;
 
 		return result.fill >= 0.5_cv;
@@ -423,20 +433,20 @@ private:
 		slug_t ppeY;
 	};
 
-	Sample _renderSample(slug_t rx, slug_t ry, const _Pixel& px) const {
-		if(shape.strokeRadius > 0_cv) return _renderStroke(rx, ry, px, false);
+	Sample _renderSample(Point r, const _Pixel& px) const {
+		if(shape.strokeRadius > 0_cv) return _renderStroke(r, px, false);
 
 		Sample out;
 
 		for(const auto& c : curves) {
 			out.iters++;
 
-			const slug_t x1 = c.x1 - rx, y1 = c.y1 - ry;
-			const slug_t x2 = c.x2 - rx, y2 = c.y2 - ry;
-			const slug_t x3 = c.x3 - rx, y3 = c.y3 - ry;
+			const Point p1 = c.p1() - r;
+			const Point p2 = c.p2() - r;
+			const Point p3 = c.p3() - r;
 
-			_addHorizCrossings(out, x1, y1, x2, y2, x3, y3, px);
-			_addVertCrossings(out, x1, y1, x2, y2, x3, y3, px);
+			_addHorizCrossings(out, p1, p2, p3, px);
+			_addVertCrossings(out, p1, p2, p3, px);
 		}
 
 		out.fill = _calcCoverage(out.xcov, out.ycov, out.xwgt, out.ywgt);
@@ -444,35 +454,34 @@ private:
 		return out;
 	}
 
-	Sample _renderSampleBanded(slug_t rx, slug_t ry, const _Pixel& px) const {
-		if(shape.strokeRadius > 0_cv) return _renderStroke(rx, ry, px, true);
+	Sample _renderSampleBanded(Point r, const _Pixel& px) const {
+		if(shape.strokeRadius > 0_cv) return _renderStroke(r, px, true);
 
 		Sample out;
 
 		if(hbandOffsets.size() < 2 || vbandOffsets.size() < 2) return out;
 
-		const uint32_t bandX = _lookupBandIndir(rx * shape.bandScaleX + shape.bandOffsetX, indirX);
-		const uint32_t bandY = _lookupBandIndir(ry * shape.bandScaleY + shape.bandOffsetY, indirY);
+		const uint32_t bandX = _lookupBandIndir(r.x * shape.bandScaleX + shape.bandOffsetX, indirX);
+		const uint32_t bandY = _lookupBandIndir(r.y * shape.bandScaleY + shape.bandOffsetY, indirY);
 
 		auto process = [&](uint32_t ci, bool horizontal) -> bool {
 			out.iters++;
 
 			const auto& c = curves[ci];
-
-			const slug_t x1 = c.x1 - rx, y1 = c.y1 - ry;
-			const slug_t x2 = c.x2 - rx, y2 = c.y2 - ry;
-			const slug_t x3 = c.x3 - rx, y3 = c.y3 - ry;
+			const Point p1 = c.p1() - r;
+			const Point p2 = c.p2() - r;
+			const Point p3 = c.p3() - r;
 
 			if(horizontal) {
-				if(std::max({x1, x2, x3}) * px.ppeX < -_rampReach()) return false;
+				if(std::max({p1.x, p2.x, p3.x}) * px.ppeX < -_rampReach()) return false;
 
-				_addHorizCrossings(out, x1, y1, x2, y2, x3, y3, px);
+				_addHorizCrossings(out, p1, p2, p3, px);
 			}
 
 			else {
-				if(std::max({y1, y2, y3}) * px.ppeY < -_rampReach()) return false;
+				if(std::max({p1.y, p2.y, p3.y}) * px.ppeY < -_rampReach()) return false;
 
-				_addVertCrossings(out, x1, y1, x2, y2, x3, y3, px);
+				_addVertCrossings(out, p1, p2, p3, px);
 			}
 
 			return true;
@@ -509,7 +518,7 @@ private:
 	// strokeRadius (em, fixed at build time). Every band of the chosen axis within half a pixel of
 	// the point is walked, so a curve filed only in a neighboring band still contributes there;
 	// walking a curve twice cannot change the minimum.
-	Sample _renderStroke(slug_t rx, slug_t ry, const _Pixel& px, bool banded) const {
+	Sample _renderStroke(Point r, const _Pixel& px, bool banded) const {
 		Sample out;
 
 		const slug_t radius = shape.strokeRadius;
@@ -521,15 +530,15 @@ private:
 			for(const auto& c : curves) {
 				out.iters++;
 
-				d = std::min(d, distanceToCurve(c, rx, ry));
+				d = std::min(d, distanceToCurve(c, r));
 			}
 		}
 
 		else {
 			if(hbandOffsets.size() < 2 || vbandOffsets.size() < 2) return out;
 
-			const uint32_t bandX = _lookupBandIndir(rx * shape.bandScaleX + shape.bandOffsetX, indirX);
-			const uint32_t bandY = _lookupBandIndir(ry * shape.bandScaleY + shape.bandOffsetY, indirY);
+			const uint32_t bandX = _lookupBandIndir(r.x * shape.bandScaleX + shape.bandOffsetX, indirX);
+			const uint32_t bandY = _lookupBandIndir(r.y * shape.bandScaleY + shape.bandOffsetY, indirY);
 
 			if(bandY + 1 >= hbandOffsets.size() || bandX + 1 >= vbandOffsets.size()) return out;
 
@@ -538,10 +547,10 @@ private:
 			const bool horizontal = hcount <= vcount;
 			const auto& offsets = horizontal ? hbandOffsets : vbandOffsets;
 			const auto& indices = horizontal ? hbandIndices : vbandIndices;
-			const slug_t cutoff = (horizontal ? rx : ry) - radius - emPerPixel;
+			const slug_t cutoff = (horizontal ? r.x : r.y) - radius - emPerPixel;
 
 			// The band axis is perpendicular to the sort axis: h-bands slice y, v-bands slice x.
-			const slug_t coord = horizontal ? ry : rx;
+			const slug_t coord = horizontal ? r.y : r.x;
 			const slug_t bandScale = horizontal ? shape.bandScaleY : shape.bandScaleX;
 			const slug_t bandOffset = horizontal ? shape.bandOffsetY : shape.bandOffsetX;
 			const auto& indir = horizontal ? indirY : indirX;
@@ -561,7 +570,7 @@ private:
 
 					out.iters++;
 
-					d = std::min(d, distanceToCurve(c, rx, ry));
+					d = std::min(d, distanceToCurve(c, r));
 				}
 			}
 		}
@@ -611,56 +620,44 @@ private:
 		return b >= 0_cv ? std::pair{tNear, tFar} : std::pair{tFar, tNear};
 	}
 
-	// One ray crossing: r is the root's signed distance along the ray's axis (em units);
-	// (tx, ty) is the curve's tangent direction there, B'(t) / 2 = a * t - b, unnormalized.
+	// One ray crossing: r is the root's signed distance along the ray's axis (em units); tangent is
+	// the curve's direction there, B'(t) / 2 = a * t - b, unnormalized.
 	struct Crossing {
 		slug_t r;
-		slug_t tx;
-		slug_t ty;
+		Point tangent;
 	};
 
-	static std::pair<Crossing, Crossing> _solveHorizPoly(
-		slug_t x1, slug_t y1,
-		slug_t x2, slug_t y2,
-		slug_t x3, slug_t y3
-	) {
-		const slug_t ax = x1 - 2_cv * x2 + x3, ay = y1 - 2_cv * y2 + y3;
-		const slug_t bx = x1 - x2, by = y1 - y2;
+	// p1, p2, p3 are the curve's points relative to the sample.
+	static std::pair<Crossing, Crossing> _solveHorizPoly(Point p1, Point p2, Point p3) {
+		const Point a = p1 - 2_cv * p2 + p3;
+		const Point b = p1 - p2;
 
-		auto at = [&](slug_t t) {
-			return Crossing{(ax * t - 2_cv * bx) * t + x1, ax * t - bx, ay * t - by};
-		};
+		auto at = [&](slug_t t) { return Crossing{(a.x * t - 2_cv * b.x) * t + p1.x, a * t - b}; };
 
-		if(std::abs(ay) < EPS) {
-			const auto c = at(std::abs(by) >= EPS ? y1 * (0.5_cv / by) : 0_cv);
+		if(std::abs(a.y) < EPS) {
+			const auto c = at(std::abs(b.y) >= EPS ? p1.y * (0.5_cv / b.y) : 0_cv);
 
 			return {c, c};
 		}
 
-		const auto [t1, t2] = _solveRoots(ay, by, y1);
+		const auto [t1, t2] = _solveRoots(a.y, b.y, p1.y);
 
 		return {at(t1), at(t2)};
 	}
 
-	static std::pair<Crossing, Crossing> _solveVertPoly(
-		slug_t x1, slug_t y1,
-		slug_t x2, slug_t y2,
-		slug_t x3, slug_t y3
-	) {
-		const slug_t ax = x1 - 2_cv * x2 + x3, ay = y1 - 2_cv * y2 + y3;
-		const slug_t bx = x1 - x2, by = y1 - y2;
+	static std::pair<Crossing, Crossing> _solveVertPoly(Point p1, Point p2, Point p3) {
+		const Point a = p1 - 2_cv * p2 + p3;
+		const Point b = p1 - p2;
 
-		auto at = [&](slug_t t) {
-			return Crossing{(ay * t - 2_cv * by) * t + y1, ax * t - bx, ay * t - by};
-		};
+		auto at = [&](slug_t t) { return Crossing{(a.y * t - 2_cv * b.y) * t + p1.y, a * t - b}; };
 
-		if(std::abs(ax) < EPS) {
-			const auto c = at(std::abs(bx) >= EPS ? x1 * (0.5_cv / bx) : 0_cv);
+		if(std::abs(a.x) < EPS) {
+			const auto c = at(std::abs(b.x) >= EPS ? p1.x * (0.5_cv / b.x) : 0_cv);
 
 			return {c, c};
 		}
 
-		const auto [t1, t2] = _solveRoots(ax, bx, x1);
+		const auto [t1, t2] = _solveRoots(a.x, b.x, p1.x);
 
 		return {at(t1), at(t2)};
 	}
@@ -677,8 +674,8 @@ private:
 	slug_t _rampScale(const Crossing& c, bool horizontal, const _Pixel& px) const {
 		if(aaRamp == AARamp::Axis) return 1_cv;
 
-		const slug_t nx = c.ty;
-		const slug_t ny = -c.tx;
+		const slug_t nx = c.tangent.y;
+		const slug_t ny = -c.tangent.x;
 		const slug_t acrossX = std::abs(nx * px.em.dxX + ny * px.em.dxY);
 		const slug_t acrossY = std::abs(nx * px.em.dyX + ny * px.em.dyY);
 		const slug_t across = (acrossX + acrossY) * (horizontal ? px.ppeX : px.ppeY);
@@ -694,18 +691,12 @@ private:
 		return aaRamp == AARamp::Axis ? 0.5_cv : 0.5_cv / EDGE_SCALE_FLOOR;
 	}
 
-	void _addHorizCrossings(
-		Sample& out,
-		slug_t x1, slug_t y1,
-		slug_t x2, slug_t y2,
-		slug_t x3, slug_t y3,
-		const _Pixel& px
-	) const {
-		const uint32_t code = _calcRootCode(y1, y2, y3);
+	void _addHorizCrossings(Sample& out, Point p1, Point p2, Point p3, const _Pixel& px) const {
+		const uint32_t code = _calcRootCode(p1.y, p2.y, p3.y);
 
 		if(!code) return;
 
-		const auto [c1, c2] = _solveHorizPoly(x1, y1, x2, y2, x3, y3);
+		const auto [c1, c2] = _solveHorizPoly(p1, p2, p3);
 
 		if(code & 0x01u) {
 			const slug_t r = c1.r * px.ppeX;
@@ -722,18 +713,12 @@ private:
 		}
 	}
 
-	void _addVertCrossings(
-		Sample& out,
-		slug_t x1, slug_t y1,
-		slug_t x2, slug_t y2,
-		slug_t x3, slug_t y3,
-		const _Pixel& px
-	) const {
-		const uint32_t code = _calcRootCode(x1, x2, x3);
+	void _addVertCrossings(Sample& out, Point p1, Point p2, Point p3, const _Pixel& px) const {
+		const uint32_t code = _calcRootCode(p1.x, p2.x, p3.x);
 
 		if(!code) return;
 
-		const auto [c1, c2] = _solveVertPoly(x1, y1, x2, y2, x3, y3);
+		const auto [c1, c2] = _solveVertPoly(p1, p2, p3);
 
 		if(code & 0x01u) {
 			const slug_t r = c1.r * px.ppeY;
@@ -968,7 +953,7 @@ struct Field {
 
 	slug_t range = 0_cv; // em-space half-range this field was baked with
 	slug_t texelsPerEm = 0_cv;
-	slug_t emOriginX = 0_cv, emOriginY = 0_cv; // em-space point at the bottom-left corner
+	Point emOrigin = {}; // em-space point at the bottom-left corner
 
 	std::vector<float> data = {}; // row-major, `channels` floats per texel
 
@@ -1065,7 +1050,7 @@ inline Field strokeField(
 
 			slug_t d = std::numeric_limits<slug_t>::max();
 
-			for(const auto& c : curves) d = std::min(d, distanceToCurve(c, x, y));
+			for(const auto& c : curves) d = std::min(d, distanceToCurve(c, {x, y}));
 
 			const float v = std::clamp(
 				static_cast<float>(0.5_cv + (strokeRadius - d) / (2_cv * range)),
@@ -1082,8 +1067,7 @@ inline Field strokeField(
 	out.width = w;
 	out.height = h;
 	out.texelsPerEm = static_cast<slug_t>(scale);
-	out.emOriginX = static_cast<slug_t>(l);
-	out.emOriginY = static_cast<slug_t>(b);
+	out.emOrigin = {static_cast<slug_t>(l), static_cast<slug_t>(b)};
 	out.data = std::move(buf);
 
 	return out;
@@ -1175,8 +1159,7 @@ inline Field field(
 	out.width = w;
 	out.height = h;
 	out.texelsPerEm = static_cast<slug_t>(scale);
-	out.emOriginX = static_cast<slug_t>(bounds.l);
-	out.emOriginY = static_cast<slug_t>(bounds.b);
+	out.emOrigin = {static_cast<slug_t>(bounds.l), static_cast<slug_t>(bounds.b)};
 	out.data = std::move(buf);
 
 	return out;

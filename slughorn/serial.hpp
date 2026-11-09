@@ -562,14 +562,12 @@ json buildJson(
 			{"band_scale_y", shape.bandScaleY},
 			{"band_offset_x",shape.bandOffsetX},
 			{"band_offset_y",shape.bandOffsetY},
-			{"bearing_x", shape.bearingX},
-			{"bearing_y", shape.bearingY},
+			{"bearing_x", shape.bearing.x},
+			{"bearing_y", shape.bearing.y},
 			{"width", shape.width},
 			{"height", shape.height},
 			{"advance", shape.advance},
-			{"origin_x", shape.originX},
-			{"origin_y", shape.originY},
-			{"origin", {{"type", originType}, {"x", shape.origin.x}, {"y", shape.origin.y}}}
+			{"origin", {{"type", originType}, {"x", shape.origin.point.x}, {"y", shape.origin.point.y}}}
 		};
 
 		// Written only for stroke shapes; a missing key reads back as 0 (an ordinary fill).
@@ -583,8 +581,8 @@ json buildJson(
 				{"h", shape.sdf->h},
 				{"range", shape.sdf->range},
 				{"texels_per_em", shape.sdf->texelsPerEm},
-				{"em_origin_x", shape.sdf->emOriginX},
-				{"em_origin_y", shape.sdf->emOriginY}
+				{"em_origin_x", shape.sdf->emOrigin.x},
+				{"em_origin_y", shape.sdf->emOrigin.y}
 			};
 		}
 
@@ -762,13 +760,10 @@ Atlas atlasFromJson(
 		shape.bandScaleY = js.at("band_scale_y");
 		shape.bandOffsetX= js.at("band_offset_x");
 		shape.bandOffsetY= js.at("band_offset_y");
-		shape.bearingX = js.at("bearing_x");
-		shape.bearingY = js.at("bearing_y");
+		shape.bearing = {js.at("bearing_x").get<slug_t>(), js.at("bearing_y").get<slug_t>()};
 		shape.width = js.at("width");
 		shape.height = js.at("height");
 		shape.advance = js.at("advance");
-		shape.originX = js.value("origin_x", 0_cv);
-		shape.originY = js.value("origin_y", 0_cv);
 		shape.strokeRadius = js.value("stroke_radius", 0_cv);
 
 		if(js.contains("sdf")) {
@@ -781,8 +776,7 @@ Atlas atlasFromJson(
 				.h = jt.at("h").get<uint32_t>(),
 				.range = jt.at("range").get<slug_t>(),
 				.texelsPerEm = jt.at("texels_per_em").get<slug_t>(),
-				.emOriginX = jt.at("em_origin_x").get<slug_t>(),
-				.emOriginY = jt.at("em_origin_y").get<slug_t>()
+				.emOrigin = {jt.at("em_origin_x").get<slug_t>(), jt.at("em_origin_y").get<slug_t>()}
 			};
 		}
 
@@ -794,7 +788,13 @@ Atlas atlasFromJson(
 				t == "Pivot"    ? Atlas::ShapeInfo::Origin::Type::Pivot    :
 				t == "Custom"   ? Atlas::ShapeInfo::Origin::Type::Custom   :
 				                  Atlas::ShapeInfo::Origin::Type::Default;
-			shape.origin = Atlas::ShapeInfo::Origin(ot, jo.value("x", 0_cv), jo.value("y", 0_cv));
+			shape.origin = Atlas::ShapeInfo::Origin(ot, {jo.value("x", 0_cv), jo.value("y", 0_cv)});
+		}
+
+		// Files written before "origin" held the resolved point stored it as origin_x/origin_y
+		// (and "origin" x/y held the unresolved request).
+		if(js.contains("origin_x")) {
+			shape.origin.point = {js.at("origin_x").get<slug_t>(), js.value("origin_y", 0_cv)};
 		}
 
 		sd.shapes[key] = shape;

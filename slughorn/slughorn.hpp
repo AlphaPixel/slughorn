@@ -148,15 +148,66 @@ concept Numeric = std::integral<T> || std::floating_point<T>;
 inline constexpr slug_t PI_CV = cv(std::numbers::pi_v<slug_t>);
 inline constexpr slug_t PI_2_CV = cv(std::numbers::pi_v<slug_t> / 2_cv);
 
+// ================================================================================================
+// Point
+//
+// The common 2-value (slug_t) primitive used throughout slughorn. The operators and free functions
+// below are the common vector arithmetic; `==` is exact, and a tolerant comparison is always an
+// explicit coincident().
+//
+// NOTE: I opted for "free functions" below (as opposed to methods) to keep parity with GLSL!
+// ================================================================================================
+struct Point {
+	slug_t x = 0_cv;
+	slug_t y = 0_cv;
+
+	Point& operator+=(Point b) { x += b.x; y += b.y; return *this; }
+	Point& operator-=(Point b) { x -= b.x; y -= b.y; return *this; }
+	Point& operator*=(slug_t s) { x *= s; y *= s; return *this; }
+	Point& operator/=(slug_t s) { x /= s; y /= s; return *this; }
+
+	bool operator==(const Point&) const = default;
+};
+
+inline Point operator+(Point a, Point b) { return {a.x + b.x, a.y + b.y}; }
+inline Point operator-(Point a, Point b) { return {a.x - b.x, a.y - b.y}; }
+inline Point operator-(Point a) { return {-a.x, -a.y}; }
+inline Point operator*(Point a, slug_t s) { return {a.x * s, a.y * s}; }
+inline Point operator*(slug_t s, Point a) { return {a.x * s, a.y * s}; }
+inline Point operator/(Point a, slug_t s) { return {a.x / s, a.y / s}; }
+
+inline slug_t dot(Point a, Point b) { return a.x * b.x + a.y * b.y; }
+
+// The z component of the 3D cross product: positive when b is counterclockwise from a.
+inline slug_t cross(Point a, Point b) { return a.x * b.y - a.y * b.x; }
+
+inline slug_t lengthSquared(Point a) { return dot(a, a); }
+inline slug_t length(Point a) { return std::sqrt(dot(a, a)); }
+
+// `a` rotated 90 degrees counterclockwise: the left-hand normal of a direction.
+inline Point perp(Point a) { return {-a.y, a.x}; }
+
+// `a` scaled to unit length; a zero-length `a` is returned unchanged.
+inline Point normalize(Point a) {
+	const slug_t len = length(a);
+
+	return len > 0_cv ? a / len : a;
+}
+
+inline Point lerp(Point a, Point b, slug_t t) { return a + (b - a) * t; }
+
+// The midpoint of `a` and `b`.
+inline Point mid(Point a, Point b) { return (a + b) * 0.5_cv; }
+
 // Whether two points are the same up to float rounding, in data whose largest absolute coordinate
 // is `extent`. Float spacing is relative to magnitude, and a point's rounding error follows the
 // magnitudes it was computed from (the whole path's, through the same transforms), not its own;
 // so the tolerance is 1e-5 * extent, about 80 float steps of the largest coordinate, with an
 // absolute floor of 1e-5 for em-space data.
-inline bool coincident(slug_t ax, slug_t ay, slug_t bx, slug_t by, slug_t extent) {
+inline bool coincident(Point a, Point b, slug_t extent) {
 	const slug_t tolerance = 1e-5_cv * std::max(1_cv, extent);
 
-	return std::abs(ax - bx) <= tolerance && std::abs(ay - by) <= tolerance;
+	return std::abs(a.x - b.x) <= tolerance && std::abs(a.y - b.y) <= tolerance;
 }
 
 // ================================================================================================
@@ -194,7 +245,7 @@ struct Matrix {
 	slug_t dx = 0_cv, dy = 0_cv; // translation
 
 	static Matrix identity() { return {}; }
-	static Matrix translate(slug_t tx, slug_t ty) { return { .dx = tx, .dy = ty }; }
+	static Matrix translate(Point t) { return { .dx = t.x, .dy = t.y }; }
 	static Matrix scale(slug_t sx, slug_t sy) { return { .xx = sx, .yy = sy }; }
 	static Matrix rotate(slug_t angle) {
 		const slug_t c = std::cos(angle), s = std::sin(angle);
@@ -215,12 +266,9 @@ struct Matrix {
 		;
 	}
 
-	// Apply this matrix to a point.
-	//
-	// TODO: Investigate some operator overload instead!
-	void apply(slug_t x, slug_t y, slug_t& xo, slug_t& yo) const {
-		xo = xx * x + xy * y + dx;
-		yo = yx * x + yy * y + dy;
+	// Apply this matrix to a point (also `matrix * point`).
+	Point apply(Point p) const {
+		return {xx * p.x + xy * p.y + dx, yx * p.x + yy * p.y + dy};
 	}
 
 	// The inverse transform, or std::nullopt when the matrix is singular.
@@ -244,6 +292,8 @@ struct Matrix {
 
 		return m;
 	}
+
+	Point operator*(Point p) const { return apply(p); }
 
 	// Concatenate: returns (this * rhs), i.e. rhs is applied first.
 	Matrix operator*(const Matrix& rhs) const {
@@ -628,70 +678,70 @@ struct Mask {
 		};
 	}
 
-	static Mask circle(slug_t cx, slug_t cy, slug_t r, bool inv=false) {
+	static Mask circle(Point c, slug_t r, bool inv=false) {
 		return {
 			.type = Type::Circle,
-			.params = { cx, cy, r },
+			.params = { c.x, c.y, r },
 			.invert = inv,
 		};
 	}
 
-	static Mask rect(slug_t x, slug_t y, slug_t w, slug_t h, bool inv=false) {
+	static Mask rect(Point p, slug_t w, slug_t h, bool inv=false) {
 		return {
 			.type = Type::Rect,
-			.params = { x, y, w, h },
+			.params = { p.x, p.y, w, h },
 			.invert = inv,
 		};
 	}
 
-	static Mask capsule(slug_t ax, slug_t ay, slug_t bx, slug_t by, slug_t r, bool inv=false) {
+	static Mask capsule(Point a, Point b, slug_t r, bool inv=false) {
 		return {
 			.type = Type::Capsule,
-			.params = { ax, ay, bx, by, r },
+			.params = { a.x, a.y, b.x, b.y, r },
 			.invert = inv,
 		};
 	}
 
-	static Mask arc(slug_t cx, slug_t cy, slug_t r, slug_t a0, slug_t a1, bool inv=false) {
+	static Mask arc(Point c, slug_t r, slug_t a0, slug_t a1, bool inv=false) {
 		return {
 			.type = Type::Arc,
-			.params = { cx, cy, r, a0, a1 },
+			.params = { c.x, c.y, r, a0, a1 },
 			.invert = inv,
 		};
 	}
 
-	static Mask arcBand(slug_t cx, slug_t cy, slug_t r, slug_t a0, slug_t a1, slug_t rb, bool inv=false) {
+	static Mask arcBand(Point c, slug_t r, slug_t a0, slug_t a1, slug_t rb, bool inv=false) {
 		return {
 			.type = Type::ArcBand,
-			.params = { cx, cy, r, a0, a1, rb },
+			.params = { c.x, c.y, r, a0, a1, rb },
 			.invert = inv,
 		};
 	}
 
-	static Mask hexagon(slug_t cx, slug_t cy, slug_t r, slug_t rotation=0_cv, bool inv=false) {
+	static Mask hexagon(Point c, slug_t r, slug_t rotation=0_cv, bool inv=false) {
 		return {
 			.type = Type::Hexagon,
-			.params = { cx, cy, r, rotation },
+			.params = { c.x, c.y, r, rotation },
 			.invert = inv,
 		};
 	}
 
-	static Mask octagon(slug_t cx, slug_t cy, slug_t r, slug_t rotation=0_cv, bool inv=false) {
+	static Mask octagon(Point c, slug_t r, slug_t rotation=0_cv, bool inv=false) {
 		return {
 			.type = Type::Octagon,
-			.params = { cx, cy, r, rotation },
+			.params = { c.x, c.y, r, rotation },
 			.invert = inv,
 		};
 	}
 
 	static Mask star(
-		slug_t cx, slug_t cy, slug_t r,
+		Point c, slug_t r,
 		slug_t points, slug_t innerRatio, slug_t rotation=0_cv,
 		bool inv=false
 	) {
 		return {
 			.type = Type::Star,
-			.params = { cx, cy, r, points, innerRatio, rotation },
+			.params = { c.x, c.y, r, points, innerRatio, rotation },
 			.invert = inv,
 		};
 	}
@@ -939,7 +989,29 @@ public:
 		slug_t x1, y1; // start point
 		slug_t x2, y2; // off-curve control point
 		slug_t x3, y3; // end point
+
+		// A quadratic from start `a` through control `c` to end `b`.
+		static Curve quad(Point a, Point c, Point b) { return {a.x, a.y, c.x, c.y, b.x, b.y}; }
+
+		// A straight segment: the control point duplicates the end point, which keeps the
+		// quadratic coefficient exactly zero (a midpoint control point leaves it at rounding
+		// noise).
+		static Curve line(Point a, Point b) { return quad(a, b, b); }
+
+		Point p1() const { return {x1, y1}; }
+		Point p2() const { return {x2, y2}; }
+		Point p3() const { return {x3, y3}; }
+
+		void setP1(Point p) { x1 = p.x; y1 = p.y; }
+		void setP2(Point p) { x2 = p.x; y2 = p.y; }
+		void setP3(Point p) { x3 = p.x; y3 = p.y; }
+
+		// The same curve traversed from end to start.
+		Curve reversed() const { return quad(p3(), p2(), p1()); }
 	};
+
+	// Curves are packed into GPU textures and serialized as six consecutive scalars.
+	static_assert(sizeof(Curve) == 6 * sizeof(slug_t));
 
 	using Curves = std::vector<Curve>;
 	using Contours = std::vector<Curves>;
@@ -969,7 +1041,7 @@ public:
 
 		bool autoMetrics = true;
 
-		slug_t bearingX = 0, bearingY = 0;
+		Point bearing = {};
 		slug_t width = 0, height = 0;
 		slug_t advance = 0;
 
@@ -996,10 +1068,10 @@ public:
 		// Origin() - Default: bbox corner (existing behavior).
 		// Origin(Type) - type-only: Centered, or any future named variant (UpperLeft, etc.)
 		// that needs no explicit coordinates.
-		// Origin(px, py) - Custom: caller-specified pivot in authoring space; unambiguously
-		// Custom because no other variant takes coordinates.
+		// Origin(p) - Pivot: caller-specified pivot in authoring space.
+		// Origin(Type, p) - an explicit type plus coordinates (Pivot or Custom).
 		//
-		// Layer::transform.dx/dy will equal (px, py) scaled to em-space,
+		// Layer::transform.dx/dy will equal p scaled to em-space,
 		// giving the GPU the correct rotation pivot.
 		struct Origin {
 			// Default - quad placed at bbox corner; originData = (0, 0).
@@ -1014,14 +1086,14 @@ public:
 
 			Type type;
 
-			slug_t x, y;
+			Point point;
 
-			Origin(): type(Type::Default), x(0_cv), y(0_cv) {}
-			Origin(Type t): type(t), x(0_cv), y(0_cv) {}
-			Origin(slug_t px, slug_t py): type(Type::Pivot), x(px), y(py) {}
-			Origin(Type t, slug_t px, slug_t py): type(t), x(px), y(py) {}
+			Origin(): type(Type::Default), point() {}
+			Origin(Type t): type(t), point() {}
+			Origin(Point p): type(Type::Pivot), point(p) {}
+			Origin(Type t, Point p): type(t), point(p) {}
 
-			bool operator==(const Origin& o) const { return type == o.type && x == o.x && y == o.y; }
+			bool operator==(const Origin& o) const { return type == o.type && point == o.point; }
 			bool operator!=(const Origin& o) const { return !(*this == o); }
 		};
 
@@ -1099,7 +1171,7 @@ public:
 	//
 	// - ONE uniform scale, `texelsPerEm` (tiles keep the shape's aspect ratio).
 	//
-	// - (emOriginX, emOriginY) is the em-space point at the tile's bottom-left corner, so a point
+	// - emOrigin is the em-space point at the tile's bottom-left corner, so a point
 	// maps to texel (em - emOrigin) * texelsPerEm within the tile.
 	//
 	// - values are clamped to [0, 1]: edge = 0.5, interior > 0.5. A distance of +/- `range` em
@@ -1147,7 +1219,7 @@ public:
 			slug_t range = 0_cv;
 
 			slug_t texelsPerEm = 0_cv;
-			slug_t emOriginX = 0_cv, emOriginY = 0_cv;
+			Point emOrigin = {};
 
 			// Total distance range in texels (the "pixelRange" msdfgen speaks of).
 			slug_t pixelRange() const { return 2_cv * range * texelsPerEm; }
@@ -1201,21 +1273,19 @@ public:
 
 		// Metrics in em-space (normalized to the font's em square, or to the
 		// bounding box of the curves when autoMetrics = true)
-		slug_t bearingX = 0, bearingY = 0;
+		Point bearing = {};
 		slug_t width = 0, height = 0;
 		slug_t advance = 0;
-
-		// Em-space pivot offset. Shader reads this as the rotation/effect origin.
-		// Computed from ShapeInfo::Origin during build(); see `origin` below for the input spec.
-		slug_t originX = 0_cv, originY = 0_cv;
 
 		// ShapeInfo::strokeRadius: the maximum half width this shape's bands were built for
 		// (0 = an ordinary fill).
 		slug_t strokeRadius = 0_cv;
 
-		// The origin spec supplied by the caller at addShape()/canvas time.
-		// Preserved post-build for diagnostics (slughorn info) and for computeQuad
-		// branching (Task 0 clean fix: Custom must not subtract originX/Y from transform).
+		// The resolved origin: `type` is the ShapeInfo::Origin type supplied at addShape()/canvas
+		// time, `point` is the em-space offset of the transform origin that computeQuad()
+		// subtracts and the shader reads as the rotation/effect origin: (0, 0) for Default,
+		// (width/2, height/2) for Centered, the em-space point for Pivot, the raw user value for
+		// Custom.
 		ShapeInfo::Origin origin;
 
 		// Scanline Sweeper: start texel and curve count in the scanline curve texture.
@@ -1256,14 +1326,14 @@ public:
 		// The returned quad is relative to (0,0) - scene placement is the
 		// caller's responsibility (e.g. osg::MatrixTransform).
 		Quad computeQuad(const Transform& transform, slug_t scale=1_cv) const {
-			const slug_t ox = (transform.x - originX) * scale;
-			const slug_t oy = (transform.y - originY) * scale;
+			const slug_t ox = (transform.x - origin.point.x) * scale;
+			const slug_t oy = (transform.y - origin.point.y) * scale;
 
 			return {
-				ox + bearingX * scale,
-				oy + (bearingY - height) * scale,
-				ox + (bearingX + width) * scale,
-				oy + bearingY * scale
+				ox + bearing.x * scale,
+				oy + (bearing.y - height) * scale,
+				ox + (bearing.x + width) * scale,
+				oy + bearing.y * scale
 			};
 		}
 	};
@@ -1570,7 +1640,7 @@ public:
 	// equals that advance and height/bearingY are the union of all shapes. When advances
 	// differ, the cell is the axis-aligned union of all per-shape bounding boxes.
 	//
-	// Only the layout fields (bearingX/Y, width, height, advance) are updated. Per-shape
+	// Only the layout fields (bearing, width, height, advance) are updated. Per-shape
 	// band transforms (bandScale*, bandOffset*, bandMax*) are left intact; the GPU quad
 	// is determined by the shared metrics while each shape's coverage is still computed
 	// from its own band data. This is the correct invariant for setLayerShapeIndex cycling.
@@ -1583,11 +1653,11 @@ public:
 	// if not, this is a no-op.
 	//
 	// Use this when a shape must cover a known em-space extent; e.g. for GPU tiling where
-	// emCoords must span exactly [0,1]x[0,1]: call setShapeMetrics(key, 0, 1, 1, 1).
+	// emCoords must span exactly [0,1]x[0,1]: call setShapeMetrics(key, {0, 1}, 1, 1).
 	//
-	// Only the layout fields (bearingX/Y, width, height) are updated. Band transforms and
+	// Only the layout fields (bearing, width, height) are updated. Band transforms and
 	// advance are left intact.
-	void setShapeMetrics(const Key& key, slug_t bearingX, slug_t bearingY, slug_t width, slug_t height);
+	void setShapeMetrics(const Key& key, Point bearing, slug_t width, slug_t height);
 #endif
 
 	// --------------------------------------------------------------------------------------------
@@ -1800,10 +1870,9 @@ private:
 //
 // Returns Matrix::identity() for degenerate (zero-length) inputs.
 // ================================================================================================
-inline Matrix buildLinearGradientMatrix(slug_t x0, slug_t y0, slug_t x1, slug_t y1) {
-	const slug_t dx = x1 - x0;
-	const slug_t dy = y1 - y0;
-	const slug_t lenSq = dx * dx + dy * dy;
+inline Matrix buildLinearGradientMatrix(Point p0, Point p1) {
+	const Point d = p1 - p0;
+	const slug_t lenSq = lengthSquared(d);
 
 	if(lenSq < 1e-12_cv) return Matrix::identity();
 
@@ -1811,9 +1880,9 @@ inline Matrix buildLinearGradientMatrix(slug_t x0, slug_t y0, slug_t x1, slug_t 
 
 	// yx, yy, dy are unused for linear gradient t computation
 	return {
-		.xx = dx * invLenSq,
-		.xy = dy * invLenSq,
-		.dx = -(x0 * dx + y0 * dy) * invLenSq,
+		.xx = d.x * invLenSq,
+		.xy = d.y * invLenSq,
+		.dx = -dot(p0, d) * invLenSq,
 	};
 }
 
@@ -1832,8 +1901,8 @@ inline Matrix buildLinearGradientMatrix(slug_t x0, slug_t y0, slug_t x1, slug_t 
 // Shader formula: t = length(emCoord - center) * invDR - r0 * invDR
 //                   = (length(emCoord - center) - r0) / (r1 - r0), clamped to [0, 1].
 // ================================================================================================
-inline Matrix buildRadialGradientMatrix(slug_t cx, slug_t cy, slug_t r1) {
-	return { .xx = r1, .dx = cx, .dy = cy };
+inline Matrix buildRadialGradientMatrix(Point c, slug_t r1) {
+	return { .xx = r1, .dx = c.x, .dy = c.y };
 }
 
 // ================================================================================================
@@ -1851,7 +1920,7 @@ inline Matrix buildRadialGradientMatrix(slug_t cx, slug_t cy, slug_t r1) {
 // Canvas/FreeType circular radials continue to use buildRadialGradientMatrix.
 // ================================================================================================
 inline Matrix buildAffineRadialGradientMatrix(
-	slug_t cx, slug_t cy,
+	Point c,
 	slug_t b00, slug_t b01,
 	slug_t b10, slug_t b11
 ) {
@@ -1860,8 +1929,8 @@ inline Matrix buildAffineRadialGradientMatrix(
 		.yx = b10,
 		.xy = b01,
 		.yy = b11,
-		.dx = cx,
-		.dy = cy,
+		.dx = c.x,
+		.dy = c.y,
 	};
 }
 
@@ -1883,8 +1952,8 @@ inline Matrix buildAffineRadialGradientMatrix(
 // For a seam-free full-circle gradient, use startAngle = -a and arcSpan = 2a. atan2 returns
 // values in [-a, a], which exactly covers the sweep, so t goes cleanly from 0 to 1.
 // ================================================================================================
-inline Matrix buildSweepGradientMatrix(slug_t cx, slug_t cy, slug_t startAngle, slug_t arcSpan) {
-	return { .xx = startAngle, .xy = arcSpan, .dx = cx, .dy = cy };
+inline Matrix buildSweepGradientMatrix(Point c, slug_t startAngle, slug_t arcSpan) {
+	return { .xx = startAngle, .xy = arcSpan, .dx = c.x, .dy = c.y };
 }
 
 // ================================================================================================
@@ -1926,44 +1995,40 @@ struct CurveDecomposer {
 	// em-normalized [0,1] geometry.
 	slug_t tolerance = TOLERANCE_EXACT;
 
-	slug_t _x = 0_cv;
-	slug_t _y = 0_cv;
-	slug_t _sx = 0_cv;
-	slug_t _sy = 0_cv;
+	// The current point and the current subpath's start.
+	Point _pen = {};
+	Point _start = {};
 
 	CurveDecomposer(Atlas::Curves& c): curves(c) {}
 
-	void moveTo(slug_t x, slug_t y) {
-		_requireFinite({x, y});
+	void moveTo(Point p) {
+		_requireFinite({p});
 
-		_x = _sx = x;
-		_y = _sy = y;
+		_pen = _start = p;
 	}
 
-	void lineTo(slug_t x3, slug_t y3) {
-		_requireFinite({x3, y3});
+	// The control point duplicates the endpoint rather than sitting at the exact midpoint. A
+	// midpoint control point makes the shader's quadratic coefficient degenerate to (near-)zero,
+	// which is numerically unstable to solve for directly - rounding noise in the stored midpoint
+	// (worse at reduced precision, e.g. RGBA16F curve textures, but present at any precision) can
+	// push it just past the "treat as linear" epsilon and into the fragile branch, producing
+	// visible jaggies on straight edges under zoom. Duplicating the endpoint keeps the coefficient
+	// robustly non-zero instead. Matches the reference Slug implementation's documented convention
+	// (github.com/EricLengyel/Slug).
+	void lineTo(Point p) {
+		_requireFinite({p});
 
-		// Control point duplicates the endpoint rather than sitting at the exact midpoint.
-		// A midpoint control point makes the shader's quadratic coefficient degenerate to
-		// (near-)zero, which is numerically unstable to solve for directly - rounding noise
-		// in the stored midpoint (worse at reduced precision, e.g. RGBA16F curve textures, but
-		// present at any precision) can push it just past the "treat as linear" epsilon and
-		// into the fragile branch, producing visible jaggies on straight edges under zoom.
-		// Duplicating the endpoint keeps the coefficient robustly non-zero instead. Matches the
-		// reference Slug implementation's documented convention (github.com/EricLengyel/Slug).
-		curves.push_back({_x, _y, x3, y3, x3, y3});
+		curves.push_back(Atlas::Curve::line(_pen, p));
 
-		_x = x3;
-		_y = y3;
+		_pen = p;
 	}
 
-	void quadTo(slug_t cx, slug_t cy, slug_t x3, slug_t y3) {
-		_requireFinite({cx, cy, x3, y3});
+	void quadTo(Point c, Point p) {
+		_requireFinite({c, p});
 
-		curves.push_back({_x, _y, cx, cy, x3, y3});
+		curves.push_back(Atlas::Curve::quad(_pen, c, p));
 
-		_x = x3;
-		_y = y3;
+		_pen = p;
 	}
 
 	// Adaptive cubic -> quadratic decomposition via De Casteljau subdivision.
@@ -1972,17 +2037,12 @@ struct CurveDecomposer {
 	// at the leaf. MAX_DEPTH caps recursion for degenerate inputs. Backends that
 	// previously called cubicTo() get improved fidelity automatically; no call
 	// site changes required.
-	void cubicTo(
-		slug_t c1x, slug_t c1y,
-		slug_t c2x, slug_t c2y,
-		slug_t x3, slug_t y3
-	) {
-		_requireFinite({c1x, c1y, c2x, c2y, x3, y3});
+	void cubicTo(Point c1, Point c2, Point p) {
+		_requireFinite({c1, c2, p});
 
-		_cubicAdaptive(_x, _y, c1x, c1y, c2x, c2y, x3, y3, 0);
+		_cubicAdaptive(_pen, c1, c2, p, 0);
 
-		_x = x3;
-		_y = y3;
+		_pen = p;
 	}
 
 	// Close the current subpath by drawing a line back to the subpath start.
@@ -1990,7 +2050,7 @@ struct CurveDecomposer {
 	void close() {
 		constexpr slug_t eps = 1e-6_cv;
 
-		if(std::abs(_x - _sx) > eps || std::abs(_y - _sy) > eps) lineTo(_sx, _sy);
+		if(std::abs(_pen.x - _start.x) > eps || std::abs(_pen.y - _start.y) > eps) lineTo(_start);
 	}
 
 	// Snapshot the current write position for a later reverseFrom() call.
@@ -2000,12 +2060,7 @@ struct CurveDecomposer {
 	// endpoints (control point stays put) then reverse the sequence order.
 	// Works for any contiguous range, e.g. a single sub-path captured via mark().
 	static void reverseCurves(Atlas::Curves& curves, size_t begin, size_t end) {
-		for(size_t i = begin; i < end; i++) {
-			auto& c = curves[i];
-
-			std::swap(c.x1, c.x3);
-			std::swap(c.y1, c.y3);
-		}
+		for(size_t i = begin; i < end; i++) curves[i] = curves[i].reversed();
 
 		std::reverse(
 			curves.begin() + static_cast<std::ptrdiff_t>(begin),
@@ -2020,9 +2075,9 @@ private:
 	// Rejects non-finite (NaN/Inf) coordinates at the ingestion boundary. A NaN reaching
 	// buildShapeBands' band-sort comparator violates strict weak ordering (all comparisons
 	// against NaN are false), which is undefined behavior for std::sort.
-	static void _requireFinite(std::initializer_list<slug_t> coords) {
-		for(slug_t v : coords) {
-			if(!std::isfinite(v)) {
+	static void _requireFinite(std::initializer_list<Point> points) {
+		for(const Point& p : points) {
+			if(!std::isfinite(p.x) || !std::isfinite(p.y)) {
 				throw std::runtime_error("CurveDecomposer: non-finite coordinate in path data");
 			}
 		}
@@ -2033,109 +2088,57 @@ private:
 	// cubic's bounding box, which is well below any practical rendering threshold.
 	static constexpr int MAX_DEPTH = 8;
 
-	// Squared distance from point (px,py) to the infinite line through (ax,ay)->(bx,by).
-	// Using squared distance avoids a sqrt in the hot path; we compare against tolerance2.
-	static slug_t _pointToLineDistSq(
-		slug_t px, slug_t py,
-		slug_t ax, slug_t ay,
-		slug_t bx, slug_t by
-	) {
-		const slug_t dx = bx - ax;
-		const slug_t dy = by - ay;
-		const slug_t lenSq = dx*dx + dy*dy;
+	// Squared distance from p to the infinite line through a->b. Using squared distance avoids a
+	// sqrt in the hot path; we compare against tolerance2.
+	static slug_t _pointToLineDistSq(Point p, Point a, Point b) {
+		const Point d = b - a;
+		const slug_t lenSq = lengthSquared(d);
 
-		if(lenSq < 1e-12_cv) {
-			// Degenerate chord - just return distance to the start point.
-			const slug_t ex = px - ax;
-			const slug_t ey = py - ay;
-
-			return ex*ex + ey*ey;
-		}
+		// Degenerate chord - just return distance to the start point.
+		if(lenSq < 1e-12_cv) return lengthSquared(p - a);
 
 		// |cross(b-a, a-p)| / |b-a| - perpendicular distance
-		const slug_t cross = dx*(ay - py) - dy*(ax - px);
+		const slug_t c = cross(d, a - p);
 
-		return (cross * cross) / lenSq;
+		return (c * c) / lenSq;
 	}
 
 	// Returns true when both interior control points of the cubic lie within
 	// `tolerance` of the p0->p3 chord - i.e. the cubic is visually flat.
-	bool _flatEnough(
-		slug_t p0x, slug_t p0y,
-		slug_t p1x, slug_t p1y,
-		slug_t p2x, slug_t p2y,
-		slug_t p3x, slug_t p3y
-	) const {
+	bool _flatEnough(Point p0, Point p1, Point p2, Point p3) const {
 		const slug_t tolSq = tolerance * tolerance;
 
-		return
-			_pointToLineDistSq(p1x, p1y, p0x, p0y, p3x, p3y) <= tolSq &&
-			_pointToLineDistSq(p2x, p2y, p0x, p0y, p3x, p3y) <= tolSq
-		;
+		return _pointToLineDistSq(p1, p0, p3) <= tolSq && _pointToLineDistSq(p2, p0, p3) <= tolSq;
 	}
 
 	// Emit the flat-enough (or max-depth) cubic as two quadratics via midpoint split.
 	// This is the leaf operation - matches the original cubicTo behavior and NanoSVG convention.
-	void _emitTwoQuads(
-		slug_t p0x, slug_t p0y,
-		slug_t p1x, slug_t p1y,
-		slug_t p2x, slug_t p2y,
-		slug_t p3x, slug_t p3y
-	) {
-		const slug_t midx = (p0x + 3_cv * p1x + 3_cv * p2x + p3x) * 0.125_cv;
-		const slug_t midy = (p0y + 3_cv * p1y + 3_cv * p2y + p3y) * 0.125_cv;
+	void _emitTwoQuads(Point p0, Point p1, Point p2, Point p3) {
+		const Point m = (p0 + 3_cv * p1 + 3_cv * p2 + p3) * 0.125_cv;
 
-		curves.push_back({
-			p0x, p0y,
-			(p0x + 3_cv * p1x) * 0.25_cv,
-			(p0y + 3_cv * p1y) * 0.25_cv,
-			midx, midy
-		});
-
-		curves.push_back({
-			midx, midy,
-			(3_cv * p2x + p3x) * 0.25_cv,
-			(3_cv * p2y + p3y) * 0.25_cv,
-			p3x, p3y
-		});
+		curves.push_back(Atlas::Curve::quad(p0, (p0 + 3_cv * p1) * 0.25_cv, m));
+		curves.push_back(Atlas::Curve::quad(m, (3_cv * p2 + p3) * 0.25_cv, p3));
 	}
 
 	// Recursive De Casteljau subdivision. Splits at the midpoint and recurses into each half until
 	// flat or MAX_DEPTH is reached.
-	void _cubicAdaptive(
-		slug_t p0x, slug_t p0y,
-		slug_t p1x, slug_t p1y,
-		slug_t p2x, slug_t p2y,
-		slug_t p3x, slug_t p3y,
-		size_t depth
-	) {
-		if(depth >= MAX_DEPTH || _flatEnough(p0x, p0y, p1x, p1y, p2x, p2y, p3x, p3y)) {
-			_emitTwoQuads(p0x, p0y, p1x, p1y, p2x, p2y, p3x, p3y);
+	void _cubicAdaptive(Point p0, Point p1, Point p2, Point p3, size_t depth) {
+		if(depth >= MAX_DEPTH || _flatEnough(p0, p1, p2, p3)) {
+			_emitTwoQuads(p0, p1, p2, p3);
 
 			return;
 		}
 
 		// De Casteljau split at t=0.5
-		const slug_t m01x = (p0x + p1x) * 0.5_cv;
-		const slug_t m01y = (p0y + p1y) * 0.5_cv;
+		const Point m01 = mid(p0, p1);
+		const Point m12 = mid(p1, p2);
+		const Point m23 = mid(p2, p3);
+		const Point m012 = mid(m01, m12);
+		const Point m123 = mid(m12, m23);
+		const Point m0123 = mid(m012, m123);
 
-		const slug_t m12x = (p1x + p2x) * 0.5_cv;
-		const slug_t m12y = (p1y + p2y) * 0.5_cv;
-
-		const slug_t m23x = (p2x + p3x) * 0.5_cv;
-		const slug_t m23y = (p2y + p3y) * 0.5_cv;
-
-		const slug_t m012x = (m01x + m12x) * 0.5_cv;
-		const slug_t m012y = (m01y + m12y) * 0.5_cv;
-
-		const slug_t m123x = (m12x + m23x) * 0.5_cv;
-		const slug_t m123y = (m12y + m23y) * 0.5_cv;
-
-		const slug_t m0123x = (m012x + m123x) * 0.5_cv;
-		const slug_t m0123y = (m012y + m123y) * 0.5_cv;
-
-		_cubicAdaptive(p0x, p0y, m01x, m01y, m012x, m012y, m0123x, m0123y, depth + 1);
-		_cubicAdaptive(m0123x, m0123y, m123x, m123y, m23x, m23y, p3x, p3y, depth + 1);
+		_cubicAdaptive(p0, m01, m012, m0123, depth + 1);
+		_cubicAdaptive(m0123, m123, m23, p3, depth + 1);
 	}
 };
 
@@ -2164,6 +2167,32 @@ inline slug_t curveExtent(const Atlas::Curves& curves) {
 	});
 
 	return extent;
+}
+
+// Appends the quadratic p0 -> p1 -> p2 to `pts` as a polyline, by midpoint subdivision until each
+// piece is within `tol` of its chord (or 8 levels deep). p0 itself is not appended; the caller has
+// already placed it.
+inline void flattenCurve(Point p0, Point p1, Point p2, slug_t tol, size_t depth, std::vector<Point>& pts) {
+	const Point d = p2 - p0;
+	const slug_t lenSq = lengthSquared(d);
+	const slug_t c = cross(p1 - p0, d);
+
+	if(lenSq < 1e-12_cv || (c * c) <= (tol * tol * lenSq) || depth >= 8) {
+		pts.push_back(p2);
+
+		return;
+	}
+
+	const Point m01 = mid(p0, p1);
+	const Point m12 = mid(p1, p2);
+	const Point m = mid(m01, m12);
+
+	flattenCurve(p0, m01, m, tol, depth + 1, pts);
+	flattenCurve(m, m12, p2, tol, depth + 1, pts);
+}
+
+inline void flattenCurve(const Atlas::Curve& c, slug_t tol, std::vector<Point>& pts) {
+	flattenCurve(c.p1(), c.p2(), c.p3(), tol, 0, pts);
 }
 
 // De Casteljau split of a quadratic Bezier at parameter t in (0,1).
@@ -2251,6 +2280,10 @@ inline std::ostream& operator<<(std::ostream& os, const Key& k) {
 	;
 
 	return os << "Key(\"" << k.name() << "\")";
+}
+
+inline std::ostream& operator<<(std::ostream& os, const Point& p) {
+	return os << "Point(x=" << p.x << " y=" << p.y << ")";
 }
 
 inline std::ostream& operator<<(std::ostream& os, const Color& c) {
@@ -2370,14 +2403,14 @@ inline std::ostream& operator<<(std::ostream& os, Atlas::ShapeInfo::Origin::Type
 }
 
 inline std::ostream& operator<<(std::ostream& os, const Atlas::ShapeInfo::Origin& origin) {
-	return os << "Origin(type=" << origin.type << " x=" << origin.x << " y=" << origin.y << ")";
+	return os << "Origin(type=" << origin.type << " x=" << origin.point.x << " y=" << origin.point.y << ")";
 }
 
 inline std::ostream& operator<<(std::ostream& os, const Atlas::Shape& s) {
 	return os
 		<< "Shape(w=" << s.width << " h=" << s.height
-		<< " bearing=" << s.bearingX << "/" << s.bearingY
-		<< " origin=" << s.originX << "/" << s.originY
+		<< " bearing=" << s.bearing.x << "/" << s.bearing.y
+		<< " origin=" << s.origin
 		<< " strokeRadius=" << s.strokeRadius
 		<< " bandScale=" << s.bandScaleX << "/" << s.bandScaleY
 		<< " bandOffset=" << s.bandOffsetX << "/" << s.bandOffsetY << ")"
@@ -2388,7 +2421,7 @@ inline std::ostream& operator<<(std::ostream& os, const Atlas::ShapeInfo& info) 
 	return os
 		<< "ShapeInfo(curves=" << info.curves.size()
 		<< " autoMetrics=" << info.autoMetrics
-		<< " bearing=" << info.bearingX << "/" << info.bearingY
+		<< " bearing=" << info.bearing.x << "/" << info.bearing.y
 		<< " size=" << info.width << "x" << info.height
 		<< " advance=" << info.advance
 		<< " bands=" << info.numBandsX << "x" << info.numBandsY

@@ -295,9 +295,9 @@ def test_shape_rule_geometry_only(atlas):
 	config = slughorn.nanosvg.LoadConfig()
 	config.rules = rules
 	composite = slughorn.nanosvg.load_string(_SVG_WITH_IDS, atlas, config=config)
-	# "geo" is present in composite with drawMode=Geometry; 2 layers are Visible.
+	# "geo" is present in composite with draw_mode=Geometry; 2 layers are Visible.
 	assert len(composite) == 3, f"expected 3 total layers (geo=geometry-only), got {len(composite)}"
-	visible = [l for l in composite.layers if l.drawMode == slughorn.DrawMode.Visible]
+	visible = [l for l in composite.layers if l.draw_mode == slughorn.DrawMode.Visible]
 	assert len(visible) == 2, f"expected 2 visible layers, got {len(visible)}"
 
 def test_shape_rule_geometry_only_layer_invisible(atlas):
@@ -306,7 +306,7 @@ def test_shape_rule_geometry_only_layer_invisible(atlas):
 	config = slughorn.nanosvg.LoadConfig()
 	config.rules = rules
 	composite = slughorn.nanosvg.load_string(_SVG_WITH_IDS, atlas, config=config)
-	geo_layers = [l for l in composite.layers if l.drawMode == slughorn.DrawMode.Geometry]
+	geo_layers = [l for l in composite.layers if l.draw_mode == slughorn.DrawMode.Geometry]
 	assert len(geo_layers) == 1, "expected exactly one geometry-only layer"
 
 def test_shape_rule_geometry_only_shape_in_atlas(atlas):
@@ -328,24 +328,24 @@ def test_shape_rule_geometry_only_transform_accessible(atlas):
 	config = slughorn.nanosvg.LoadConfig()
 	config.rules = rules
 	composite = slughorn.nanosvg.load_string(_SVG_WITH_IDS, atlas, config=config)
-	geo_layer = next(l for l in composite.layers if l.drawMode == slughorn.DrawMode.Geometry)
+	geo_layer = next(l for l in composite.layers if l.draw_mode == slughorn.DrawMode.Geometry)
 	# "geo" rect starts at x=200 in a 300-wide SVG; normalized: 200/300 ≈ 0.667.
 	assert geo_layer.transform.x == pytest.approx(200.0 / 300.0, abs=1e-3)
 
 
 # ---------------------------------------------------------------------------
-# Layer.drawMode field
+# Layer.draw_mode field
 # ---------------------------------------------------------------------------
 
 def test_layer_visible_defaults_true(atlas):
 	composite = slughorn.nanosvg.load_string(_SVG_ONE_SOLID, atlas)
-	assert composite.layers[0].drawMode == slughorn.DrawMode.Visible
+	assert composite.layers[0].draw_mode == slughorn.DrawMode.Visible
 
 def test_layer_visible_settable():
 	layer = slughorn.Layer("test")
-	assert layer.drawMode == slughorn.DrawMode.Visible
-	layer.drawMode = slughorn.DrawMode.Hidden
-	assert layer.drawMode == slughorn.DrawMode.Hidden
+	assert layer.draw_mode == slughorn.DrawMode.Visible
+	layer.draw_mode = slughorn.DrawMode.Hidden
+	assert layer.draw_mode == slughorn.DrawMode.Hidden
 
 
 # ---------------------------------------------------------------------------

@@ -29,7 +29,7 @@
 //
 // PATH SAMPLING:
 //
-// auto s = p.sample(0.5); // Sample { x, y, angle, arcLength } at arc-length midpoint
+// auto s = p.sample(0.5); // Sample { point, angle, arcLength } at arc-length midpoint
 // auto snap = canvas.path(); // copy of internal path; sample or continue building
 //
 // SCALE CONTRACT
@@ -52,39 +52,6 @@
 
 namespace slughorn {
 namespace canvas {
-
-// ================================================================================================
-// detail::flattenCurve - shared by Path::strokePath and Path::_rebuildLUT
-// ================================================================================================
-
-namespace detail {
-
-inline void flattenCurve(
-	slug_t p0x, slug_t p0y,
-	slug_t p1x, slug_t p1y,
-	slug_t p2x, slug_t p2y,
-	slug_t tol, size_t depth,
-	std::vector<std::pair<slug_t, slug_t>>& pts
-) {
-	const slug_t dx = p2x - p0x, dy = p2y - p0y;
-	const slug_t lenSq = dx * dx + dy * dy;
-	const slug_t cross = (p1x - p0x) * dy - (p1y - p0y) * dx;
-
-	if(lenSq < 1e-12_cv || (cross * cross) <= (tol * tol * lenSq) || depth >= 8) {
-		pts.push_back({p2x, p2y});
-
-		return;
-	}
-
-	const slug_t m01x = (p0x + p1x) * 0.5_cv, m01y = (p0y + p1y) * 0.5_cv;
-	const slug_t m12x = (p1x + p2x) * 0.5_cv, m12y = (p1y + p2y) * 0.5_cv;
-	const slug_t mx = (m01x + m12x) * 0.5_cv, my = (m01y + m12y) * 0.5_cv;
-
-	flattenCurve(p0x, p0y, m01x, m01y, mx, my, tol, depth + 1, pts);
-	flattenCurve(mx, my, m12x, m12y, p2x, p2y, tol, depth + 1, pts);
-}
-
-}
 
 // ================================================================================================
 // Stroke join/cap styles - matches SVG/Canvas2D stroke-linejoin/stroke-linecap semantics.
@@ -133,7 +100,11 @@ class Path {
 public:
 	// angle: the path's tangent direction in radians. arcLength: distance traveled along the path
 	// to this point, from its subpath's start.
-	struct Sample { slug_t x, y, angle, arcLength; };
+	struct Sample {
+		Point point = {};
+		slug_t angle = 0_cv;
+		slug_t arcLength = 0_cv;
+	};
 
 	// One subpath as a polyline (see polylines()). closed: the subpath was ended by closePath() (or,
 	// for curves with no such record, like Path(Atlas::Curves), it ends where it started), so its
@@ -184,7 +155,7 @@ public:
 			const auto& first = _pendingCurves[begin];
 			const auto& last = _pendingCurves[end - 1];
 
-			if(slughorn::coincident(last.x3, last.y3, first.x1, first.y1, extent)) {
+			if(slughorn::coincident(last.p3(), first.p1(), extent)) {
 				_pendingClosedStarts.push_back(begin);
 			}
 		}
@@ -201,14 +172,12 @@ public:
 	_pendingClosedStarts(o._pendingClosedStarts),
 	_pendingStrokedEnd(o._pendingStrokedEnd),
 	_pendingSubpathsUntracked(o._pendingSubpathsUntracked),
-	_penX(o._penX), _penY(o._penY),
+	_pen(o._pen),
 	_ctm(o._ctm), _ctmStack(o._ctmStack),
 	_decomposer(_activeCurves) {
 		_decomposer.tolerance = o._decomposer.tolerance;
-		_decomposer._x = o._decomposer._x;
-		_decomposer._y = o._decomposer._y;
-		_decomposer._sx = o._decomposer._sx;
-		_decomposer._sy = o._decomposer._sy;
+		_decomposer._pen = o._decomposer._pen;
+		_decomposer._start = o._decomposer._start;
 	}
 
 	Path& operator=(const Path& o) {
@@ -221,13 +190,11 @@ public:
 		_pendingClosedStarts = o._pendingClosedStarts;
 		_pendingStrokedEnd = o._pendingStrokedEnd;
 		_pendingSubpathsUntracked = o._pendingSubpathsUntracked;
-		_penX = o._penX; _penY = o._penY;
+		_pen = o._pen;
 		_ctm = o._ctm; _ctmStack = o._ctmStack;
 		_decomposer.tolerance = o._decomposer.tolerance;
-		_decomposer._x = o._decomposer._x;
-		_decomposer._y = o._decomposer._y;
-		_decomposer._sx = o._decomposer._sx;
-		_decomposer._sy = o._decomposer._sy;
+		_decomposer._pen = o._decomposer._pen;
+		_decomposer._start = o._decomposer._start;
 		_lutDirty = true;
 
 		return *this;
@@ -241,14 +208,12 @@ public:
 	_pendingClosedStarts(std::move(o._pendingClosedStarts)),
 	_pendingStrokedEnd(o._pendingStrokedEnd),
 	_pendingSubpathsUntracked(o._pendingSubpathsUntracked),
-	_penX(o._penX), _penY(o._penY),
+	_pen(o._pen),
 	_ctm(o._ctm), _ctmStack(std::move(o._ctmStack)),
 	_decomposer(_activeCurves) {
 		_decomposer.tolerance = o._decomposer.tolerance;
-		_decomposer._x = o._decomposer._x;
-		_decomposer._y = o._decomposer._y;
-		_decomposer._sx = o._decomposer._sx;
-		_decomposer._sy = o._decomposer._sy;
+		_decomposer._pen = o._decomposer._pen;
+		_decomposer._start = o._decomposer._start;
 	}
 
 	Path& operator=(Path&& o) noexcept {
@@ -261,13 +226,11 @@ public:
 		_pendingClosedStarts = std::move(o._pendingClosedStarts);
 		_pendingStrokedEnd = o._pendingStrokedEnd;
 		_pendingSubpathsUntracked = o._pendingSubpathsUntracked;
-		_penX = o._penX; _penY = o._penY;
+		_pen = o._pen;
 		_ctm = o._ctm; _ctmStack = std::move(o._ctmStack);
 		_decomposer.tolerance = o._decomposer.tolerance;
-		_decomposer._x = o._decomposer._x;
-		_decomposer._y = o._decomposer._y;
-		_decomposer._sx = o._decomposer._sx;
-		_decomposer._sy = o._decomposer._sy;
+		_decomposer._pen = o._decomposer._pen;
+		_decomposer._start = o._decomposer._start;
 		_lutDirty = true;
 
 		return *this;
@@ -295,9 +258,8 @@ public:
 		_pendingStrokedEnd = 0;
 		_pendingSubpathsUntracked = false;
 
-		_decomposer._x = _decomposer._y = 0_cv;
-		_decomposer._sx = _decomposer._sy = 0_cv;
-		_penX = _penY = 0_cv;
+		_decomposer._pen = _decomposer._start = {};
+		_pen = {};
 		_lutDirty = true;
 
 		return *this;
@@ -324,13 +286,7 @@ public:
 	// Matches HTML Canvas Path2D.addPath(path, DOMMatrix) semantics.
 	Path& addPath(const Path& other, const slughorn::Matrix& transform) {
 		auto xform = [&](const slughorn::Atlas::Curve& c) {
-			slughorn::Atlas::Curve out;
-
-			transform.apply(c.x1, c.y1, out.x1, out.y1);
-			transform.apply(c.x2, c.y2, out.x2, out.y2);
-			transform.apply(c.x3, c.y3, out.x3, out.y3);
-
-			return out;
+			return slughorn::Atlas::Curve::quad(transform * c.p1(), transform * c.p2(), transform * c.p3());
 		};
 
 		_appendTrackedCurves(other._pendingCurves, other._pendingSubpathStarts, other._pendingClosedStarts, xform);
@@ -366,11 +322,13 @@ public:
 	Path& setTransform(const Matrix& m) { _ctm = m; return *this; }
 	Path& transform(const Matrix& m) { _ctm = _ctm * m; return *this; }
 
-	Path& translate(slug_t tx, slug_t ty) {
-		_ctm = _ctm * Matrix::translate(tx, ty);
+	Path& translate(Point t) {
+		_ctm = _ctm * Matrix::translate(t);
 
 		return *this;
 	}
+
+	Path& translate(slug_t tx, slug_t ty) { return translate({tx, ty}); }
 
 	Path& rotate(slug_t angle) {
 		_ctm = _ctm * Matrix::rotate(angle);
@@ -388,72 +346,50 @@ public:
 	// Path commands
 	// -------------------------------------------------------------------------
 
-	Path& moveTo(slug_t x, slug_t y) {
+	Path& moveTo(Point p) {
 		// A moveTo() while _activeCurves already holds data starts a NEW subpath - record where
 		// it will begin (its first curve is about to be pushed at this exact index). An empty
 		// _activeCurves (fresh path, or right after clear()/closePath()) needs no marker: that
 		// subpath's start is the implicit index 0.
 		if(!_activeCurves.empty()) _activeSubpathStarts.push_back(_activeCurves.size());
 
-		_penX = x;
-		_penY = y;
-
-		slug_t tx, ty;
-
-		_ctm.apply(x, y, tx, ty);
-
-		_decomposer.moveTo(tx, ty);
-
+		_pen = p;
+		_decomposer.moveTo(_ctm * p);
 		_lutDirty = true;
 
 		return *this;
 	}
 
-	Path& lineTo(slug_t x, slug_t y) {
-		_penX = x;
-		_penY = y;
-
-		slug_t tx, ty;
-
-		_ctm.apply(x, y, tx, ty);
-		_decomposer.lineTo(tx, ty);
-
+	Path& lineTo(Point p) {
+		_pen = p;
+		_decomposer.lineTo(_ctm * p);
 		_lutDirty = true;
 
 		return *this;
 	}
 
-	Path& quadTo(slug_t cx, slug_t cy, slug_t x, slug_t y) {
-		_penX = x;
-		_penY = y;
-
-		slug_t tcx, tcy, tx, ty;
-
-		_ctm.apply(cx, cy, tcx, tcy);
-		_ctm.apply(x, y, tx, ty);
-
-		_decomposer.quadTo(tcx, tcy, tx, ty);
-
+	Path& quadTo(Point c, Point p) {
+		_pen = p;
+		_decomposer.quadTo(_ctm * c, _ctm * p);
 		_lutDirty = true;
 
 		return *this;
 	}
+
+	Path& bezierTo(Point c1, Point c2, Point p) {
+		_pen = p;
+		_decomposer.cubicTo(_ctm * c1, _ctm * c2, _ctm * p);
+		_lutDirty = true;
+
+		return *this;
+	}
+
+	Path& moveTo(slug_t x, slug_t y) { return moveTo({x, y}); }
+	Path& lineTo(slug_t x, slug_t y) { return lineTo({x, y}); }
+	Path& quadTo(slug_t cx, slug_t cy, slug_t x, slug_t y) { return quadTo({cx, cy}, {x, y}); }
 
 	Path& bezierTo(slug_t c1x, slug_t c1y, slug_t c2x, slug_t c2y, slug_t x, slug_t y) {
-		_penX = x;
-		_penY = y;
-
-		slug_t tc1x, tc1y, tc2x, tc2y, tx, ty;
-
-		_ctm.apply(c1x, c1y, tc1x, tc1y);
-		_ctm.apply(c2x, c2y, tc2x, tc2y);
-		_ctm.apply(x, y, tx, ty);
-
-		_decomposer.cubicTo(tc1x, tc1y, tc2x, tc2y, tx, ty);
-
-		_lutDirty = true;
-
-		return *this;
+		return bezierTo({c1x, c1y}, {c2x, c2y}, {x, y});
 	}
 
 	// Ends the current subpath with a straight segment back to its start and records it as closed:
@@ -511,7 +447,10 @@ public:
 		return closePath();
 	}
 
-	Path& circle(slug_t cx, slug_t cy, slug_t r) { return ellipse(cx, cy, r, r); }
+	Path& circle(Point c, slug_t r) { return ellipse(c, r, r); }
+	Path& circle(slug_t cx, slug_t cy, slug_t r) { return circle({cx, cy}, r); }
+
+	Path& ellipse(Point c, slug_t rx, slug_t ry) { return ellipse(c.x, c.y, rx, ry); }
 
 	Path& ellipse(slug_t cx, slug_t cy, slug_t rx, slug_t ry) {
 		const slug_t k = 0.5522847498_cv;
@@ -529,7 +468,7 @@ public:
 
 	// arc() does NOT call clear(). It appends to the current path, enabling composition
 	// with lineTo() for pie slices, stadium shapes, etc.
-	Path& arc(slug_t cx, slug_t cy, slug_t r, slug_t startAngle, slug_t endAngle, bool ccw=false) {
+	Path& arc(Point c, slug_t r, slug_t startAngle, slug_t endAngle, bool ccw=false) {
 		slug_t sweep;
 
 		if(ccw) {
@@ -546,49 +485,52 @@ public:
 			if(sweep < 0_cv) sweep += 2_cv * PI_CV;
 		}
 
-		_arcSegments(cx, cy, r, startAngle, sweep);
+		_arcSegments(c, r, startAngle, sweep);
 
 		return *this;
 	}
 
-	Path& arcTo(slug_t x1, slug_t y1, slug_t x2, slug_t y2, slug_t r) {
-		if(r <= 0_cv) return lineTo(x1, y1);
+	Path& arc(slug_t cx, slug_t cy, slug_t r, slug_t startAngle, slug_t endAngle, bool ccw=false) {
+		return arc({cx, cy}, r, startAngle, endAngle, ccw);
+	}
 
-		const slug_t p0x = _penX, p0y = _penY;
-		const slug_t d0x = p0x - x1, d0y = p0y - y1;
-		const slug_t d1x = x2 - x1, d1y = y2 - y1;
-		const slug_t len0 = std::sqrt(d0x*d0x + d0y*d0y);
-		const slug_t len1 = std::sqrt(d1x*d1x + d1y*d1y);
+	Path& arcTo(Point p1, Point p2, slug_t r) {
+		if(r <= 0_cv) return lineTo(p1);
 
-		if(len0 < 1e-6_cv || len1 < 1e-6_cv) return lineTo(x1, y1);
+		const Point d0 = _pen - p1;
+		const Point d1 = p2 - p1;
+		const slug_t len0 = length(d0);
+		const slug_t len1 = length(d1);
 
-		const slug_t u0x = d0x / len0, u0y = d0y / len0;
-		const slug_t u1x = d1x / len1, u1y = d1y / len1;
-		const slug_t cross = u0x*u1y - u0y*u1x;
+		if(len0 < 1e-6_cv || len1 < 1e-6_cv) return lineTo(p1);
 
-		if(std::abs(cross) < 1e-6_cv) return lineTo(x1, y1);
+		const Point u0 = d0 / len0;
+		const Point u1 = d1 / len1;
+		const slug_t turn = cross(u0, u1);
 
-		const slug_t dot = u0x*u1x + u0y*u1y;
-		const slug_t tanHalf = std::abs(cross) / (1_cv + dot);
+		if(std::abs(turn) < 1e-6_cv) return lineTo(p1);
 
-		if(tanHalf < 1e-6_cv) return lineTo(x1, y1);
+		const slug_t tanHalf = std::abs(turn) / (1_cv + dot(u0, u1));
+
+		if(tanHalf < 1e-6_cv) return lineTo(p1);
 
 		const slug_t tangentDist = r / tanHalf;
-		const slug_t t0x = x1 + u0x * tangentDist, t0y = y1 + u0y * tangentDist;
-		const slug_t t1x = x1 + u1x * tangentDist, t1y = y1 + u1y * tangentDist;
+		const Point t0 = p1 + u0 * tangentDist;
+		const Point t1 = p1 + u1 * tangentDist;
 
-		const slug_t sign = (cross > 0_cv) ? 1_cv : -1_cv;
-		const slug_t cenX = t0x - sign * u0y * r;
-		const slug_t cenY = t0y + sign * u0x * r;
+		const slug_t sign = (turn > 0_cv) ? 1_cv : -1_cv;
+		const Point center = t0 + perp(u0) * (sign * r);
 
-		const slug_t a0 = std::atan2(t0y - cenY, t0x - cenX);
-		const slug_t a1 = std::atan2(t1y - cenY, t1x - cenX);
+		const slug_t a0 = std::atan2(t0.y - center.y, t0.x - center.x);
+		const slug_t a1 = std::atan2(t1.y - center.y, t1.x - center.x);
 
-		lineTo(t0x, t0y);
-		arc(cenX, cenY, r, a0, a1, cross > 0_cv);
+		lineTo(t0);
+		arc(center, r, a0, a1, turn > 0_cv);
 
 		return *this;
 	}
+
+	Path& arcTo(slug_t x1, slug_t y1, slug_t x2, slug_t y2, slug_t r) { return arcTo({x1, y1}, {x2, y2}, r); }
 
 	// -------------------------------------------------------------------------
 	// Stroke expansion
@@ -652,7 +594,7 @@ public:
 					const auto& prev = centerline[i - 1];
 					const auto& cur = centerline[i];
 
-					if(!slughorn::coincident(cur.x1, cur.y1, prev.x3, prev.y3, extent)) {
+					if(!slughorn::coincident(cur.p1(), prev.p3(), extent)) {
 						starts.push_back(i);
 					}
 				}
@@ -692,7 +634,7 @@ public:
 
 		enum class CornerKind { Miter, Bevel, Round };
 
-		// Per-corner join data. innerNx/innerNy is the offset factor applied symmetrically
+		// Per-corner join data. innerN is the offset factor applied symmetrically
 		// (+h on the left wall, -h on the right wall): the miter-scaled bisector, which puts the
 		// point where the two adjacent offset edges intersect. A Miter corner shares that point
 		// between both walls. A Bevel/Round corner uses it for the INNER wall only - the inner
@@ -706,7 +648,7 @@ public:
 		struct Corner {
 			CornerKind kind = CornerKind::Miter;
 			bool outerIsLeft = true;
-			slug_t innerNx = 0_cv, innerNy = 0_cv;
+			Point innerN = {};
 			bool innerPivot = false;
 		};
 
@@ -716,7 +658,7 @@ public:
 		// an endpoint (e.g. several disconnected 2-point edges meeting at one point) - not a
 		// 2-segment corner, undefined by any LineJoin style. Collected during the main loop below
 		// (one arm per open subpath's true start/end), clustered and round-disc-patched after it.
-		struct Arm { slug_t x, y; size_t subpathIndex; };
+		struct Arm { Point p; size_t subpathIndex; };
 
 		std::vector<Arm> arms;
 
@@ -727,53 +669,38 @@ public:
 			if(begin >= end) continue;
 
 			// Pass 1: flatten this subpath to a polyline.
-			std::vector<std::pair<slug_t, slug_t>> pts;
+			std::vector<Point> pts;
 
-			pts.push_back({centerline[begin].x1, centerline[begin].y1});
+			pts.push_back(centerline[begin].p1());
 
-			for(size_t i = begin; i < end; i++) {
-				const auto& c = centerline[i];
-
-				detail::flattenCurve(c.x1, c.y1, c.x2, c.y2, c.x3, c.y3, tol, 0, pts);
-			}
+			for(size_t i = begin; i < end; i++) slughorn::detail::flattenCurve(centerline[i], tol, pts);
 
 			if(pts.size() < 2) continue;
 
 			const size_t numSegs = pts.size() - 1;
 
 			// Pass 2a: per-segment perpendicular normals (left-hand: +90 deg from travel direction).
-			std::vector<std::pair<slug_t, slug_t>> segN(numSegs);
+			std::vector<Point> segN(numSegs);
 			std::vector<slug_t> segLen(numSegs);
 
 			for(size_t i = 0; i < numSegs; i++) {
-				const slug_t dx = pts[i + 1].first - pts[i].first;
-				const slug_t dy = pts[i + 1].second - pts[i].second;
-				const slug_t len = std::sqrt(dx * dx + dy * dy);
+				const Point d = pts[i + 1] - pts[i];
+				const slug_t len = length(d);
 
 				segLen[i] = len;
-
-				segN[i] = len > 1e-9_cv
-					? std::pair{-dy / len, dx / len}
-					: std::pair{0_cv, 1_cv}
-				;
+				segN[i] = len > 1e-9_cv ? perp(d) / len : Point{0_cv, 1_cv};
 			}
 
 			// Untracked curves carry no closePath() record, only geometry: a subpath ending where it
 			// started is the best available sign it was closed (raw fill contours always do).
 			const bool isClosed = begin < untrackedEnd
-				? slughorn::coincident(
-					pts.back().first,
-					pts.back().second,
-					pts.front().first,
-					pts.front().second,
-					extent
-				)
+				? slughorn::coincident(pts.back(), pts.front(), extent)
 				: std::binary_search(closedStarts.begin(), closedStarts.end(), begin)
 			;
 
 			if(!isClosed) {
-				arms.push_back({pts.front().first, pts.front().second, si});
-				arms.push_back({pts.back().first, pts.back().second, si});
+				arms.push_back({pts.front(), si});
+				arms.push_back({pts.back(), si});
 			}
 
 			// Pass 2b: tag each interior corner. Corner i sits at pts[i], between incoming
@@ -781,13 +708,12 @@ public:
 			auto calcCorner = [&](size_t prev, size_t cur) -> Corner {
 				Corner c;
 
-				slug_t bx = segN[prev].first + segN[cur].first;
-				slug_t by = segN[prev].second + segN[cur].second;
+				Point b = segN[prev] + segN[cur];
 
-				const slug_t blen = std::sqrt(bx * bx + by * by);
+				const slug_t blen = length(b);
 
 				if(blen > 1e-6_cv) {
-					bx /= blen; by /= blen;
+					b /= blen;
 
 					// Sign of cross(segN[prev], segN[cur]) equals the sign of cross(dir[prev],
 					// dir[cur]) (a shared 90 deg rotation preserves it) - positive means a CCW/
@@ -795,11 +721,11 @@ public:
 					// concrete CCW square-corner case: East-then-North turn gives turnSign=+1,
 					// and a CCW-traced convex polygon's interior - the concave side - is by
 					// definition on the left, so outer must be right).
-					const slug_t turnSign = segN[prev].first * segN[cur].second - segN[prev].second * segN[cur].first;
+					const slug_t turnSign = cross(segN[prev], segN[cur]);
 
 					c.outerIsLeft = turnSign < 0_cv;
 
-					const slug_t d = bx * segN[cur].first + by * segN[cur].second;
+					const slug_t d = dot(b, segN[cur]);
 					slug_t m = 1_cv;
 					bool exceeded = false;
 
@@ -816,8 +742,7 @@ public:
 						: (join == LineJoin::Round ? CornerKind::Round : CornerKind::Bevel)
 					;
 
-					c.innerNx = bx * m;
-					c.innerNy = by * m;
+					c.innerN = b * m;
 
 					// h * sqrt(m^2 - 1) is how far the inner intersection sits along each
 					// adjacent segment, measured from the corner.
@@ -830,7 +755,7 @@ public:
 				// same fallback the original single-normal code used.
 				else {
 					c.kind = CornerKind::Miter;
-					c.innerNx = segN[cur].first; c.innerNy = segN[cur].second;
+					c.innerN = segN[cur];
 				}
 
 				return c;
@@ -841,12 +766,12 @@ public:
 			for(size_t i = 0; i < pts.size(); i++) {
 				if(!i) corners[i] = isClosed
 					? calcCorner(numSegs - 1, 0)
-					: Corner{CornerKind::Miter, true, segN[0].first, segN[0].second}
+					: Corner{CornerKind::Miter, true, segN[0]}
 				;
 
 				else if(i == numSegs) corners[i] = isClosed
 					? corners[0]
-					: Corner{CornerKind::Miter, true, segN[numSegs - 1].first, segN[numSegs - 1].second}
+					: Corner{CornerKind::Miter, true, segN[numSegs - 1]}
 				;
 
 				else corners[i] = calcCorner(i - 1, i);
@@ -857,41 +782,34 @@ public:
 			// shared point, so a fixed 1:1-with-pts index no longer holds.
 			Atlas::Curves lwall, rwall;
 
-			// Straight edges duplicate the endpoint as the control point, the same convention as
-			// CurveDecomposer::lineTo() - a midpoint control point leaves the quadratic
-			// coefficient at rounding noise rather than robustly non-zero.
-			auto pushWallSegment = [](Atlas::Curves& wall, slug_t x0, slug_t y0, slug_t x2, slug_t y2) {
-				wall.push_back({x0, y0, x2, y2, x2, y2});
-			};
-
 			for(size_t i = 0; i < numSegs; i++) {
-				const slug_t p0x = pts[i].first, p0y = pts[i].second;
-				const slug_t p2x = pts[i + 1].first, p2y = pts[i + 1].second;
+				const Point p0 = pts[i];
+				const Point p2 = pts[i + 1];
 				const Corner& c0 = corners[i];
 				const Corner& c1 = corners[i + 1];
 
-				slug_t l0x = p0x + h * c0.innerNx, l0y = p0y + h * c0.innerNy;
-				slug_t r0x = p0x - h * c0.innerNx, r0y = p0y - h * c0.innerNy;
+				Point l0 = p0 + h * c0.innerN;
+				Point r0 = p0 - h * c0.innerN;
 
 				// A Bevel/Round corner's OUTER side ignores the shared inner-wall point and
 				// starts this segment at the raw, un-mitered pt + h*segN[i] instead - matching
 				// exactly where the join geometry (emitted below, while closing out the
 				// PREVIOUS segment) left off. An innerPivot corner does the same on its inner side.
 				if(c0.kind != CornerKind::Miter) {
-					if(c0.outerIsLeft || c0.innerPivot) { l0x = p0x + h * segN[i].first; l0y = p0y + h * segN[i].second; }
-					if(!c0.outerIsLeft || c0.innerPivot) { r0x = p0x - h * segN[i].first; r0y = p0y - h * segN[i].second; }
+					if(c0.outerIsLeft || c0.innerPivot) l0 = p0 + h * segN[i];
+					if(!c0.outerIsLeft || c0.innerPivot) r0 = p0 - h * segN[i];
 				}
 
-				slug_t l2x = p2x + h * c1.innerNx, l2y = p2y + h * c1.innerNy;
-				slug_t r2x = p2x - h * c1.innerNx, r2y = p2y - h * c1.innerNy;
+				Point l2 = p2 + h * c1.innerN;
+				Point r2 = p2 - h * c1.innerN;
 
 				if(c1.kind != CornerKind::Miter) {
-					if(c1.outerIsLeft || c1.innerPivot) { l2x = p2x + h * segN[i].first; l2y = p2y + h * segN[i].second; }
-					if(!c1.outerIsLeft || c1.innerPivot) { r2x = p2x - h * segN[i].first; r2y = p2y - h * segN[i].second; }
+					if(c1.outerIsLeft || c1.innerPivot) l2 = p2 + h * segN[i];
+					if(!c1.outerIsLeft || c1.innerPivot) r2 = p2 - h * segN[i];
 				}
 
-				pushWallSegment(lwall, l0x, l0y, l2x, l2y);
-				pushWallSegment(rwall, r0x, r0y, r2x, r2y);
+				lwall.push_back(Atlas::Curve::line(l0, l2));
+				rwall.push_back(Atlas::Curve::line(r0, r2));
 
 				// Emit corner (i+1)'s join geometry on its outer wall, connecting this segment's
 				// outer-wall end to the next segment's outer-wall start - only for a real
@@ -905,36 +823,28 @@ public:
 					const slug_t sign = c1.outerIsLeft ? 1_cv : -1_cv;
 					const size_t nextSeg = (i + 1 < numSegs) ? (i + 1) : 0;
 
-					if(c1.kind == CornerKind::Bevel) {
-						pushWallSegment(
-							outerWall,
-							p2x + h * sign * segN[i].first, p2y + h * sign * segN[i].second,
-							p2x + h * sign * segN[nextSeg].first, p2y + h * sign * segN[nextSeg].second
-						);
-					}
+					// This segment's and the next one's normals on the outer side, and the offsets to
+					// the outer wall along them.
+					const Point dir0 = sign * segN[i];
+					const Point dir1 = sign * segN[nextSeg];
+					const Point out0 = h * dir0;
+					const Point out1 = h * dir1;
+
+					if(c1.kind == CornerKind::Bevel) outerWall.push_back(Atlas::Curve::line(p2 + out0, p2 + out1));
 
 					else { // Round
-						const slug_t a0 = std::atan2(sign * segN[i].second, sign * segN[i].first);
-						const slug_t a1 = std::atan2(sign * segN[nextSeg].second, sign * segN[nextSeg].first);
+						const slug_t a0 = std::atan2(dir0.y, dir0.x);
+						const slug_t a1 = std::atan2(dir1.y, dir1.x);
 						const slug_t sweep = std::atan2(std::sin(a1 - a0), std::cos(a1 - a0));
 
-						_appendArcChunks(outerWall, p2x, p2y, h, a0, sweep);
+						_appendArcChunks(outerWall, p2, h, a0, sweep);
 					}
 
 					if(c1.innerPivot) {
 						Atlas::Curves& innerWall = c1.outerIsLeft ? rwall : lwall;
 
-						pushWallSegment(
-							innerWall,
-							p2x - h * sign * segN[i].first, p2y - h * sign * segN[i].second,
-							p2x, p2y
-						);
-
-						pushWallSegment(
-							innerWall,
-							p2x, p2y,
-							p2x - h * sign * segN[nextSeg].first, p2y - h * sign * segN[nextSeg].second
-						);
+						innerWall.push_back(Atlas::Curve::line(p2 - out0, p2));
+						innerWall.push_back(Atlas::Curve::line(p2, p2 - out1));
 					}
 				}
 			}
@@ -947,15 +857,17 @@ public:
 				// Extend the terminal wall points outward along the path's own tangent
 				// (derived from segN, avoids recomputing it) by h; the closure code below then
 				// joins the (now-shifted) tips with a straight edge, same as Butt.
-				const slug_t d0x = segN[0].second, d0y = -segN[0].first;
-				const slug_t dNx = segN[numSegs - 1].second, dNy = -segN[numSegs - 1].first;
+				const Point d0 = -perp(segN[0]);
+				const Point dN = -perp(segN[numSegs - 1]);
 
-				rwall.back().x3 += h * dNx; rwall.back().y3 += h * dNy;
-				lwall.back().x3 += h * dNx; lwall.back().y3 += h * dNy;
-				rwall.back().x2 = rwall.back().x3; rwall.back().y2 = rwall.back().y3;
-				lwall.back().x2 = lwall.back().x3; lwall.back().y2 = lwall.back().y3;
-				lwall.front().x1 -= h * d0x; lwall.front().y1 -= h * d0y;
-				rwall.front().x1 -= h * d0x; rwall.front().y1 -= h * d0y;
+				for(Atlas::Curves* wall : {&rwall, &lwall}) {
+					Atlas::Curve& last = wall->back();
+
+					last.setP3(last.p3() + h * dN);
+					last.setP2(last.p3());
+				}
+
+				for(Atlas::Curves* wall : {&lwall, &rwall}) wall->front().setP1(wall->front().p1() - h * d0);
 			}
 
 			Atlas::Curves outline;
@@ -964,37 +876,23 @@ public:
 
 			// End cap: rwall's terminal point -> lwall's terminal point.
 			if(!isClosed && cap == LineCap::Round) {
-				const slug_t a0 = std::atan2(-segN[numSegs - 1].second, -segN[numSegs - 1].first);
+				const slug_t a0 = std::atan2(-segN[numSegs - 1].y, -segN[numSegs - 1].x);
 
-				_appendArcChunks(outline, pts[numSegs].first, pts[numSegs].second, h, a0, PI_CV);
+				_appendArcChunks(outline, pts[numSegs], h, a0, PI_CV);
 			}
 
-			else {
-				const slug_t ax = rwall.back().x3, ay = rwall.back().y3;
-				const slug_t bx = lwall.back().x3, by = lwall.back().y3;
+			else outline.push_back(Atlas::Curve::line(rwall.back().p3(), lwall.back().p3()));
 
-				outline.push_back({ax, ay, bx, by, bx, by});
-			}
-
-			for(size_t i = lwall.size(); i-- > 0;) {
-				const auto& l = lwall[i];
-
-				outline.push_back({l.x3, l.y3, l.x2, l.y2, l.x1, l.y1});
-			}
+			for(size_t i = lwall.size(); i-- > 0;) outline.push_back(lwall[i].reversed());
 
 			// Start cap: lwall's start point -> rwall's start point.
 			if(!isClosed && cap == LineCap::Round) {
-				const slug_t a0 = std::atan2(segN[0].second, segN[0].first);
+				const slug_t a0 = std::atan2(segN[0].y, segN[0].x);
 
-				_appendArcChunks(outline, pts[0].first, pts[0].second, h, a0, PI_CV);
+				_appendArcChunks(outline, pts[0], h, a0, PI_CV);
 			}
 
-			else {
-				const slug_t ax = lwall.front().x1, ay = lwall.front().y1;
-				const slug_t bx = rwall.front().x1, by = rwall.front().y1;
-
-				outline.push_back({ax, ay, bx, by, bx, by});
-			}
+			else outline.push_back(Atlas::Curve::line(lwall.front().p1(), rwall.front().p1()));
 
 			const size_t outlineStart = _pendingCurves.size();
 
@@ -1018,10 +916,10 @@ public:
 		if(cap == LineCap::Butt && arms.size() >= 2) {
 			const slug_t eps = std::max(1e-6_cv, h * 1e-4_cv);
 
-			auto cellOf = [&](slug_t x, slug_t y) -> std::pair<int64_t, int64_t> {
+			auto cellOf = [&](Point p) -> std::pair<int64_t, int64_t> {
 				return {
-					static_cast<int64_t>(std::floor(x / eps)),
-					static_cast<int64_t>(std::floor(y / eps))
+					static_cast<int64_t>(std::floor(p.x / eps)),
+					static_cast<int64_t>(std::floor(p.y / eps))
 				};
 			};
 
@@ -1033,7 +931,7 @@ public:
 
 			std::unordered_map<std::pair<int64_t, int64_t>, std::vector<size_t>, CellHash> grid;
 
-			for(size_t i = 0; i < arms.size(); i++) grid[cellOf(arms[i].x, arms[i].y)].push_back(i);
+			for(size_t i = 0; i < arms.size(); i++) grid[cellOf(arms[i].p)].push_back(i);
 
 			std::vector<bool> visited(arms.size(), false);
 
@@ -1051,7 +949,7 @@ public:
 					stack.pop_back();
 					cluster.push_back(cur);
 
-					const auto [cx, cy] = cellOf(arms[cur].x, arms[cur].y);
+					const auto [cx, cy] = cellOf(arms[cur].p);
 
 					for(int64_t dx = -1; dx <= 1; dx++) {
 						for(int64_t dy = -1; dy <= 1; dy++) {
@@ -1062,10 +960,7 @@ public:
 							for(size_t cand : it->second) {
 								if(visited[cand]) continue;
 
-								const slug_t ddx = arms[cand].x - arms[cur].x;
-								const slug_t ddy = arms[cand].y - arms[cur].y;
-
-								if(std::sqrt(ddx * ddx + ddy * ddy) <= eps) {
+								if(length(arms[cand].p - arms[cur].p) <= eps) {
 									visited[cand] = true;
 
 									stack.push_back(cand);
@@ -1085,7 +980,7 @@ public:
 
 				Atlas::Curves disc;
 
-				_appendArcChunks(disc, arms[cluster[0]].x, arms[cluster[0]].y, h, 0_cv, 2_cv * PI_CV);
+				_appendArcChunks(disc, arms[cluster[0]].p, h, 0_cv, 2_cv * PI_CV);
 
 				const size_t discStart = _pendingCurves.size();
 
@@ -1245,8 +1140,8 @@ public:
 				p.arcLength = line.points.empty()
 					? 0_cv
 					: line.points.back().arcLength + std::hypot(
-						p.x - line.points.back().x,
-						p.y - line.points.back().y
+						p.point.x - line.points.back().point.x,
+						p.point.y - line.points.back().point.y
 					)
 				;
 
@@ -1377,70 +1272,70 @@ private:
 	// then folds each chunk down to quadratics via a scratch CurveDecomposer - the same adaptive
 	// cubic->quadratic subdivision every other curve-emission path in this file already goes
 	// through (CurveDecomposer::cubicTo/_cubicAdaptive), not a second copy of that algorithm.
-	static void _appendArcChunks(Atlas::Curves& out, slug_t cx, slug_t cy, slug_t r, slug_t a0, slug_t sweep) {
+	static void _appendArcChunks(Atlas::Curves& out, Point c, slug_t r, slug_t a0, slug_t sweep) {
 		if(r <= 0_cv || sweep == 0_cv) return;
 
-		const slug_t absSweep = std::abs(sweep);
-		const size_t nSegs = std::max(size_t{1}, static_cast<size_t>(std::ceil(absSweep / PI_2_CV)));
+		const size_t nSegs = _arcChunkCount(sweep);
 		const slug_t segSweep = sweep / cv(nSegs);
 
 		Atlas::Curves scratch;
 		CurveDecomposer dec(scratch);
 
-		dec.moveTo(cx + r * std::cos(a0), cy + r * std::sin(a0));
-
 		slug_t angle = a0;
 
 		for(size_t i = 0; i < nSegs; i++) {
-			const slug_t seg0 = angle, seg1 = angle + segSweep;
-			const slug_t k = (4_cv / 3_cv) * std::tan(segSweep * 0.25_cv);
-			const slug_t cos0 = std::cos(seg0), sin0 = std::sin(seg0);
-			const slug_t cos1 = std::cos(seg1), sin1 = std::sin(seg1);
+			const ArcCubic b = _arcCubic(c, r, angle, segSweep);
 
-			const slug_t p3x = cx + r * cos1, p3y = cy + r * sin1;
-			const slug_t p1x = cx + r * cos0 - k * r * sin0, p1y = cy + r * sin0 + k * r * cos0;
-			const slug_t p2x = p3x + k * r * sin1, p2y = p3y - k * r * cos1;
+			if(!i) dec.moveTo(b.p0);
 
-			dec.cubicTo(p1x, p1y, p2x, p2y, p3x, p3y);
+			dec.cubicTo(b.p1, b.p2, b.p3);
 
-			angle = seg1;
+			angle += segSweep;
 		}
 
-		for(const auto& c : scratch) out.push_back(c);
+		for(const auto& curve : scratch) out.push_back(curve);
 	}
 
-	void _arcSegments(slug_t cx, slug_t cy, slug_t r, slug_t startAngle, slug_t sweep) {
+	void _arcSegments(Point c, slug_t r, slug_t startAngle, slug_t sweep) {
 		if(r <= 0_cv || sweep == 0_cv) return;
 
-		const slug_t absSweep = std::abs(sweep);
-		const size_t nSegs = std::max(size_t{1}, static_cast<size_t>(std::ceil(absSweep / PI_2_CV)));
+		const size_t nSegs = _arcChunkCount(sweep);
 		const slug_t segSweep = sweep / cv(nSegs);
 
 		slug_t angle = startAngle;
 
 		for(size_t i = 0; i < nSegs; i++) {
-			const slug_t a0 = angle, a1 = angle + segSweep;
-			const slug_t k = (4_cv / 3_cv) * std::tan(segSweep * 0.25_cv);
-			const slug_t cos0 = std::cos(a0), sin0 = std::sin(a0);
-			const slug_t cos1 = std::cos(a1), sin1 = std::sin(a1);
+			const ArcCubic b = _arcCubic(c, r, angle, segSweep);
 
-			const slug_t p0x = cx + r * cos0, p0y = cy + r * sin0;
-			const slug_t p3x = cx + r * cos1, p3y = cy + r * sin1;
-			const slug_t p1x = p0x - k * r * sin0, p1y = p0y + k * r * cos0;
-			const slug_t p2x = p3x + k * r * sin1, p2y = p3y - k * r * cos1;
+			if(!i && _activeCurves.empty() && _pendingCurves.empty()) moveTo(b.p0);
 
-			if(!i && _activeCurves.empty() && _pendingCurves.empty()) moveTo(p0x, p0y);
+			else if(!i && lengthSquared(b.p0 - _pen) > 1e-10_cv) lineTo(b.p0);
 
-			else if(!i) {
-				const slug_t dx = p0x - _penX, dy = p0y - _penY;
+			bezierTo(b.p1, b.p2, b.p3);
 
-				if(dx*dx + dy*dy > 1e-10_cv) lineTo(p0x, p0y);
-			}
-
-			bezierTo(p1x, p1y, p2x, p2y, p3x, p3y);
-
-			angle = a1;
+			angle += segSweep;
 		}
+	}
+
+	// One chunk per quarter turn (at least one) of an arc sweeping `sweep` radians.
+	static size_t _arcChunkCount(slug_t sweep) {
+		return std::max(size_t{1}, static_cast<size_t>(std::ceil(std::abs(sweep) / PI_2_CV)));
+	}
+
+	struct ArcCubic { Point p0, p1, p2, p3; };
+
+	// The cubic Bezier approximating the arc of radius r around c from angle a0 through `sweep`
+	// radians (|sweep| <= PI/2).
+	static ArcCubic _arcCubic(Point c, slug_t r, slug_t a0, slug_t sweep) {
+		const slug_t a1 = a0 + sweep;
+		const slug_t kr = (4_cv / 3_cv) * std::tan(sweep * 0.25_cv) * r;
+		const slug_t cos0 = std::cos(a0), sin0 = std::sin(a0);
+		const slug_t cos1 = std::cos(a1), sin1 = std::sin(a1);
+
+		const Point p0 = c + r * Point{cos0, sin0};
+		const Point p3 = c + r * Point{cos1, sin1};
+
+		return {p0, p0 + kr * Point{-sin0, cos0}, p3 + kr * Point{sin1, -cos1}, p3};
 	}
 
 	// The jump from one subpath's end to the next one's start adds no length: _lut holds the same
@@ -1467,7 +1362,7 @@ private:
 				starts.push_back(0);
 
 				for(size_t i = 1; i < all.size(); i++) {
-					if(!slughorn::coincident(all[i].x1, all[i].y1, all[i - 1].x3, all[i - 1].y3, extent)) {
+					if(!slughorn::coincident(all[i].p1(), all[i - 1].p3(), extent)) {
 						starts.push_back(i);
 					}
 				}
@@ -1485,19 +1380,12 @@ private:
 						_pendingClosedStarts.end(),
 						i
 					));
-					_pts.push_back({c.x1, c.y1});
+					_pts.push_back(c.p1());
 
 					next++;
 				}
 
-				detail::flattenCurve(
-					c.x1, c.y1,
-					c.x2, c.y2,
-					c.x3, c.y3,
-					TOLERANCE_BALANCED,
-					0,
-					_pts
-				);
+				slughorn::detail::flattenCurve(c, TOLERANCE_BALANCED, _pts);
 			}
 
 			_lut.resize(_pts.size(), 0_cv);
@@ -1513,10 +1401,7 @@ private:
 					continue;
 				}
 
-				const slug_t dx = _pts[i].first - _pts[i - 1].first;
-				const slug_t dy = _pts[i].second - _pts[i - 1].second;
-
-				_lut[i] = _lut[i - 1] + std::sqrt(dx * dx + dy * dy);
+				_lut[i] = _lut[i - 1] + length(_pts[i] - _pts[i - 1]);
 			}
 
 			// Untracked closure: the same ends-coincide fallback as strokePath().
@@ -1525,13 +1410,7 @@ private:
 					const auto& first = _pts[_ptStarts[k]];
 					const auto& last = _pts[k + 1 < _ptStarts.size() ? _ptStarts[k + 1] - 1 : _pts.size() - 1];
 
-					_ptClosed[k] = slughorn::coincident(
-						last.first,
-						last.second,
-						first.first,
-						first.second,
-						extent
-					);
+					_ptClosed[k] = slughorn::coincident(last, first, extent);
 				}
 			}
 
@@ -1557,18 +1436,14 @@ private:
 		const slug_t segLen = _lut[i] - _lut[i-1];
 		const slug_t frac = segLen > 1e-12_cv ? std::max(0_cv, std::min(1_cv, (s - _lut[i-1]) / segLen)) : 0_cv;
 
-		const slug_t x = _pts[i - 1].first + frac * (_pts[i].first - _pts[i - 1].first);
-		const slug_t y = _pts[i - 1].second + frac * (_pts[i].second - _pts[i - 1].second);
-
-		const slug_t angle = std::atan2(
-			_pts[i].second - _pts[i - 1].second,
-			_pts[i].first - _pts[i - 1].first
-		);
+		const Point d = _pts[i] - _pts[i - 1];
+		const Point p = _pts[i - 1] + frac * d;
+		const slug_t angle = std::atan2(d.y, d.x);
 
 		// The subpath holding segment (i - 1, i): the last one starting at or before i - 1.
 		const auto sub = std::upper_bound(_ptStarts.begin(), _ptStarts.end(), i - 1) - 1;
 
-		return { x, y, angle, s - _lut[*sub] };
+		return { p, angle, s - _lut[*sub] };
 	}
 
 	// _activeCurves MUST be declared before _decomposer (reference binding order).
@@ -1601,12 +1476,12 @@ private:
 	// this is set, since _pendingSubpathStarts cannot be trusted to be complete.
 	bool _pendingSubpathsUntracked = false;
 
-	slug_t _penX = 0_cv, _penY = 0_cv;
+	Point _pen = {};
 	Matrix _ctm = Matrix::identity();
 	std::vector<Matrix> _ctmStack;
 	CurveDecomposer _decomposer;
 
-	mutable std::vector<std::pair<slug_t, slug_t>> _pts;
+	mutable std::vector<Point> _pts;
 	mutable std::vector<slug_t> _lut;
 	mutable std::vector<size_t> _ptStarts; // _pts index of each subpath's first point
 	mutable std::vector<uint8_t> _ptClosed; // parallel to _ptStarts: 1 if that subpath is closed
@@ -1709,13 +1584,15 @@ public:
 	Canvas& setTransform(const Matrix& m) { _path.setTransform(m); _ctm = m; return *this; }
 	Canvas& transform(const Matrix& m) { _path.transform(m); _ctm = _ctm * m; return *this; }
 
-	Canvas& translate(slug_t tx, slug_t ty) {
-		_path.translate(tx, ty);
+	Canvas& translate(Point t) {
+		_path.translate(t);
 
-		_ctm = _ctm * Matrix::translate(tx, ty);
+		_ctm = _ctm * Matrix::translate(t);
 
 		return *this;
 	}
+
+	Canvas& translate(slug_t tx, slug_t ty) { return translate({tx, ty}); }
 
 	Canvas& rotate(slug_t angle) {
 		_path.rotate(angle);
@@ -1740,14 +1617,17 @@ public:
 	Canvas& beginPath() { _path.clear(); return *this; }
 	Canvas& addPath(const Path& other) { _path.addPath(other); return *this; }
 	Canvas& addPath(const Path& other, const Matrix& transform) { _path.addPath(other, transform); return *this; }
-	Canvas& moveTo(slug_t x, slug_t y) { _path.moveTo(x, y); return *this; }
-	Canvas& lineTo(slug_t x, slug_t y) { _path.lineTo(x, y); return *this; }
-	Canvas& quadTo(slug_t cx, slug_t cy, slug_t x, slug_t y) { _path.quadTo(cx, cy, x, y); return *this; }
+	Canvas& moveTo(Point p) { _path.moveTo(p); return *this; }
+	Canvas& lineTo(Point p) { _path.lineTo(p); return *this; }
+	Canvas& quadTo(Point c, Point p) { _path.quadTo(c, p); return *this; }
+	Canvas& bezierTo(Point c1, Point c2, Point p) { _path.bezierTo(c1, c2, p); return *this; }
+
+	Canvas& moveTo(slug_t x, slug_t y) { return moveTo({x, y}); }
+	Canvas& lineTo(slug_t x, slug_t y) { return lineTo({x, y}); }
+	Canvas& quadTo(slug_t cx, slug_t cy, slug_t x, slug_t y) { return quadTo({cx, cy}, {x, y}); }
 
 	Canvas& bezierTo(slug_t c1x, slug_t c1y, slug_t c2x, slug_t c2y, slug_t x, slug_t y) {
-		_path.bezierTo(c1x, c1y, c2x, c2y, x, y);
-
-		return *this;
+		return bezierTo({c1x, c1y}, {c2x, c2y}, {x, y});
 	}
 
 	Canvas& closePath() { _path.closePath(); return *this; }
@@ -1763,20 +1643,24 @@ public:
 
 	Canvas& rect(slug_t x, slug_t y, slug_t w, slug_t h) { _path.rect(x, y, w, h); return *this; }
 	Canvas& roundedRect(slug_t x, slug_t y, slug_t w, slug_t h, slug_t r) { _path.roundedRect(x, y, w, h, r); return *this; }
-	Canvas& circle(slug_t cx, slug_t cy, slug_t r) { _path.circle(cx, cy, r); return *this; }
-	Canvas& ellipse(slug_t cx, slug_t cy, slug_t rx, slug_t ry) { _path.ellipse(cx, cy, rx, ry); return *this; }
+	Canvas& circle(Point c, slug_t r) { _path.circle(c, r); return *this; }
+	Canvas& circle(slug_t cx, slug_t cy, slug_t r) { return circle({cx, cy}, r); }
+	Canvas& ellipse(Point c, slug_t rx, slug_t ry) { _path.ellipse(c, rx, ry); return *this; }
+	Canvas& ellipse(slug_t cx, slug_t cy, slug_t rx, slug_t ry) { return ellipse({cx, cy}, rx, ry); }
+
+	Canvas& arc(Point c, slug_t r, slug_t startAngle, slug_t endAngle, bool ccw=false) {
+		_path.arc(c, r, startAngle, endAngle, ccw);
+
+		return *this;
+	}
 
 	Canvas& arc(slug_t cx, slug_t cy, slug_t r, slug_t startAngle, slug_t endAngle, bool ccw=false) {
-		_path.arc(cx, cy, r, startAngle, endAngle, ccw);
-
-		return *this;
+		return arc({cx, cy}, r, startAngle, endAngle, ccw);
 	}
 
-	Canvas& arcTo(slug_t x1, slug_t y1, slug_t x2, slug_t y2, slug_t r) {
-		_path.arcTo(x1, y1, x2, y2, r);
+	Canvas& arcTo(Point p1, Point p2, slug_t r) { _path.arcTo(p1, p2, r); return *this; }
 
-		return *this;
-	}
+	Canvas& arcTo(slug_t x1, slug_t y1, slug_t x2, slug_t y2, slug_t r) { return arcTo({x1, y1}, {x2, y2}, r); }
 
 	// -------------------------------------------------------------------------
 	// Gradient factory
@@ -1876,10 +1760,8 @@ public:
 
 		// The path's curves already carry the path CTM; the cell gets the same treatment. Only
 		// its translation/scale survive - a rotated cell is not a rectangle.
-		slug_t x0, y0, x1, y1;
-
-		_path._ctm.apply(x, y, x0, y0);
-		_path._ctm.apply(x + w, y + h, x1, y1);
+		const Point p0 = _path._ctm * Point{x, y};
+		const Point p1 = _path._ctm * Point{x + w, y + h};
 
 		PatternHandle handle;
 
@@ -1888,10 +1770,10 @@ public:
 		handle.tileOffsetY = _autoMetrics ? minY : 0_cv;
 
 		handle.info.tile = key;
-		handle.info.cellX = std::min(x0, x1) - handle.tileOffsetX;
-		handle.info.cellY = std::min(y0, y1) - handle.tileOffsetY;
-		handle.info.cellWidth = std::abs(x1 - x0);
-		handle.info.cellHeight = std::abs(y1 - y0);
+		handle.info.cellX = std::min(p0.x, p1.x) - handle.tileOffsetX;
+		handle.info.cellY = std::min(p0.y, p1.y) - handle.tileOffsetY;
+		handle.info.cellWidth = std::abs(p1.x - p0.x);
+		handle.info.cellHeight = std::abs(p1.y - p0.y);
 		handle.info.repeatX = repeatX;
 		handle.info.repeatY = repeatY;
 
@@ -1915,9 +1797,9 @@ public:
 		const slug_t py = info.cellY + info.cellHeight * 0.5_cv;
 
 		info.transform =
-			Matrix::translate(px, py) *
+			Matrix::translate({px, py}) *
 			*inverse *
-			Matrix::translate(-px, -py)
+			Matrix::translate({-px, -py})
 		;
 
 		return _atlas.addPattern(info);
@@ -2113,10 +1995,10 @@ public:
 		PatternInfo info = handle.info;
 
 		info.transform =
-			Matrix::translate(-handle.tileOffsetX, -handle.tileOffsetY) *
+			Matrix::translate({-handle.tileOffsetX, -handle.tileOffsetY}) *
 			*inverse *
 			Matrix::scale(1_cv / scale, 1_cv / scale) *
-			Matrix::translate(minX, minY)
+			Matrix::translate({minX, minY})
 		;
 
 		Layer layer = _commitFill(_path._pendingCurves, color, scale, key, origin, Matrix::identity(), _path.pendingContourStarts());
@@ -2220,9 +2102,7 @@ public:
 		if(str.empty() || fontSize == 0_cv) return *this;
 
 		// Apply CTM so text() uses the same coordinate space as path operations.
-		slug_t tx, ty;
-
-		_ctm.apply(x, y, tx, ty);
+		const auto [tx, ty] = _ctm * Point{x, y};
 
 		// Baseline dy in em-space, adjusted for vertical anchor
 		slug_t dy = ty / fontSize;
@@ -2297,9 +2177,7 @@ public:
 
 		if(centerline) _checkCenterline(s);
 
-		slug_t tx, ty;
-
-		_ctm.apply(x, y, tx, ty);
+		const auto [tx, ty] = _ctm * Point{x, y};
 
 		slug_t dy = ty / fontSize;
 
@@ -2397,11 +2275,7 @@ public:
 	) {
 		if(fontSize == 0_cv) return Layer{};
 
-		slug_t tx, ty;
-
-		_ctm.apply(x, y, tx, ty);
-
-		return _textGlyphWorld(cp, fontSize, tx, ty, angle, color, metrics, anchorY, mask);
+		return _textGlyphWorld(cp, fontSize, _ctm * Point{x, y}, angle, color, metrics, anchorY, mask);
 	}
 
 	// textOnPath - places filled glyphs from str along path, each rotated to follow
@@ -2435,7 +2309,7 @@ public:
 			const slug_t t = cursor / totalLen;
 			const auto s = path.sample(t);
 
-			_textGlyphWorld(cp, fontSize, s.x, s.y, s.angle, color, metrics, anchorY, mask);
+			_textGlyphWorld(cp, fontSize, s.point, s.angle, color, metrics, anchorY, mask);
 
 			cursor += advance;
 		}
@@ -2554,12 +2428,12 @@ public:
 	size_t layerCount() const { return _composite.layers.size(); }
 
 private:
-	// Core of textGlyph - takes world-space (tx, ty) directly so textOnPath can
+	// Core of textGlyph - takes world-space `t` directly so textOnPath can
 	// call it with path.sample() coords without re-applying the CTM.
 	Layer _textGlyphWorld(
 		uint32_t cp,
 		slug_t fontSize,
-		slug_t tx, slug_t ty,
+		Point t,
 		slug_t angle,
 		Color color,
 		const FontMetrics& metrics,
@@ -2581,7 +2455,7 @@ private:
 		// NEXT_SESSION.md's DecalDrawable em-window writeup. Referencing the real glyph here is
 		// correct; whether it LOOKS correct downstream depends on that consumer.
 		if(angle == 0_cv) {
-			slug_t dy = ty / fontSize;
+			slug_t dy = t.y / fontSize;
 
 			switch(anchorY) {
 				case TextAnchorY::Baseline: break;
@@ -2593,7 +2467,7 @@ private:
 			Layer layer{
 				.key = Key(cp, mask),
 				.color = color,
-				.transform = {.x = tx / fontSize, .y = dy},
+				.transform = {.x = t.x / fontSize, .y = dy},
 				.scale = fontSize
 			};
 
@@ -2617,27 +2491,18 @@ private:
 
 		const slug_t cosA = std::cos(angle), sinA = std::sin(angle);
 
-		auto xform = [&](slug_t px, slug_t py, slug_t& wx, slug_t& wy) {
-			const slug_t sx = px * fontSize;
-			const slug_t sy = py * fontSize - anchorOffsetY;
+		auto xform = [&](Point p) -> Point {
+			const slug_t sx = p.x * fontSize;
+			const slug_t sy = p.y * fontSize - anchorOffsetY;
 
-			wx = sx * cosA - sy * sinA + tx;
-			wy = sx * sinA + sy * cosA + ty;
+			return {sx * cosA - sy * sinA + t.x, sx * sinA + sy * cosA + t.y};
 		};
 
 		Atlas::Curves baked;
 
 		baked.reserve(info->curves.size());
 
-		for(const auto& cv : info->curves) {
-			slug_t wx1, wy1, wx2, wy2, wx3, wy3;
-
-			xform(cv.x1, cv.y1, wx1, wy1);
-			xform(cv.x2, cv.y2, wx2, wy2);
-			xform(cv.x3, cv.y3, wx3, wy3);
-
-			baked.push_back({wx1, wy1, wx2, wy2, wx3, wy3});
-		}
+		for(const auto& c : info->curves) baked.push_back(Atlas::Curve::quad(xform(c.p1()), xform(c.p2()), xform(c.p3())));
 
 		using Origin = Atlas::ShapeInfo::Origin;
 
@@ -2856,13 +2721,11 @@ private:
 				minY_em = std::min({minY_em, c.y1, c.y2, c.y3});
 			}
 
-			infoOrigin.x = origin.x * scale - minX_em;
-			infoOrigin.y = origin.y * scale - minY_em;
+			infoOrigin.point = origin.point * scale - Point{minX_em, minY_em};
 		}
 
 		else if(origin.type == Atlas::ShapeInfo::Origin::Type::Custom) {
-			infoOrigin.x = origin.x * scale;
-			infoOrigin.y = origin.y * scale;
+			infoOrigin.point = origin.point * scale;
 		}
 
 		Atlas::Curves local;
@@ -2894,8 +2757,7 @@ private:
 
 		else {
 			info.autoMetrics = false;
-			info.bearingX = 0_cv;
-			info.bearingY = 1_cv;
+			info.bearing = {0_cv, 1_cv};
 			info.width = 1_cv;
 			info.height = 1_cv;
 		}
@@ -2908,7 +2770,10 @@ private:
 
 		Layer layer{ .key = key, .color = color };
 
-		placement.apply(transform.dx, transform.dy, layer.transform.x, layer.transform.y);
+		const Point t = placement * Point{transform.dx, transform.dy};
+
+		layer.transform.x = t.x;
+		layer.transform.y = t.y;
 
 		_composite.layers.push_back(layer);
 
@@ -2950,13 +2815,11 @@ private:
 				minY_em = std::min({minY_em, c.y1, c.y2, c.y3});
 			}
 
-			infoOrigin.x = origin.x * scale - minX_em;
-			infoOrigin.y = origin.y * scale - minY_em;
+			infoOrigin.point = origin.point * scale - Point{minX_em, minY_em};
 		}
 
 		else if(origin.type == Atlas::ShapeInfo::Origin::Type::Custom) {
-			infoOrigin.x = origin.x * scale;
-			infoOrigin.y = origin.y * scale;
+			infoOrigin.point = origin.point * scale;
 		}
 
 		Atlas::Curves local;
@@ -2980,8 +2843,7 @@ private:
 
 		else {
 			info.autoMetrics = false;
-			info.bearingX = 0_cv;
-			info.bearingY = 1_cv;
+			info.bearing = {0_cv, 1_cv};
 			info.width = 1_cv;
 			info.height = 1_cv;
 		}
@@ -3019,13 +2881,11 @@ private:
 		Atlas::ShapeInfo::Origin infoOrigin = origin;
 
 		if(origin.type == Atlas::ShapeInfo::Origin::Type::Pivot) {
-			infoOrigin.x = origin.x * scale - minX;
-			infoOrigin.y = origin.y * scale - minY;
+			infoOrigin.point = origin.point * scale - Point{minX, minY};
 		}
 
 		else if(origin.type == Atlas::ShapeInfo::Origin::Type::Custom) {
-			infoOrigin.x = origin.x * scale;
-			infoOrigin.y = origin.y * scale;
+			infoOrigin.point = origin.point * scale;
 		}
 
 		auto [local, transform] = _toLocalOrigin(scaled, origin, scale, strokeRadius > 0_cv);
@@ -3038,26 +2898,24 @@ private:
 		};
 
 		if(handle.type == GradientInfo::Type::Radial) {
-			const slug_t cx = handle.x0 * scale - minX;
-			const slug_t cy = handle.y0 * scale - minY;
+			const Point c = {handle.x0 * scale - minX, handle.y0 * scale - minY};
 			const slug_t r0 = handle.x1 * scale;
 			const slug_t r1 = handle.y1 * scale;
 
 			ginfo.innerRadius = r0;
-			ginfo.transform = buildRadialGradientMatrix(cx, cy, r1);
+			ginfo.transform = buildRadialGradientMatrix(c, r1);
 		}
 
 		else if(handle.type == GradientInfo::Type::Sweep) {
-			const slug_t cx = handle.x0 * scale - minX;
-			const slug_t cy = handle.y0 * scale - minY;
+			const Point c = {handle.x0 * scale - minX, handle.y0 * scale - minY};
 
-			ginfo.transform = buildSweepGradientMatrix(cx, cy, handle.x1, handle.y1 - handle.x1);
+			ginfo.transform = buildSweepGradientMatrix(c, handle.x1, handle.y1 - handle.x1);
 		}
 
 		else {
 			ginfo.transform = buildLinearGradientMatrix(
-				handle.x0 * scale - minX, handle.y0 * scale - minY,
-				handle.x1 * scale - minX, handle.y1 * scale - minY
+				{handle.x0 * scale - minX, handle.y0 * scale - minY},
+				{handle.x1 * scale - minX, handle.y1 * scale - minY}
 			);
 		}
 
@@ -3081,7 +2939,10 @@ private:
 			.gradientId = gid
 		};
 
-		placement.apply(transform.dx, transform.dy, layer.transform.x, layer.transform.y);
+		const Point t = placement * Point{transform.dx, transform.dy};
+
+		layer.transform.x = t.x;
+		layer.transform.y = t.y;
 
 		_composite.layers.push_back(layer);
 
@@ -3150,16 +3011,16 @@ private:
 		}
 
 		else if(origin.type == Atlas::ShapeInfo::Origin::Type::Pivot) {
-			transform.dx = origin.x * scale;
-			transform.dy = origin.y * scale;
+			transform.dx = origin.point.x * scale;
+			transform.dy = origin.point.y * scale;
 		}
 
 		else if(origin.type == Atlas::ShapeInfo::Origin::Type::Custom) {
-			// computeQuad subtracts originX/Y from transform, so pre-add it here so the
+			// computeQuad subtracts origin.point from transform, so pre-add it here so the
 			// subtraction cancels out and the quad lands at the bbox corner (same as Default).
-			// originX/Y still holds the raw user value for the shader.
-			transform.dx = minX + origin.x * scale;
-			transform.dy = minY + origin.y * scale;
+			// origin.point still holds the raw user value for the shader.
+			transform.dx = minX + origin.point.x * scale;
+			transform.dy = minY + origin.point.y * scale;
 		}
 
 		else {
@@ -3233,7 +3094,10 @@ inline std::ostream& operator<<(std::ostream& os, const Stroke& s) {
 }
 
 inline std::ostream& operator<<(std::ostream& os, const Path::Sample& s) {
-	return os << "Sample(x=" << s.x << " y=" << s.y << " angle=" << s.angle << " arcLength=" << s.arcLength << ")";
+	return os
+		<< "Sample(x=" << s.point.x << " y=" << s.point.y
+		<< " angle=" << s.angle << " arcLength=" << s.arcLength << ")"
+	;
 }
 
 inline std::ostream& operator<<(std::ostream& os, const Path::Polyline& l) {
@@ -3244,7 +3108,7 @@ inline std::ostream& operator<<(std::ostream& os, const Path& p) {
 	return os
 		<< "Path(activeCurves=" << p._activeCurves.size()
 		<< " pendingCurves=" << p._pendingCurves.size()
-		<< " pen=(" << p._penX << "," << p._penY << ")"
+		<< " pen=(" << p._pen.x << "," << p._pen.y << ")"
 		<< " ctm=" << p._ctm
 		<< " ctmStack=" << p._ctmStack.size()
 		<< " lutDirty=" << p._lutDirty

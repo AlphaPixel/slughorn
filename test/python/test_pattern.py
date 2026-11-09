@@ -1,5 +1,5 @@
 """
-Tests for fill patterns: slughorn.PatternInfo, Atlas.add_pattern(), Layer.patternId,
+Tests for fill patterns: slughorn.PatternInfo, Atlas.add_pattern(), Layer.pattern_id,
 Canvas.define_pattern() / fill_pattern(), Matrix.inverse(), and serial round trips.
 
 The key invariant: PatternInfo.transform maps a point's region em-coordinate to the same point's
@@ -71,20 +71,20 @@ def test_add_pattern_ids_are_one_based():
 	assert [p.tile for p in atlas.get_patterns()] == [slughorn.Key("a"), slughorn.Key("b")]
 
 def test_layer_pattern_id_default_and_kwarg():
-	assert slughorn.Layer("x").patternId == 0
-	assert slughorn.Layer("x", patternId=3).patternId == 3
+	assert slughorn.Layer("x").pattern_id == 0
+	assert slughorn.Layer("x", pattern_id=3).pattern_id == 3
 
 # ---------------------------------------------------------------------------
 # Matrix.inverse
 # ---------------------------------------------------------------------------
 
 def test_matrix_inverse_roundtrip():
-	m = slughorn.Matrix.translate(3.0, -2.0) * slughorn.Matrix.rotate(0.7) * slughorn.Matrix.scale(2.0, 0.5)
+	m = slughorn.Matrix.translate((3.0, -2.0)) * slughorn.Matrix.rotate(0.7) * slughorn.Matrix.scale(2.0, 0.5)
 	inv = m.inverse()
 
-	x, y = m.apply(1.25, -4.0)
+	x, y = m.apply((1.25, -4.0))
 
-	assert inv.apply(x, y) == pytest.approx((1.25, -4.0))
+	assert inv.apply((x, y)) == pytest.approx((1.25, -4.0))
 
 def test_matrix_inverse_singular_is_none():
 	assert slughorn.Matrix.scale(0.0, 1.0).inverse() is None
@@ -154,7 +154,7 @@ def test_fill_pattern_transform_maps_region_em_to_tile_em(auto_metrics, scale):
 	h = _define_hex_pattern(cvs)
 	layer = _fill_region(cvs, h, scale)
 
-	assert layer.patternId == 1
+	assert layer.pattern_id == 1
 
 	info = atlas.get_patterns()[0]
 
@@ -166,7 +166,7 @@ def test_fill_pattern_transform_maps_region_em_to_tile_em(auto_metrics, scale):
 	em = (cx * scale - region_min[0], cy * scale - region_min[1])
 	tile_em = (cx - h.tile_offset_x, cy - h.tile_offset_y)
 
-	assert info.transform.apply(*em) == pytest.approx(tile_em)
+	assert info.transform.apply(em) == pytest.approx(tile_em)
 
 def test_fill_pattern_handle_transform_applies_inverse():
 	atlas = slughorn.Atlas()
@@ -183,7 +183,7 @@ def test_fill_pattern_handle_transform_applies_inverse():
 
 	info = atlas.get_patterns()[0]
 
-	assert info.transform.apply(4.0, 6.0) == pytest.approx((2.0, 3.0))
+	assert info.transform.apply((4.0, 6.0)) == pytest.approx((2.0, 3.0))
 
 def test_fill_pattern_singular_transform_fails():
 	atlas = slughorn.Atlas()
@@ -195,7 +195,7 @@ def test_fill_pattern_singular_transform_fails():
 
 	layer = _fill_region(cvs, h)
 
-	assert layer.patternId == 0
+	assert layer.pattern_id == 0
 	assert atlas.get_patterns() == []
 
 def test_fill_pattern_layer_lands_in_composite():
@@ -208,7 +208,7 @@ def test_fill_pattern_layer_lands_in_composite():
 	cs = cvs.finalize()
 
 	assert cs.layers[-1].key == layer.key
-	assert cs.layers[-1].patternId == 1
+	assert cs.layers[-1].pattern_id == 1
 
 def test_fill_pattern_builds():
 	atlas = slughorn.Atlas()
@@ -240,7 +240,7 @@ def test_canvas_add_pattern_identity_keeps_identity():
 	assert (info.cell_x, info.cell_y) == pytest.approx((h.info.cell_x, h.info.cell_y))
 
 	for p in [(0.0, 0.0), (h.info.cell_x, h.info.cell_y), (1.5, -2.0)]:
-		assert info.transform.apply(*p) == pytest.approx(p)
+		assert info.transform.apply(p) == pytest.approx(p)
 
 def test_canvas_add_pattern_transform_is_about_centerline():
 	atlas = slughorn.Atlas()
@@ -260,11 +260,11 @@ def test_canvas_add_pattern_transform_is_about_centerline():
 	# The cell's left edge at mid-height (the stroke's start on its centerline) is fixed; a
 	# stroke-frame point q, at tile em (cx, cy) + q, maps to the tile em of its pattern-space
 	# point inverse(transform) * q.
-	assert info.transform.apply(cx, cy) == pytest.approx((cx, cy))
+	assert info.transform.apply((cx, cy)) == pytest.approx((cx, cy))
 
-	qx, qy = h.transform.apply(0.25, 0.5)
+	qx, qy = h.transform.apply((0.25, 0.5))
 
-	assert info.transform.apply(cx + qx, cy + qy) == pytest.approx((cx + 0.25, cy + 0.5))
+	assert info.transform.apply((cx + qx, cy + qy)) == pytest.approx((cx + 0.25, cy + 0.5))
 
 def test_canvas_add_pattern_failures_return_zero():
 	atlas = slughorn.Atlas()
@@ -292,7 +292,7 @@ def test_canvas_keeps_temporary_atlas_alive():
 
 	_fill_region(cvs, h)
 
-	assert cvs.finalize().layers[-1].patternId == 1
+	assert cvs.finalize().layers[-1].pattern_id == 1
 
 # ---------------------------------------------------------------------------
 # Serial
@@ -326,7 +326,7 @@ def test_serial_roundtrip(tmp_path, ext):
 	assert (dst.cell_x, dst.cell_y, dst.cell_width, dst.cell_height) == pytest.approx(
 		(src.cell_x, src.cell_y, src.cell_width, src.cell_height)
 	)
-	assert dst.transform.apply(1.0, 2.0) == pytest.approx(src.transform.apply(1.0, 2.0))
+	assert dst.transform.apply((1.0, 2.0)) == pytest.approx(src.transform.apply((1.0, 2.0)))
 	assert dst.repeat_x == Repeat.Repeat
 	assert dst.repeat_y == Repeat.Reflect
-	assert back.get_composite_shape(slughorn.Key("patterned")).layers[-1].patternId == 1
+	assert back.get_composite_shape(slughorn.Key("patterned")).layers[-1].pattern_id == 1

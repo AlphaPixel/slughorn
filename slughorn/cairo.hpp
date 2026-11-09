@@ -62,7 +62,7 @@ namespace cairo {
 // coordinates into the em-square slughorn expects (e.g. 1/100 if your path is built in a 100-unit
 // space). Pass 1.0 if coordinates are already normalized.
 // When autoMetrics=false and canvasExtent={widthEm, heightEm} is supplied, the returned ShapeInfo
-// has its band metrics (bearingX/Y, width, height, autoMetrics) pre-populated. Callers that use
+// has its band metrics (bearing, width, height, autoMetrics) pre-populated. Callers that use
 // decomposePath directly and then call atlas.addShape() should pass canvasExtent here.
 std::pair<Atlas::ShapeInfo, Transform> decomposePath(
 	cairo_t* cr,
@@ -122,6 +122,10 @@ std::pair<Atlas::ShapeInfo, Transform> decomposePath(
 
 	CurveDecomposer decomposer(curves);
 
+	const auto point = [scale](const cairo_path_data_t& d) {
+		return Point{cv(d.point.x) * scale, cv(d.point.y) * scale};
+	};
+
 	cairo_path_t* path = cairo_copy_path(cr);
 
 	for(int i = 0; i < path->num_data; i += path->data[i].header.length) {
@@ -129,21 +133,17 @@ std::pair<Atlas::ShapeInfo, Transform> decomposePath(
 
 		switch(d->header.type) {
 			case CAIRO_PATH_MOVE_TO:
-				decomposer.moveTo(cv(d[1].point.x) * scale, cv(d[1].point.y) * scale);
+				decomposer.moveTo(point(d[1]));
 
 				break;
 
 			case CAIRO_PATH_LINE_TO:
-				decomposer.lineTo(cv(d[1].point.x) * scale, cv(d[1].point.y) * scale);
+				decomposer.lineTo(point(d[1]));
 
 				break;
 
 			case CAIRO_PATH_CURVE_TO:
-				decomposer.cubicTo(
-					cv(d[1].point.x) * scale, cv(d[1].point.y) * scale,
-					cv(d[2].point.x) * scale, cv(d[2].point.y) * scale,
-					cv(d[3].point.x) * scale, cv(d[3].point.y) * scale
-				);
+				decomposer.cubicTo(point(d[1]), point(d[2]), point(d[3]));
 
 				break;
 
@@ -166,22 +166,20 @@ std::pair<Atlas::ShapeInfo, Transform> decomposePath(
 	Atlas::ShapeInfo::Origin infoOrigin = origin;
 
 	if(origin.type == Atlas::ShapeInfo::Origin::Type::Pivot) {
-		infoOrigin.x = origin.x * scale - offX;
-		infoOrigin.y = origin.y * scale - offY;
+		infoOrigin.point = origin.point * scale - Point{offX, offY};
 	}
 
 	else if(origin.type == Atlas::ShapeInfo::Origin::Type::Custom) {
-		infoOrigin.x = origin.x * scale;
-		infoOrigin.y = origin.y * scale;
+		infoOrigin.point = origin.point * scale;
 	}
 
 	const Transform transform = !autoMetrics ? Transform{} :
 		(origin.type == Atlas::ShapeInfo::Origin::Type::Centered)
 		? Transform{ cv(x1 + x2) * 0.5_cv * scale, cv(y1 + y2) * 0.5_cv * scale }
 		: (origin.type == Atlas::ShapeInfo::Origin::Type::Pivot)
-		? Transform{ origin.x * scale, origin.y * scale }
+		? Transform{ origin.point.x * scale, origin.point.y * scale }
 		: (origin.type == Atlas::ShapeInfo::Origin::Type::Custom)
-		? Transform{ ox + origin.x * scale, oy + origin.y * scale }
+		? Transform{ ox + origin.point.x * scale, oy + origin.point.y * scale }
 		: Transform{ ox, oy }
 	;
 
@@ -191,8 +189,7 @@ std::pair<Atlas::ShapeInfo, Transform> decomposePath(
 	info.origin = infoOrigin;
 
 	if(!autoMetrics && canvasExtent) {
-		info.bearingX = 0_cv;
-		info.bearingY = canvasExtent->second;
+		info.bearing = {0_cv, canvasExtent->second};
 		info.width = canvasExtent->first;
 		info.height = canvasExtent->second;
 		info.autoMetrics = false;

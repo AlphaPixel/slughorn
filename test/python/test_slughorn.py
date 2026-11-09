@@ -177,21 +177,21 @@ def test_matrix_identity_static():
 	assert slughorn.Matrix.identity().is_identity() is True
 
 def test_matrix_translate():
-	m = slughorn.Matrix.translate(3.0, -2.0)
+	m = slughorn.Matrix.translate((3.0, -2.0))
 	assert m.is_identity() is False
-	x, y = m.apply(1.0, 1.0)
+	x, y = m.apply((1.0, 1.0))
 	assert x == pytest.approx(4.0)
 	assert y == pytest.approx(-1.0)
 
 def test_matrix_scale():
 	m = slughorn.Matrix.scale(2.0, 3.0)
-	x, y = m.apply(1.0, 1.0)
+	x, y = m.apply((1.0, 1.0))
 	assert x == pytest.approx(2.0)
 	assert y == pytest.approx(3.0)
 
 def test_matrix_rotate():
 	m = slughorn.Matrix.rotate(math.pi / 2)
-	x, y = m.apply(1.0, 0.0)
+	x, y = m.apply((1.0, 0.0))
 	assert x == pytest.approx(0.0, abs=1e-6)
 	assert y == pytest.approx(1.0, abs=1e-6)
 
@@ -199,13 +199,13 @@ def test_matrix_apply():
 	m = slughorn.Matrix()
 	m.dx = 2.0
 	m.dy = -3.0
-	assert m.apply(1.0, 2.0) == pytest.approx((3.0, -1.0))
+	assert m.apply((1.0, 2.0)) == pytest.approx((3.0, -1.0))
 
 def test_matrix_mul():
-	t = slughorn.Matrix.translate(1.0, 0.0)
+	t = slughorn.Matrix.translate((1.0, 0.0))
 	s = slughorn.Matrix.scale(2.0, 2.0)
 	ts = t * s
-	x, y = ts.apply(1.0, 1.0)
+	x, y = ts.apply((1.0, 1.0))
 	# t*s: scale first, then translate
 	assert math.isfinite(x) and math.isfinite(y)
 
@@ -240,7 +240,7 @@ def test_gradient_info_linear(gradient_stops):
 	gi = slughorn.GradientInfo()
 	gi.type = slughorn.GradientInfo.Type.Linear
 	gi.stops = gradient_stops
-	gi.transform = slughorn.build_linear_gradient_matrix(0.0, 0.0, 1.0, 0.0)
+	gi.transform = slughorn.build_linear_gradient_matrix((0.0, 0.0), (1.0, 0.0))
 	assert gi.type == slughorn.GradientInfo.Type.Linear
 	assert len(gi.stops) == 2
 
@@ -280,10 +280,10 @@ def test_gradient_info_kwargs_ctor_unspecified_fields_keep_defaults():
 	assert gi.end_angle == pytest.approx(1.0)
 
 def test_build_linear_gradient_matrix():
-	m = slughorn.build_linear_gradient_matrix(0.0, 0.0, 1.0, 0.0)
+	m = slughorn.build_linear_gradient_matrix((0.0, 0.0), (1.0, 0.0))
 	assert isinstance(m, slughorn.Matrix)
 	# Degenerate (zero length) should return identity.
-	m2 = slughorn.build_linear_gradient_matrix(0.5, 0.5, 0.5, 0.5)
+	m2 = slughorn.build_linear_gradient_matrix((0.5, 0.5), (0.5, 0.5))
 	assert m2.is_identity() is True
 
 
@@ -343,8 +343,8 @@ def test_layer_fields():
 	assert l.color.r == pytest.approx(1.0)
 	assert l.transform.x == pytest.approx(0.5)
 	assert l.scale == pytest.approx(1.0)
-	assert l.effectId == 0
-	assert l.gradientId == 0
+	assert l.effect_id == 0
+	assert l.gradient_id == 0
 
 def test_layer_bleed_default():
 	l = slughorn.Layer(slughorn.Key("k"), slughorn.Color())
@@ -398,7 +398,7 @@ def test_composite_shape_kwargs_ctor_layers_instance():
 	assert len(cs) == 1
 
 def test_composite_shape_kwargs_ctor_with_mask():
-	mask = slughorn.Mask.circle(0.5, 0.5, 0.3)
+	mask = slughorn.Mask.circle((0.5, 0.5), 0.3)
 	cs = slughorn.CompositeShape(mask=mask)
 	assert cs.mask is not None
 	assert cs.mask.type == slughorn.Mask.Type.Circle
@@ -508,15 +508,13 @@ def test_shape_info_origin_centered():
 	assert o.type == slughorn.ShapeInfo.Origin.Type.Centered
 
 def test_shape_info_origin_pivot():
-	o = slughorn.ShapeInfo.Origin(0.5, 0.5)
-	assert o.x == pytest.approx(0.5)
-	assert o.y == pytest.approx(0.5)
+	o = slughorn.ShapeInfo.Origin((0.5, 0.5))
+	assert o.point == pytest.approx((0.5, 0.5))
 
 def test_shape_info_origin_custom():
-	o = slughorn.ShapeInfo.Origin(slughorn.ShapeInfo.Origin.Type.Custom, 1.0, 2.0)
+	o = slughorn.ShapeInfo.Origin(slughorn.ShapeInfo.Origin.Type.Custom, (1.0, 2.0))
 	assert o.type == slughorn.ShapeInfo.Origin.Type.Custom
-	assert o.x == pytest.approx(1.0)
-	assert o.y == pytest.approx(2.0)
+	assert o.point == pytest.approx((1.0, 2.0))
 
 def test_shape_info_origin_equality():
 	a = slughorn.ShapeInfo.Origin(slughorn.ShapeInfo.Origin.Type.Centered)
@@ -791,7 +789,7 @@ def test_atlas_gradient_texture_nonempty_with_gradient(atlas, rect_curves, gradi
 	gi = slughorn.GradientInfo()
 	gi.type = slughorn.GradientInfo.Type.Linear
 	gi.stops = gradient_stops
-	gi.transform = slughorn.build_linear_gradient_matrix(0.0, 0.0, 1.0, 0.0)
+	gi.transform = slughorn.build_linear_gradient_matrix((0.0, 0.0), (1.0, 0.0))
 	atlas.add_gradient(gi)
 	atlas.build()
 	td = atlas.gradient_texture
@@ -809,7 +807,7 @@ def test_atlas_add_gradient_returns_id(atlas, gradient_stops):
 	gi = slughorn.GradientInfo()
 	gi.type = slughorn.GradientInfo.Type.Linear
 	gi.stops = gradient_stops
-	gi.transform = slughorn.build_linear_gradient_matrix(0.0, 0.0, 1.0, 0.0)
+	gi.transform = slughorn.build_linear_gradient_matrix((0.0, 0.0), (1.0, 0.0))
 	gid = atlas.add_gradient(gi)
 	assert gid >= 1
 
@@ -818,7 +816,7 @@ def test_atlas_add_gradient_ids_sequential(atlas, gradient_stops):
 		gi = slughorn.GradientInfo()
 		gi.type = slughorn.GradientInfo.Type.Linear
 		gi.stops = gradient_stops
-		gi.transform = slughorn.build_linear_gradient_matrix(0.0, 0.0, 1.0, 0.0)
+		gi.transform = slughorn.build_linear_gradient_matrix((0.0, 0.0), (1.0, 0.0))
 		return gi
 	id1 = atlas.add_gradient(make_gi())
 	id2 = atlas.add_gradient(make_gi())
@@ -828,7 +826,7 @@ def test_atlas_get_gradients(atlas, gradient_stops):
 	gi = slughorn.GradientInfo()
 	gi.type = slughorn.GradientInfo.Type.Linear
 	gi.stops = gradient_stops
-	gi.transform = slughorn.build_linear_gradient_matrix(0.0, 0.0, 1.0, 0.0)
+	gi.transform = slughorn.build_linear_gradient_matrix((0.0, 0.0), (1.0, 0.0))
 	atlas.add_gradient(gi)
 	atlas.add_gradient(gi)
 	assert len(atlas.get_gradients()) == 2
@@ -919,8 +917,7 @@ def test_shape_em_size(built_atlas):
 
 def test_shape_origin_default(built_atlas):
 	s = built_atlas.get_shape(slughorn.Key("rect"))
-	assert s.origin_x == pytest.approx(0.0)
-	assert s.origin_y == pytest.approx(0.0)
+	assert s.origin.point == pytest.approx((0.0, 0.0))
 
 def test_shape_origin_centered(atlas, rect_curves):
 	info = slughorn.ShapeInfo()
@@ -929,8 +926,7 @@ def test_shape_origin_centered(atlas, rect_curves):
 	atlas.add_shape(slughorn.Key("centered"), info)
 	atlas.build()
 	s = atlas.get_shape(slughorn.Key("centered"))
-	assert s.origin_x == pytest.approx(s.width / 2, rel=1e-3)
-	assert s.origin_y == pytest.approx(s.height / 2, rel=1e-3)
+	assert s.origin.point == pytest.approx((s.width / 2, s.height / 2), rel=1e-3)
 
 def test_shape_curves_nonempty(built_atlas):
 	s = built_atlas.get_shape(slughorn.Key("rect"))
@@ -1012,6 +1008,59 @@ def test_normalize_coverage_preserved(atlas):
 
 def test_coincident_scales_with_extent():
 	# 1e-4 apart: rounding at extent 1000 (tolerance 0.01), a real gap at extent 1 (tolerance 1e-5).
-	assert slughorn.coincident(1000.0, 5.0, 1000.0001, 5.0, 1000.0)
-	assert not slughorn.coincident(0.5, 0.5, 0.5001, 0.5, 1.0)
-	assert slughorn.coincident(0.5, 0.5, 0.5, 0.5, 0.0)
+	assert slughorn.coincident((1000.0, 5.0), (1000.0001, 5.0), 1000.0)
+	assert not slughorn.coincident((0.5, 0.5), (0.5001, 0.5), 1.0)
+	assert slughorn.coincident((0.5, 0.5), (0.5, 0.5), 0.0)
+
+def test_point_arithmetic():
+	a = slughorn.Point(1.0, 2.0)
+	b = slughorn.Point(3.0, -1.0)
+
+	assert a + b == slughorn.Point(4.0, 1.0)
+	assert a - b == slughorn.Point(-2.0, 3.0)
+	assert -a == slughorn.Point(-1.0, -2.0)
+	assert a * 2.0 == 2.0 * a == slughorn.Point(2.0, 4.0)
+	assert a / 2.0 == slughorn.Point(0.5, 1.0)
+
+	assert slughorn.dot(a, b) == 1.0
+	assert slughorn.cross(a, b) == -7.0
+	assert slughorn.length(slughorn.Point(3.0, 4.0)) == 5.0
+	assert slughorn.length_squared(slughorn.Point(3.0, 4.0)) == 25.0
+	assert slughorn.perp(slughorn.Point(1.0, 0.0)) == slughorn.Point(0.0, 1.0)
+	assert slughorn.normalize(slughorn.Point(0.0, 2.0)) == slughorn.Point(0.0, 1.0)
+	assert slughorn.normalize(slughorn.Point()) == slughorn.Point()
+	assert slughorn.lerp(a, b, 0.5) == slughorn.mid(a, b) == slughorn.Point(2.0, 0.5)
+
+def test_point_tuple_conversion_and_unpacking():
+	x, y = slughorn.Point(1.5, -2.5)
+
+	assert (x, y) == (1.5, -2.5)
+	assert len(slughorn.Point()) == 2
+	assert slughorn.Point((3.0, 4.0)) == slughorn.Point(3.0, 4.0)
+	assert slughorn.dot((1.0, 2.0), (3.0, 4.0)) == 11.0
+
+def test_matrix_times_point():
+	m = slughorn.Matrix.translate((10.0, 20.0))
+
+	assert m * slughorn.Point(1.0, 2.0) == slughorn.Point(11.0, 22.0)
+	assert m.apply((1.0, 2.0)) == slughorn.Point(11.0, 22.0)
+
+def test_path_point_overloads_match_scalars():
+	a = slughorn.canvas.Path()
+	b = slughorn.canvas.Path()
+
+	a.move_to(0.0, 0.0)
+	a.line_to(1.0, 0.0)
+	a.quad_to(1.5, 0.5, 1.0, 1.0)
+	a.bezier_to(0.5, 1.5, 0.0, 1.5, -0.5, 1.0)
+	a.arc_to(-1.0, 0.0, 0.0, 0.0, 0.25)
+	a.arc(0.0, 0.0, 0.5, 0.0, 1.0)
+
+	b.move_to((0.0, 0.0))
+	b.line_to(slughorn.Point(1.0, 0.0))
+	b.quad_to((1.5, 0.5), (1.0, 1.0))
+	b.bezier_to((0.5, 1.5), (0.0, 1.5), (-0.5, 1.0))
+	b.arc_to((-1.0, 0.0), (0.0, 0.0), 0.25)
+	b.arc((0.0, 0.0), 0.5, 0.0, 1.0)
+
+	assert a.arc_length() == b.arc_length()

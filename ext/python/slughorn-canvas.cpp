@@ -159,8 +159,7 @@ void bind_canvas(py::module_& canvas) {
 			"Position, tangent direction and arc length at a point on the path.\n"
 			"Returned by Path.sample(), resample() and polylines(). Fields are read-only."
 		)
-			.def_readonly("x", &PathSample::x, "X coordinate.")
-			.def_readonly("y", &PathSample::y, "Y coordinate.")
+			.def_readonly("point", &PathSample::point)
 			.def_readonly("angle", &PathSample::angle, "Tangent angle in radians.")
 			.def_readonly("arc_length", &PathSample::arcLength,
 				"Distance traveled along the path to this point, from its subpath's start.")
@@ -248,18 +247,23 @@ void bind_canvas(py::module_& canvas) {
 				"Replace CTM with matrix m.")
 			.def("transform", py::overload_cast<const slughorn::Matrix&>(&Path::transform),
 				"m"_a, "Post-multiply CTM by m.")
-			.def("translate", &Path::translate, "tx"_a, "ty"_a)
+			.def("translate", py::overload_cast<slug_t, slug_t>(&Path::translate), "tx"_a, "ty"_a)
+			.def("translate", py::overload_cast<slughorn::Point>(&Path::translate), "t"_a)
 			.def("rotate", &Path::rotate, "angle"_a, "Angle in radians.")
 			.def("scale", &Path::scale, "sx"_a, "sy"_a)
 
 			// Path commands
-			.def("move_to", &Path::moveTo, "x"_a, "y"_a)
-			.def("line_to", &Path::lineTo, "x"_a, "y"_a)
-			.def("quad_to", &Path::quadTo,
+			.def("move_to", py::overload_cast<slug_t, slug_t>(&Path::moveTo), "x"_a, "y"_a)
+			.def("move_to", py::overload_cast<slughorn::Point>(&Path::moveTo), "p"_a)
+			.def("line_to", py::overload_cast<slug_t, slug_t>(&Path::lineTo), "x"_a, "y"_a)
+			.def("line_to", py::overload_cast<slughorn::Point>(&Path::lineTo), "p"_a)
+			.def("quad_to", py::overload_cast<slug_t, slug_t, slug_t, slug_t>(&Path::quadTo),
 				"cx"_a, "cy"_a, "x"_a, "y"_a)
-			.def("bezier_to", &Path::bezierTo,
+			.def("quad_to", py::overload_cast<slughorn::Point, slughorn::Point>(&Path::quadTo), "c"_a, "p"_a)
+			.def("bezier_to", py::overload_cast<slug_t, slug_t, slug_t, slug_t, slug_t, slug_t>(&Path::bezierTo),
 				"c1x"_a, "c1y"_a, "c2x"_a, "c2y"_a,
 				"x"_a, "y"_a)
+			.def("bezier_to", py::overload_cast<slughorn::Point, slughorn::Point, slughorn::Point>(&Path::bezierTo), "c1"_a, "c2"_a, "p"_a)
 			.def("close_path", &Path::closePath)
 
 			// Shape helpers
@@ -267,14 +271,19 @@ void bind_canvas(py::module_& canvas) {
 				"x"_a, "y"_a, "w"_a, "h"_a)
 			.def("rounded_rect", &Path::roundedRect,
 				"x"_a, "y"_a, "w"_a, "h"_a, "r"_a)
-			.def("circle", &Path::circle, "cx"_a, "cy"_a, "r"_a)
-			.def("ellipse", &Path::ellipse,
+			.def("circle", py::overload_cast<slug_t, slug_t, slug_t>(&Path::circle), "cx"_a, "cy"_a, "r"_a)
+			.def("circle", py::overload_cast<slughorn::Point, slug_t>(&Path::circle), "c"_a, "r"_a)
+			.def("ellipse", py::overload_cast<slug_t, slug_t, slug_t, slug_t>(&Path::ellipse),
 				"cx"_a, "cy"_a, "rx"_a, "ry"_a)
-			.def("arc", &Path::arc,
+			.def("ellipse", py::overload_cast<slughorn::Point, slug_t, slug_t>(&Path::ellipse), "c"_a, "rx"_a, "ry"_a)
+			.def("arc", py::overload_cast<slughorn::Point, slug_t, slug_t, slug_t, bool>(&Path::arc),
+				"c"_a, "r"_a, "start_angle"_a, "end_angle"_a, "ccw"_a=false)
+			.def("arc", py::overload_cast<slug_t, slug_t, slug_t, slug_t, slug_t, bool>(&Path::arc),
 				"cx"_a, "cy"_a, "r"_a, "start_angle"_a, "end_angle"_a, "ccw"_a=false,
 				"Circular arc. Does NOT call clear(); appends to the current path.\n"
 				"Angles in radians from +X axis, Y-up convention.")
-			.def("arc_to", &Path::arcTo,
+			.def("arc_to", py::overload_cast<slughorn::Point, slughorn::Point, slug_t>(&Path::arcTo), "p1"_a, "p2"_a, "r"_a)
+			.def("arc_to", py::overload_cast<slug_t, slug_t, slug_t, slug_t, slug_t>(&Path::arcTo),
 				"x1"_a, "y1"_a, "x2"_a, "y2"_a, "r"_a,
 				"Tangential arc. Matches HTML Canvas arcTo().")
 
@@ -353,7 +362,8 @@ void bind_canvas(py::module_& canvas) {
 		.def("transform",
 			py::overload_cast<const slughorn::Matrix&>(&slughorn::canvas::Canvas::transform),
 			"m"_a)
-		.def("translate", &slughorn::canvas::Canvas::translate, "tx"_a, "ty"_a)
+		.def("translate", py::overload_cast<slug_t, slug_t>(&slughorn::canvas::Canvas::translate), "tx"_a, "ty"_a)
+		.def("translate", py::overload_cast<slughorn::Point>(&slughorn::canvas::Canvas::translate), "t"_a)
 		.def("rotate", &slughorn::canvas::Canvas::rotate, "angle"_a)
 		.def("scale", &slughorn::canvas::Canvas::scale, "sx"_a, "sy"_a)
 
@@ -376,14 +386,18 @@ void bind_canvas(py::module_& canvas) {
 			"Append curves from an explicit Path with each control point transformed by transform.\n"
 			"Matches HTML Canvas Path2D.addPath(path, DOMMatrix) semantics."
 		)
-		.def("move_to", &slughorn::canvas::Canvas::moveTo, "x"_a, "y"_a)
-		.def("line_to", &slughorn::canvas::Canvas::lineTo, "x"_a, "y"_a)
-		.def("quad_to", &slughorn::canvas::Canvas::quadTo,
+		.def("move_to", py::overload_cast<slug_t, slug_t>(&slughorn::canvas::Canvas::moveTo), "x"_a, "y"_a)
+		.def("move_to", py::overload_cast<slughorn::Point>(&slughorn::canvas::Canvas::moveTo), "p"_a)
+		.def("line_to", py::overload_cast<slug_t, slug_t>(&slughorn::canvas::Canvas::lineTo), "x"_a, "y"_a)
+		.def("line_to", py::overload_cast<slughorn::Point>(&slughorn::canvas::Canvas::lineTo), "p"_a)
+		.def("quad_to", py::overload_cast<slug_t, slug_t, slug_t, slug_t>(&slughorn::canvas::Canvas::quadTo),
 			"cx"_a, "cy"_a, "x"_a, "y"_a
 		)
-		.def("bezier_to", &slughorn::canvas::Canvas::bezierTo,
+		.def("quad_to", py::overload_cast<slughorn::Point, slughorn::Point>(&slughorn::canvas::Canvas::quadTo), "c"_a, "p"_a)
+		.def("bezier_to", py::overload_cast<slug_t, slug_t, slug_t, slug_t, slug_t, slug_t>(&slughorn::canvas::Canvas::bezierTo),
 			"c1x"_a, "c1y"_a, "c2x"_a, "c2y"_a, "x"_a, "y"_a
 		)
+		.def("bezier_to", py::overload_cast<slughorn::Point, slughorn::Point, slughorn::Point>(&slughorn::canvas::Canvas::bezierTo), "c1"_a, "c2"_a, "p"_a)
 		.def("close_path", &slughorn::canvas::Canvas::closePath)
 
 		// Convenience shape helpers ---------------------------------------
@@ -396,17 +410,23 @@ void bind_canvas(py::module_& canvas) {
 			"x"_a, "y"_a, "w"_a, "h"_a, "r"_a,
 			"Rounded rectangle with uniform corner radius r."
 		)
-		.def("circle", &slughorn::canvas::Canvas::circle,
+		.def("circle", py::overload_cast<slughorn::Point, slug_t>(&slughorn::canvas::Canvas::circle), "c"_a, "r"_a)
+		.def("circle", py::overload_cast<slug_t, slug_t, slug_t>(&slughorn::canvas::Canvas::circle),
 			"cx"_a, "cy"_a, "r"_a
 		)
-		.def("ellipse", &slughorn::canvas::Canvas::ellipse,
+		.def("ellipse", py::overload_cast<slughorn::Point, slug_t, slug_t>(&slughorn::canvas::Canvas::ellipse), "c"_a, "rx"_a, "ry"_a)
+		.def("ellipse", py::overload_cast<slug_t, slug_t, slug_t, slug_t>(&slughorn::canvas::Canvas::ellipse),
 			"cx"_a, "cy"_a, "rx"_a, "ry"_a
 		)
-		.def("arc", &slughorn::canvas::Canvas::arc,
+		.def("arc", py::overload_cast<slughorn::Point, slug_t, slug_t, slug_t, bool>(&slughorn::canvas::Canvas::arc),
+			"c"_a, "r"_a, "start_angle"_a, "end_angle"_a, "ccw"_a=false
+		)
+		.def("arc", py::overload_cast<slug_t, slug_t, slug_t, slug_t, slug_t, bool>(&slughorn::canvas::Canvas::arc),
 			"cx"_a, "cy"_a, "r"_a, "start_angle"_a, "end_angle"_a, "ccw"_a=false,
 			"Circular arc. Angles in radians from +X axis, Y-up convention."
 		)
-		.def("arc_to", &slughorn::canvas::Canvas::arcTo,
+		.def("arc_to", py::overload_cast<slughorn::Point, slughorn::Point, slug_t>(&slughorn::canvas::Canvas::arcTo), "p1"_a, "p2"_a, "r"_a)
+		.def("arc_to", py::overload_cast<slug_t, slug_t, slug_t, slug_t, slug_t>(&slughorn::canvas::Canvas::arcTo),
 			"x1"_a, "y1"_a, "x2"_a, "y2"_a, "r"_a,
 			"Tangential arc from current point. Matches HTML Canvas arcTo()."
 		)

@@ -84,8 +84,8 @@ def test_path_add_path_transform():
 	p.move_to(0.0, 0.0)
 	p.line_to(0.2, 0.0)
 	q = slughorn.canvas.Path()
-	q.add_path(p, slughorn.Matrix.translate(0.5, 0.0))
-	q.add_path(p, slughorn.Matrix.translate(0.8, 0.0))
+	q.add_path(p, slughorn.Matrix.translate((0.5, 0.0)))
+	q.add_path(p, slughorn.Matrix.translate((0.8, 0.0)))
 	# arc_length includes the implicit gap between the two stamped segments, so it
 	# is >= 2 * p.arc_length(), not exactly equal.
 	assert q.arc_length() >= 2 * p.arc_length() - 1e-4
@@ -95,8 +95,8 @@ def test_path_sample_fields():
 	p.move_to(0.0, 0.0)
 	p.line_to(1.0, 0.0)
 	s = p.sample(0.5)
-	assert math.isfinite(s.x)
-	assert math.isfinite(s.y)
+	assert math.isfinite(s.point.x)
+	assert math.isfinite(s.point.y)
 	assert math.isfinite(s.angle)
 
 def test_path_sample_midpoint():
@@ -104,8 +104,8 @@ def test_path_sample_midpoint():
 	p.move_to(0.0, 0.0)
 	p.line_to(1.0, 0.0)
 	s = p.sample(0.5)
-	assert s.x == pytest.approx(0.5, abs=0.01)
-	assert s.y == pytest.approx(0.0, abs=0.01)
+	assert s.point.x == pytest.approx(0.5, abs=0.01)
+	assert s.point.y == pytest.approx(0.0, abs=0.01)
 
 def test_path_sample_repr():
 	p = slughorn.canvas.Path()
@@ -156,7 +156,7 @@ def test_path_reset_transform():
 	p.move_to(0.0, 0.0)
 	p.line_to(0.1, 0.0)
 	s = p.sample(0.5)
-	assert s.x == pytest.approx(0.05, abs=0.01)
+	assert s.point.x == pytest.approx(0.05, abs=0.01)
 
 def test_path_repr():
 	assert repr(slughorn.canvas.Path()) != ""
@@ -263,7 +263,7 @@ def test_canvas_reset_transform(canvas, atlas):
 	assert atlas.get_shape(slughorn.Key("reset_rect")) is not None
 
 def test_canvas_set_transform(canvas, atlas):
-	canvas.set_transform(slughorn.Matrix.translate(0.1, 0.1))
+	canvas.set_transform(slughorn.Matrix.translate((0.1, 0.1)))
 	canvas.rect(0, 0, 0.3, 0.3)
 	layer = canvas.fill(slughorn.Color(1, 0, 0), 1.0, slughorn.Key("settrans_rect"))
 	atlas.build()
@@ -392,8 +392,7 @@ def test_canvas_fill_with_centered_origin(canvas, atlas):
 	)
 	atlas.build()
 	s = atlas.get_shape(slughorn.Key("fill_centered"))
-	assert s.origin_x == pytest.approx(s.width / 2, rel=1e-3)
-	assert s.origin_y == pytest.approx(s.height / 2, rel=1e-3)
+	assert s.origin.point == pytest.approx((s.width / 2, s.height / 2), rel=1e-3)
 
 def test_canvas_fill_explicit_path(canvas, atlas):
 	p = slughorn.canvas.Path()
@@ -641,9 +640,9 @@ def test_add_path_transform(atlas):
 	rect.close_path()
 
 	canvas.begin_path()
-	canvas.add_path(rect, slughorn.Matrix.translate(0.1, 0.25))
-	canvas.add_path(rect, slughorn.Matrix.translate(0.4, 0.25))
-	canvas.add_path(rect, slughorn.Matrix.translate(0.7, 0.25))
+	canvas.add_path(rect, slughorn.Matrix.translate((0.1, 0.25)))
+	canvas.add_path(rect, slughorn.Matrix.translate((0.4, 0.25)))
+	canvas.add_path(rect, slughorn.Matrix.translate((0.7, 0.25)))
 	layer = canvas.fill(slughorn.Color(1, 1, 1), 1.0, "add_path_xform")
 	atlas.build()
 
@@ -662,9 +661,9 @@ def test_add_path_transform_coverage(atlas):
 	rect.close_path()
 
 	canvas.begin_path()
-	canvas.add_path(rect, slughorn.Matrix.translate(0.1, 0.25))
-	canvas.add_path(rect, slughorn.Matrix.translate(0.4, 0.25))
-	canvas.add_path(rect, slughorn.Matrix.translate(0.7, 0.25))
+	canvas.add_path(rect, slughorn.Matrix.translate((0.1, 0.25)))
+	canvas.add_path(rect, slughorn.Matrix.translate((0.4, 0.25)))
+	canvas.add_path(rect, slughorn.Matrix.translate((0.7, 0.25)))
 	layer = canvas.fill(slughorn.Color(1, 1, 1), 1.0, "add_path_cov")
 	atlas.build()
 
@@ -686,8 +685,7 @@ def test_arc_stroke_centered_origin(atlas):
 	atlas.build()
 	s = atlas.get_shape("arc_ring")
 	assert s is not None
-	assert s.origin_x == pytest.approx(s.width  / 2, rel=1e-3)
-	assert s.origin_y == pytest.approx(s.height / 2, rel=1e-3)
+	assert s.origin.point == pytest.approx((s.width / 2, s.height / 2), rel=1e-3)
 
 def test_arc_stroke_compute_quad(atlas):
 	canvas = slughorn.canvas.Canvas(atlas, slughorn.KeyIterator())
@@ -741,9 +739,9 @@ def test_path_resample_spacing_and_angles():
 	samples = _l_path().resample(1.0)
 
 	assert len(samples) == 8
-	assert (samples[2].x, samples[2].y) == pytest.approx((2.0, 0.0), abs=1e-5)
+	assert samples[2].point == pytest.approx((2.0, 0.0), abs=1e-5)
 	assert samples[2].angle == pytest.approx(0.0, abs=1e-5)
-	assert (samples[6].x, samples[6].y) == pytest.approx((4.0, 2.0), abs=1e-5)
+	assert samples[6].point == pytest.approx((4.0, 2.0), abs=1e-5)
 	assert samples[6].angle == pytest.approx(math.pi / 2.0, abs=1e-5)
 
 def test_path_resample_phase_wraps():
@@ -751,9 +749,9 @@ def test_path_resample_phase_wraps():
 	b = _l_path().resample(1.0, 2.25)
 	c = _l_path().resample(1.0, -0.75)
 
-	assert a[0].x == pytest.approx(0.25, abs=1e-5)
-	assert [s.x for s in a] == pytest.approx([s.x for s in b])
-	assert [s.x for s in a] == pytest.approx([s.x for s in c])
+	assert a[0].point.x == pytest.approx(0.25, abs=1e-5)
+	assert [s.point.x for s in a] == pytest.approx([s.point.x for s in b])
+	assert [s.point.x for s in a] == pytest.approx([s.point.x for s in c])
 
 def test_path_resample_degenerate():
 	assert _l_path().resample(0.0) == []
@@ -774,13 +772,13 @@ def test_path_arc_length_skips_subpath_jumps():
 
 	s = p.sample(4.0 / 5.5)
 
-	assert (s.x, s.y) == pytest.approx((10.0, 6.0), abs=1e-5)
+	assert (s.point.x, s.point.y) == pytest.approx((10.0, 6.0), abs=1e-5)
 	assert s.angle == pytest.approx(math.pi / 2.0, abs=1e-5)
 
 def test_path_resample_restarts_per_subpath():
 	samples = _two_subpaths().resample(1.0, 0.5)
 
-	assert [(s.x, s.y) for s in samples] == pytest.approx(
+	assert [(s.point.x, s.point.y) for s in samples] == pytest.approx(
 		[(0.5, 0.0), (1.5, 0.0), (2.5, 0.0), (10.0, 5.5), (10.0, 6.5), (10.0, 7.5)],
 		abs=1e-5
 	)
@@ -802,9 +800,9 @@ def test_path_polylines_even_spacing_and_ends():
 	# 3.0 / 0.4 -> 8 segments of 0.375; 2.5 / 0.4 -> 7 segments of 2.5 / 7.
 	assert len(lines[0]) == 9
 	assert len(lines[1]) == 8
-	assert (lines[0][-1].x, lines[0][-1].y) == pytest.approx((3.0, 0.0), abs=1e-5)
-	assert (lines[1][0].x, lines[1][0].y) == pytest.approx((10.0, 5.0), abs=1e-5)
-	assert (lines[1][-1].x, lines[1][-1].y) == pytest.approx((10.0, 7.5), abs=1e-5)
+	assert lines[0][-1].point == pytest.approx((3.0, 0.0), abs=1e-5)
+	assert lines[1][0].point == pytest.approx((10.0, 5.0), abs=1e-5)
+	assert lines[1][-1].point == pytest.approx((10.0, 7.5), abs=1e-5)
 	assert [s.arc_length for s in lines[0]] == pytest.approx([k * 0.375 for k in range(9)], abs=1e-5)
 	assert lines[1][-1].arc_length == pytest.approx(2.5, abs=1e-5)
 
@@ -814,7 +812,7 @@ def test_path_polylines_arc_length_is_chord_sum():
 
 	line = p.polylines(5.0)[0].points
 
-	chords = sum(math.hypot(b.x - a.x, b.y - a.y) for a, b in zip(line, line[1:]))
+	chords = sum(slughorn.length(b.point - a.point) for a, b in zip(line, line[1:]))
 
 	assert line[-1].arc_length == pytest.approx(chords)
 	assert line[-1].arc_length < p.arc_length()
@@ -843,7 +841,7 @@ def test_path_polylines_closed_only_by_close_path():
 
 	# Both still end on a repeat of their first point.
 	for points, _ in closed + returned:
-		assert (points[-1].x, points[-1].y) == pytest.approx((points[0].x, points[0].y), abs=1e-5)
+		assert points[-1].point == pytest.approx(points[0].point, abs=1e-5)
 
 	assert "closed=true" in repr(closed[0])
 
@@ -865,7 +863,7 @@ def test_path_polylines_closed_survives_add_path():
 	dst = slughorn.canvas.Path()
 	dst.rect(-5.0, 0.0, 1.0, 1.0)
 	dst.add_path(src)
-	dst.add_path(src, slughorn.Matrix.translate(0.0, 10.0))
+	dst.add_path(src, slughorn.Matrix.translate((0.0, 10.0)))
 
 	assert [l.closed for l in dst.polylines(0.5)] == [True, True, False, True, False]
 
@@ -938,11 +936,11 @@ def test_canvas_define_geometry(canvas, atlas):
 	layer = canvas.define_geometry(slughorn.Key("route"))
 
 	assert layer.key == slughorn.Key("route")
-	assert layer.drawMode == slughorn.DrawMode.Geometry
+	assert layer.draw_mode == slughorn.DrawMode.Geometry
 
 	composite = canvas.finalize()
 
-	assert [l.drawMode for l in composite.layers] == [slughorn.DrawMode.Visible, slughorn.DrawMode.Geometry]
+	assert [l.draw_mode for l in composite.layers] == [slughorn.DrawMode.Visible, slughorn.DrawMode.Geometry]
 	assert atlas.get_shape(slughorn.Key("route")) is not None
 
 def test_canvas_define_geometry_from_path(canvas, atlas):
@@ -952,15 +950,15 @@ def test_canvas_define_geometry_from_path(canvas, atlas):
 
 	layer = canvas.define_geometry(p, slughorn.Key("route_path"))
 
-	assert layer.drawMode == slughorn.DrawMode.Geometry
-	assert canvas.finalize().layers[-1].drawMode == slughorn.DrawMode.Geometry
+	assert layer.draw_mode == slughorn.DrawMode.Geometry
+	assert canvas.finalize().layers[-1].draw_mode == slughorn.DrawMode.Geometry
 
 def test_canvas_define_geometry_empty(canvas):
 	canvas.begin_path()
 
 	layer = canvas.define_geometry(slughorn.Key("nothing"))
 
-	assert layer.drawMode == slughorn.DrawMode.Visible
+	assert layer.draw_mode == slughorn.DrawMode.Visible
 	assert canvas.layer_count == 0
 
 def test_path_stroke_ends_only_on_unclosed_subpaths():

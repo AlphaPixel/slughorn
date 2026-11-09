@@ -453,8 +453,8 @@ def build_curves_svg_string(
 		x1, y1 = em_to_px(x, oy + sy)
 		line(x0, y0, x1, y1, "#FF0000", width=1)
 
-	ox_em = shape.bearing_x + shape.origin_x
-	oy_em = (shape.bearing_y - shape.height) + shape.origin_y
+	ox_em = shape.bearing.x + shape.origin.point.x
+	oy_em = (shape.bearing.y - shape.height) + shape.origin.point.y
 	opx, opy = em_to_px(ox_em, oy_em)
 	circle(opx, opy, 5, fill="#FFD700", stroke="#FF8C00")
 

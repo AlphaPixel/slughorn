@@ -81,7 +81,7 @@ static void checkNear(const char* label, slug_t actual, slug_t expected, slug_t 
 //
 // curves in [0,1] space
 // transform.dx=0, transform.dy=0 (shape is at canvas origin)
-// Shape: w=1 h=1 bearingX=0 bearingY=1
+// Shape: w=1 h=1 bearing=(0, 1)
 static const std::string SVG_TRIANGLE = R"(
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
 	<path fill="red" d="M 0,0 L 100,0 L 0,100 Z"/>
@@ -176,7 +176,7 @@ static const std::string SVG_THREE_TRIANGLES = R"(
 // - correct curve count
 // - curves are in [0,1] local space
 // - transform is identity offset (dx=0, dy=0) since shape is at origin
-// - atlas Shape has w=1, h=1, bearingX=0, bearingY=1
+// - atlas Shape has w=1, h=1, bearing=(0, 1)
 // - computeQuad gives (0,0)->(1,1)
 // =============================================================================
 
@@ -239,8 +239,8 @@ void test_Shape() {
 
 		checkNear("width == 1", s->width, 1_cv);
 		checkNear("height == 1", s->height, 1_cv);
-		checkNear("bearingX == 0", s->bearingX, 0_cv);
-		checkNear("bearingY == 1", s->bearingY, 1_cv);
+		checkNear("bearing.x == 0", s->bearing.x, 0_cv);
+		checkNear("bearing.y == 1", s->bearing.y, 1_cv);
 
 		auto q = s->computeQuad(slughorn::Transform{transform.x, transform.y});
 		std::cout << "  " << q << std::endl;

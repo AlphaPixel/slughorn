@@ -35,9 +35,7 @@ void bind_render(py::module_& render) {
 		.def_readonly("channels", &Field::channels)
 		.def_readonly("range", &Field::range)
 		.def_readonly("texels_per_em", &Field::texelsPerEm)
-		.def_property_readonly("em_origin", [](const Field& f) {
-			return py::make_tuple(f.emOriginX, f.emOriginY);
-		})
+		.def_readonly("em_origin", &Field::emOrigin)
 		.def_buffer([](Field& f) -> py::buffer_info {
 			return py::buffer_info(
 				f.data.data(),
@@ -181,6 +179,20 @@ void bind_render(py::module_& render) {
 			return out;
 		}, "index"_a)
 		.def("render_sample",
+			[](const Sampler& d, slughorn::Point p, slug_t ppeX, slug_t ppeY) {
+				return d.renderSample(p, ppeX, ppeY);
+			},
+			"p"_a, "ppe_x"_a, "ppe_y"_a,
+			"Reference software sample using all decoded curves."
+		)
+		.def("render_sample",
+			[](const Sampler& d, slughorn::Point p, const EmJacobian& em) {
+				return d.renderSample(p, em);
+			},
+			"p"_a, "em"_a,
+			"Reference software sample with a full em Jacobian (read by AARamp.Edge)."
+		)
+		.def("render_sample",
 			[](const Sampler& d, slug_t x, slug_t y, slug_t ppeX, slug_t ppeY) {
 				return d.renderSample(x, y, ppeX, ppeY);
 			},
@@ -193,6 +205,20 @@ void bind_render(py::module_& render) {
 			},
 			"x"_a, "y"_a, "em"_a,
 			"Reference software sample with a full em Jacobian (read by AARamp.Edge)."
+		)
+		.def("render_sample_banded",
+			[](const Sampler& d, slughorn::Point p, slug_t ppeX, slug_t ppeY) {
+				return d.renderSampleBanded(p, ppeX, ppeY);
+			},
+			"p"_a, "ppe_x"_a, "ppe_y"_a,
+			"Band-accelerated software sample mirroring the GPU shader path."
+		)
+		.def("render_sample_banded",
+			[](const Sampler& d, slughorn::Point p, const EmJacobian& em) {
+				return d.renderSampleBanded(p, em);
+			},
+			"p"_a, "em"_a,
+			"Band-accelerated software sample with a full em Jacobian (read by AARamp.Edge)."
 		)
 		.def("render_sample_banded",
 			[](const Sampler& d, slug_t x, slug_t y, slug_t ppeX, slug_t ppeY) {
@@ -231,8 +257,8 @@ void bind_render(py::module_& render) {
 	;
 
 	render.def("distance_to_curve", &slughorn::render::distanceToCurve,
-		"curve"_a, "x"_a, "y"_a,
-		"Em distance from (x, y) to the nearest point of a quadratic Curve (t in [0, 1])."
+		"curve"_a, "p"_a,
+		"Em distance from p to the nearest point of a quadratic Curve (t in [0, 1])."
 	);
 
 	render.def("decode",

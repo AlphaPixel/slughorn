@@ -433,10 +433,20 @@ struct OutlineContext {
 	}
 };
 
+// An FT_Vector in font units, scaled to em.
+static Point ftPoint(const FT_Vector* v, slug_t scale) {
+	return {cv(v->x) * scale, cv(v->y) * scale};
+}
+
+// A 16.16 fixed-point FT_Vector, scaled to em.
+static Point ftFixedPoint(const FT_Vector& v, slug_t emScale) {
+	return {cv(v.x) / 65536_cv * emScale, cv(v.y) / 65536_cv * emScale};
+}
+
 static int ftMoveTo(const FT_Vector* to, void* user) {
 	auto* ctx = static_cast<OutlineContext*>(user);
 
-	ctx->decomposer.moveTo(cv(to->x) * ctx->scale, cv(to->y) * ctx->scale);
+	ctx->decomposer.moveTo(ftPoint(to, ctx->scale));
 
 	return 0;
 }
@@ -444,7 +454,7 @@ static int ftMoveTo(const FT_Vector* to, void* user) {
 static int ftLineTo(const FT_Vector* to, void* user) {
 	auto* ctx = static_cast<OutlineContext*>(user);
 
-	ctx->decomposer.lineTo(cv(to->x) * ctx->scale, cv(to->y) * ctx->scale);
+	ctx->decomposer.lineTo(ftPoint(to, ctx->scale));
 
 	return 0;
 }
@@ -452,10 +462,7 @@ static int ftLineTo(const FT_Vector* to, void* user) {
 static int ftConicTo(const FT_Vector* control, const FT_Vector* to, void* user) {
 	auto* ctx = static_cast<OutlineContext*>(user);
 
-	ctx->decomposer.quadTo(
-		cv(control->x) * ctx->scale, cv(control->y) * ctx->scale,
-		cv(to->x) * ctx->scale, cv(to->y) * ctx->scale
-	);
+	ctx->decomposer.quadTo(ftPoint(control, ctx->scale), ftPoint(to, ctx->scale));
 
 	return 0;
 }
@@ -468,11 +475,7 @@ static int ftCubicTo(
 ) {
 	auto* ctx = static_cast<OutlineContext*>(user);
 
-	ctx->decomposer.cubicTo(
-		cv(c1->x) * ctx->scale, cv(c1->y) * ctx->scale,
-		cv(c2->x) * ctx->scale, cv(c2->y) * ctx->scale,
-		cv(to->x) * ctx->scale, cv(to->y) * ctx->scale
-	);
+	ctx->decomposer.cubicTo(ftPoint(c1, ctx->scale), ftPoint(c2, ctx->scale), ftPoint(to, ctx->scale));
 
 	return 0;
 }
@@ -553,8 +556,7 @@ static Color resolveColor(FT_Color* palette, uint32_t colorIndex) {
 			Atlas::ShapeInfo data;
 
 			data.autoMetrics = false;
-			data.bearingX = cv(face->glyph->metrics.horiBearingX) * emScale;
-			data.bearingY = cv(face->glyph->metrics.horiBearingY) * emScale;
+			data.bearing = {cv(face->glyph->metrics.horiBearingX) * emScale, cv(face->glyph->metrics.horiBearingY) * emScale};
 			data.width = cv(face->glyph->metrics.width) * emScale;
 			data.height = cv(face->glyph->metrics.height) * emScale;
 			data.advance = advance;
@@ -765,12 +767,10 @@ static PaintResult traversePaint(
 
 				decomposeOutline(face->glyph->outline, rawCurves, emScale);
 
-				for(auto& c : rawCurves) {
-					parentMatrix.apply(c.x1, c.y1, c.x1, c.y1);
-					parentMatrix.apply(c.x2, c.y2, c.x2, c.y2);
-					parentMatrix.apply(c.x3, c.y3, c.x3, c.y3);
-
-					data.curves.push_back(c);
+				for(const auto& c : rawCurves) {
+					data.curves.push_back(
+						Atlas::Curve::quad(parentMatrix * c.p1(), parentMatrix * c.p2(), parentMatrix * c.p3())
+					);
 				}
 			}
 
@@ -865,10 +865,10 @@ static PaintResult traversePaint(
 		// dx/dy are in font units - scale by emScale.
 		// -----------------------------------------------------------------
 		case FT_COLR_PAINTFORMAT_TRANSLATE: {
-			const auto combined = slughorn::Matrix::translate(
+			const auto combined = slughorn::Matrix::translate({
 				cv(paint.u.translate.dx) / 65536_cv * emScale,
 				cv(paint.u.translate.dy) / 65536_cv * emScale
-			) * parentMatrix;
+			}) * parentMatrix;
 
 			return traversePaint(
 				face, &paint.u.translate.paint, palette,
@@ -1038,18 +1038,13 @@ static PaintResult traversePaint(
 
 			if(stops.empty()) return {white};
 
-			slug_t x0 = cv(lg.p0.x) / 65536_cv * emScale;
-			slug_t y0 = cv(lg.p0.y) / 65536_cv * emScale;
-			slug_t x1 = cv(lg.p1.x) / 65536_cv * emScale;
-			slug_t y1 = cv(lg.p1.y) / 65536_cv * emScale;
-
-			parentMatrix.apply(x0, y0, x0, y0);
-			parentMatrix.apply(x1, y1, x1, y1);
+			const Point p0 = parentMatrix * ftFixedPoint(lg.p0, emScale);
+			const Point p1 = parentMatrix * ftFixedPoint(lg.p1, emScale);
 
 			const GradientInfo info{
 				.type = GradientInfo::Type::Linear,
 				.stops = std::move(stops),
-				.transform = buildLinearGradientMatrix(x0, y0, x1, y1),
+				.transform = buildLinearGradientMatrix(p0, p1),
 			};
 
 			return {white, atlas.addGradient(info)};
@@ -1066,17 +1061,14 @@ static PaintResult traversePaint(
 			if(stops.empty()) return {white};
 
 			// Use the outer circle (c1, r1) as the gradient center/radius.
-			slug_t cx = cv(rg.c1.x) / 65536_cv * emScale;
-			slug_t cy = cv(rg.c1.y) / 65536_cv * emScale;
-			slug_t r1 = cv(rg.r1) / 65536_cv * emScale;
-			slug_t r0 = cv(rg.r0) / 65536_cv * emScale;
-
-			parentMatrix.apply(cx, cy, cx, cy);
+			const Point c = parentMatrix * ftFixedPoint(rg.c1, emScale);
+			const slug_t r1 = cv(rg.r1) / 65536_cv * emScale;
+			const slug_t r0 = cv(rg.r0) / 65536_cv * emScale;
 
 			const GradientInfo info{
 				.type = GradientInfo::Type::Radial,
 				.stops = std::move(stops),
-				.transform = buildRadialGradientMatrix(cx, cy, r1),
+				.transform = buildRadialGradientMatrix(c, r1),
 				.innerRadius = r0,
 			};
 
@@ -1094,10 +1086,7 @@ static PaintResult traversePaint(
 
 			if(stops.empty()) return {white};
 
-			slug_t cx = cv(sg.center.x) / 65536_cv * emScale;
-			slug_t cy = cv(sg.center.y) / 65536_cv * emScale;
-
-			parentMatrix.apply(cx, cy, cx, cy);
+			const Point c = parentMatrix * ftFixedPoint(sg.center, emScale);
 
 			const slug_t tau = 2_cv * PI_CV;
 			const slug_t startAngle = cv(sg.start_angle) / 65536_cv * tau;
@@ -1106,7 +1095,7 @@ static PaintResult traversePaint(
 			const GradientInfo info{
 				.type = GradientInfo::Type::Sweep,
 				.stops = std::move(stops),
-				.transform = buildSweepGradientMatrix(cx, cy, startAngle, arcSpan),
+				.transform = buildSweepGradientMatrix(c, startAngle, arcSpan),
 			};
 
 			return {white, atlas.addGradient(info)};
@@ -1231,12 +1220,8 @@ bool decomposeGlyph(
 
 		detail::decomposeOutline(face->glyph->outline, rawCurves, emScale);
 
-		for(auto& c : rawCurves) {
-			matrix->apply(c.x1, c.y1, c.x1, c.y1);
-			matrix->apply(c.x2, c.y2, c.x2, c.y2);
-			matrix->apply(c.x3, c.y3, c.x3, c.y3);
-
-			out.curves.push_back(c);
+		for(const auto& c : rawCurves) {
+			out.curves.push_back(Atlas::Curve::quad(*matrix * c.p1(), *matrix * c.p2(), *matrix * c.p3()));
 		}
 	}
 
@@ -1268,8 +1253,7 @@ bool loadGlyph(
 	Atlas::ShapeInfo data;
 
 	data.autoMetrics = false;
-	data.bearingX = cv(face->glyph->metrics.horiBearingX) * emScale;
-	data.bearingY = cv(face->glyph->metrics.horiBearingY) * emScale;
+	data.bearing = {cv(face->glyph->metrics.horiBearingX) * emScale, cv(face->glyph->metrics.horiBearingY) * emScale};
 	data.width = cv(face->glyph->metrics.width) * emScale;
 	data.height = cv(face->glyph->metrics.height) * emScale;
 	data.advance = cv(face->glyph->metrics.horiAdvance) * emScale;
@@ -1336,7 +1320,8 @@ size_t loadGlyphs(
 	struct GlyphMeta {
 		uint32_t codepoint;
 
-		slug_t bearingX, bearingY, width, height, advance;
+		Point bearing;
+		slug_t width, height, advance;
 
 		bool valid = false;
 	};
@@ -1358,8 +1343,7 @@ size_t loadGlyphs(
 			continue;
 		}
 
-		m.bearingX = cv(face->glyph->metrics.horiBearingX) * emScale;
-		m.bearingY = cv(face->glyph->metrics.horiBearingY) * emScale;
+		m.bearing = {cv(face->glyph->metrics.horiBearingX) * emScale, cv(face->glyph->metrics.horiBearingY) * emScale};
 		m.width = cv(face->glyph->metrics.width) * emScale;
 		m.height = cv(face->glyph->metrics.height) * emScale;
 		m.advance = cv(face->glyph->metrics.horiAdvance) * emScale;
@@ -1381,19 +1365,20 @@ size_t loadGlyphs(
 	}
 
 	// Compute uniform cell dimensions.
-	slug_t cellBearingX, cellBearingY, cellWidth, cellHeight, cellAdvance;
+	Point cellBearing;
+	slug_t cellWidth, cellHeight, cellAdvance;
 
 	if(tabular) {
 		// Font already handles side-bearings; cell = advance x max ascent+descent.
-		cellBearingX = 0_cv;
+		cellBearing.x = 0_cv;
 		cellWidth = refAdvance;
 		cellAdvance = refAdvance;
-		cellBearingY = 0_cv;
+		cellBearing.y = 0_cv;
 		cellHeight = 0_cv;
 
 		for(const auto& m : meta) {
 			if(!m.valid) continue;
-			if(m.bearingY > cellBearingY) cellBearingY = m.bearingY;
+			if(m.bearing.y > cellBearing.y) cellBearing.y = m.bearing.y;
 			if(m.height > cellHeight) cellHeight = m.height;
 		}
 
@@ -1408,21 +1393,21 @@ size_t loadGlyphs(
 		slug_t minLeft = std::numeric_limits<slug_t>::max();
 		slug_t maxRight = -std::numeric_limits<slug_t>::max();
 
-		cellBearingY = 0_cv;
+		cellBearing.y = 0_cv;
 		cellHeight = 0_cv;
 		cellAdvance = 0_cv;
 
 		for(const auto& m : meta) {
 			if(!m.valid) continue;
 
-			if(m.bearingX < minLeft) minLeft = m.bearingX;
-			if(m.bearingX + m.width > maxRight) maxRight = m.bearingX + m.width;
-			if(m.bearingY > cellBearingY) cellBearingY = m.bearingY;
+			if(m.bearing.x < minLeft) minLeft = m.bearing.x;
+			if(m.bearing.x + m.width > maxRight) maxRight = m.bearing.x + m.width;
+			if(m.bearing.y > cellBearing.y) cellBearing.y = m.bearing.y;
 			if(m.height > cellHeight) cellHeight = m.height;
 			if(m.advance > cellAdvance) cellAdvance = m.advance;
 		}
 
-		cellBearingX = minLeft;
+		cellBearing.x = minLeft;
 		cellWidth = maxRight - minLeft;
 
 		doLog(
@@ -1446,8 +1431,7 @@ size_t loadGlyphs(
 		Atlas::ShapeInfo data;
 
 		data.autoMetrics = false;
-		data.bearingX = cellBearingX;
-		data.bearingY = cellBearingY;
+		data.bearing = cellBearing;
 		data.width = cellWidth;
 		data.height = cellHeight;
 		data.advance = cellAdvance;
@@ -1456,8 +1440,8 @@ size_t loadGlyphs(
 		slughorn::Matrix centerMatrix;
 
 		if(!tabular) {
-			const slug_t cellCenter = cellBearingX + cellWidth / 2_cv;
-			const slug_t glyphCenter = m.bearingX + m.width / 2_cv;
+			const slug_t cellCenter = cellBearing.x + cellWidth / 2_cv;
+			const slug_t glyphCenter = m.bearing.x + m.width / 2_cv;
 
 			centerMatrix.dx = cellCenter - glyphCenter;
 			matrixPtr = &centerMatrix;

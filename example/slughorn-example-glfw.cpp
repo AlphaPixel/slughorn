@@ -187,7 +187,7 @@ ivec2 slug_CalcBandLoc(ivec2 glyphLoc, uint offset) {
 	return bandLoc;
 }
 
-// 2026-08-30: re-derive a curve's second texel location the same way slug_CalcBandLoc()
+// Re-derive a curve's second texel location the same way slug_CalcBandLoc()
 // re-derives a band fetch's row, instead of flat-adding to curveLoc.x. Packing today always
 // aligns a curve's 2 texels to start at an even X so they never straddle a row, making this a
 // no-op -- but endpoint-shared curve packing (planned) removes that alignment, so a curve's
@@ -257,7 +257,7 @@ float slug_Render(vec2 renderCoord, mat2 emJacobian, vec4 bandTransform, ivec2 g
 		ivec2 curveLoc = ivec2(texelFetch(u_bandTexture, hbandLoc, 0).xy);
 		vec4 p12 = texelFetch(u_curveTexture, curveLoc, 0) - vec4(renderCoord, renderCoord);
 
-		// 2026-08-31: same re-derive-per-fetch pattern as slug_CalcBandLoc above, now applied to
+		// Same re-derive-per-fetch pattern as slug_CalcBandLoc above, now applied to
 		// a curve's own second texel -- needed once packTextures() (slughorn.cpp) started
 		// sharing texels between connected curves (Lengyel's Slug convention: a chain of N
 		// connected curves costs N+1 texels instead of 2N), which packs densely with no
@@ -768,10 +768,10 @@ static void buildMesh(
 		const float x1 = (float)q.x1 + e, y1 = (float)q.y1 + e;
 
 		// em-space corners (same expand as quad, same pattern as ShapeDrawable)
-		const float emX0 = (float)shape->bearingX - SLUG_EXPAND;
-		const float emY0 = (float)(shape->bearingY - shape->height) - SLUG_EXPAND;
-		const float emX1 = (float)(shape->bearingX + shape->width) + SLUG_EXPAND;
-		const float emY1 = (float)shape->bearingY + SLUG_EXPAND;
+		const float emX0 = (float)shape->bearing.x - SLUG_EXPAND;
+		const float emY0 = (float)(shape->bearing.y - shape->height) - SLUG_EXPAND;
+		const float emX1 = (float)(shape->bearing.x + shape->width) + SLUG_EXPAND;
+		const float emY1 = (float)shape->bearing.y + SLUG_EXPAND;
 
 		const float bx[4] = {
 			(float)shape->bandScaleX, (float)shape->bandScaleY,
@@ -994,9 +994,9 @@ int main(int argc, char** argv) {
 		slughorn::Atlas::ShapeInfo scurve;
 		slughorn::CurveDecomposer scurvePath(scurve.curves);
 
-		scurvePath.moveTo(0.2_cv, 0.85_cv);
-		scurvePath.quadTo(0.1_cv, 0.5_cv, 0.5_cv, 0.5_cv);
-		scurvePath.quadTo(0.9_cv, 0.5_cv, 0.8_cv, 0.15_cv);
+		scurvePath.moveTo({0.2_cv, 0.85_cv});
+		scurvePath.quadTo({0.1_cv, 0.5_cv}, {0.5_cv, 0.5_cv});
+		scurvePath.quadTo({0.9_cv, 0.5_cv}, {0.8_cv, 0.15_cv});
 
 		scurve.strokeRadius = 0.04_cv;
 
@@ -1005,9 +1005,9 @@ int main(int argc, char** argv) {
 		slughorn::Atlas::ShapeInfo zigzag;
 		slughorn::CurveDecomposer zigzagPath(zigzag.curves);
 
-		zigzagPath.moveTo(0_cv, 0_cv);
+		zigzagPath.moveTo({0_cv, 0_cv});
 
-		for(size_t i = 1; i <= 20; i++) zigzagPath.lineTo(cv(i) / 20_cv, i % 2 ? 0.5_cv : 0_cv);
+		for(size_t i = 1; i <= 20; i++) zigzagPath.lineTo({cv(i) / 20_cv, i % 2 ? 0.5_cv : 0_cv});
 
 		zigzag.strokeRadius = 0.02_cv;
 

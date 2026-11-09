@@ -117,9 +117,9 @@ int main() {
 
 		CurveDecomposer cd(tri);
 
-		cd.moveTo(0.0_cv, 0.0_cv);
-		cd.lineTo(1.0_cv, 0.0_cv); // horizontal -> dropped
-		cd.lineTo(0.5_cv, 1.0_cv);
+		cd.moveTo({0.0_cv, 0.0_cv});
+		cd.lineTo({1.0_cv, 0.0_cv}); // horizontal -> dropped
+		cd.lineTo({0.5_cv, 1.0_cv});
 		cd.close();
 
 		Atlas::ShapeInfo info;
@@ -135,11 +135,11 @@ int main() {
 
 		CurveDecomposer cd(circ);
 
-		cd.moveTo(1.0_cv, 0.5_cv);
-		cd.quadTo(1.0_cv, 1.0_cv, 0.5_cv, 1.0_cv);
-		cd.quadTo(0.0_cv, 1.0_cv, 0.0_cv, 0.5_cv);
-		cd.quadTo(0.0_cv, 0.0_cv, 0.5_cv, 0.0_cv);
-		cd.quadTo(1.0_cv, 0.0_cv, 1.0_cv, 0.5_cv);
+		cd.moveTo({1.0_cv, 0.5_cv});
+		cd.quadTo({1.0_cv, 1.0_cv}, {0.5_cv, 1.0_cv});
+		cd.quadTo({0.0_cv, 1.0_cv}, {0.0_cv, 0.5_cv});
+		cd.quadTo({0.0_cv, 0.0_cv}, {0.5_cv, 0.0_cv});
+		cd.quadTo({1.0_cv, 0.0_cv}, {1.0_cv, 0.5_cv});
 
 		Atlas::ShapeInfo info;
 

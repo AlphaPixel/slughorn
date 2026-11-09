@@ -360,22 +360,18 @@ std::pair<Atlas::ShapeInfo, Transform> decomposePath(const NSVGshape* shape, slu
 	for(const NSVGpath* path : paths) {
 		if(path->npts < 4) continue;
 
-		const slug_t* p = path->pts;
+		// NanoSVG stores points as interleaved x, y floats.
+		const auto point = [&](const slug_t* p) { return Point{cv(p[0]) * scale - offX, cv(p[1]) * scale - offY}; };
 
-		const slug_t startX = cv(p[0]) * scale - offX;
-		const slug_t startY = cv(p[1]) * scale - offY;
+		const Point start = point(path->pts);
 		const size_t subpathStart = decomposer.mark();
 
-		decomposer.moveTo(startX, startY);
+		decomposer.moveTo(start);
 
 		for(int i = 0; i < path->npts - 1; i += 3) {
-			p = path->pts + i * 2;
+			const slug_t* p = path->pts + i * 2;
 
-			decomposer.cubicTo(
-				cv(p[2]) * scale - offX, cv(p[3]) * scale - offY,
-				cv(p[4]) * scale - offX, cv(p[5]) * scale - offY,
-				cv(p[6]) * scale - offX, cv(p[7]) * scale - offY
-			);
+			decomposer.cubicTo(point(p + 2), point(p + 4), point(p + 6));
 		}
 
 		if(path->closed) decomposer.close();
@@ -384,7 +380,7 @@ std::pair<Atlas::ShapeInfo, Transform> decomposePath(const NSVGshape* shape, slu
 		// an odd number of previously accumulated sub-paths, flip its winding so
 		// the nonzero shader produces the correct hole. CPU-only; baked into atlas.
 		if(evenodd && subpathStart > 0) {
-			if(rayCrossings(curves, subpathStart, startX, startY) % 2 != 0) {
+			if(rayCrossings(curves, subpathStart, start.x, start.y) % 2 != 0) {
 				decomposer.reverseFrom(subpathStart);
 			}
 		}
@@ -395,21 +391,19 @@ std::pair<Atlas::ShapeInfo, Transform> decomposePath(const NSVGshape* shape, slu
 	Atlas::ShapeInfo::Origin infoOrigin = origin;
 
 	if(origin.type == Atlas::ShapeInfo::Origin::Type::Pivot) {
-		infoOrigin.x = origin.x * scale - offX;
-		infoOrigin.y = origin.y * scale - offY;
+		infoOrigin.point = origin.point * scale - Point{offX, offY};
 	}
 	else if(origin.type == Atlas::ShapeInfo::Origin::Type::Custom) {
-		infoOrigin.x = origin.x * scale;
-		infoOrigin.y = origin.y * scale;
+		infoOrigin.point = origin.point * scale;
 	}
 
 	const Transform transform = !autoMetrics ? Transform{} :
 		(origin.type == Atlas::ShapeInfo::Origin::Type::Centered)
 		? Transform{ (minX + maxX) * 0.5_cv, (minY + maxY) * 0.5_cv }
 		: (origin.type == Atlas::ShapeInfo::Origin::Type::Pivot)
-		? Transform{ origin.x * scale, origin.y * scale }
+		? Transform{ origin.point.x * scale, origin.point.y * scale }
 		: (origin.type == Atlas::ShapeInfo::Origin::Type::Custom)
-		? Transform{ minX + origin.x * scale, minY + origin.y * scale }
+		? Transform{ minX + origin.point.x * scale, minY + origin.point.y * scale }
 		: Transform{ minX, minY }
 	;
 
@@ -434,8 +428,7 @@ std::optional<Transform> loadShape(const NSVGshape* shape, Atlas& atlas, Key key
 		// Falls back to a unit square if the caller didn't supply heightEm.
 		const slug_t h = canvasHeightEm > 0_cv ? canvasHeightEm : 1_cv;
 
-		info.bearingX = 0_cv;
-		info.bearingY = h;
+		info.bearing = {0_cv, h};
 		info.width    = 1_cv;
 		info.height   = h;
 	}
@@ -555,8 +548,8 @@ CompositeShape loadImage(
 
 				info.type = GradientInfo::Type::Linear;
 				info.transform = buildLinearGradientMatrix(
-					cv(px0) * scale - minX_em, cv(py0) * scale - minY_em,
-					cv(px1) * scale - minX_em, cv(py1) * scale - minY_em
+					{cv(px0) * scale - minX_em, cv(py0) * scale - minY_em},
+					{cv(px1) * scale - minX_em, cv(py1) * scale - minY_em}
 				);
 			}
 
@@ -618,8 +611,7 @@ CompositeShape loadImage(
 
 				info.type = GradientInfo::Type::AffineRadial;
 				info.transform = buildAffineRadialGradientMatrix(
-					cv(pcx) * scale - minX_em,
-					cv(pcy) * scale - minY_em,
+					{cv(pcx) * scale - minX_em, cv(pcy) * scale - minY_em},
 					cv(b00), cv(b01), cv(b10), cv(b11)
 				);
 				info.innerRadius = 0_cv;
